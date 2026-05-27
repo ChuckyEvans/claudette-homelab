@@ -1,0 +1,45 @@
+pi:
+  host: 192.168.1.10          # IP address of your Raspberry Pi / server
+  ssh_user: ubuntu            # SSH username (default: ubuntu on Pi OS)
+  # ssh_key: ~/.ssh/id_rsa   # optional — omit to use ssh-agent
+
+network:
+  subnet: 192.168.1.0/24      # Your local subnet for ping sweeps
+  # Hosts to ping for internet connectivity checks (default: 1.1.1.1 — Cloudflare DNS).
+  # Up to 5 entries; can be IPs or hostnames.
+  connectivity_hosts:
+    - 1.1.1.1   # Cloudflare DNS
+    - 9.9.9.9   # Quad9 DNS
+  # Optional: assign devices to gateways so the map groups them under the correct router.
+  # gateway_assignments:
+  #   "192.168.1.1":
+  #     - 192.168.1.100
+  #     - 192.168.1.101
+
+schedule:
+  check_interval_minutes: 5   # Service check frequency: 1, 2, 5, 10, 15, 30, or 60 (= every hour on the dot)
+  internet_check_minutes: 5   # Internet connectivity check frequency (same options)
+  ping_interval_minutes: 5    # Ping sweep frequency (same options)
+  speedtest_interval_hours: 1  # Speed test frequency: 1, 2, 3, 4, 6, 12, or 24 (= once a day)
+  threat_interval_hours: 6    # CVE / threat intelligence refresh frequency (same options)
+  deep_scan_hour: 4           # Hour (0-23) for the nightly deep port scan — e.g. 4 = 4:00 AM
+
+isp:
+  name: "Your ISP Name"       # Your ISP name — shown in outage reports and exports
+  connection_type: fibre      # Connection type: fibre / dsl / lte / cable / satellite
+  expected_uptime: 100        # Expected uptime % — e.g. 100 for fibre, 99.9 for typical SLA
+  plan_download_mbps: 250     # Advertised download speed (Mbps) — used for SLA compliance in speed reports
+  plan_upload_mbps: 250       # Advertised upload speed (Mbps)
+  account_number: ""          # Optional account / contract number for ISP correspondence
+  support_email: ""           # Optional ISP support contact
+
+  keywords:
+    - docker
+    - python flask
+    - yt-dlp
+    - transmission
+    - jackett
+    - pihole
+    - sickgear
+    - raspberry pi
+  severity_threshold: medium   # low / medium / high / critical
