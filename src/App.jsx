@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Layout from './components/Layout.jsx'
 import Dashboard from './components/Dashboard.jsx'
 import ServicesPanel from './components/ServicesPanel.jsx'
@@ -21,25 +21,43 @@ import { applyTheme } from './lib/themes.js'
   if (t) applyTheme(t)
 })()
 
-function ToastStack({ toasts }) {
-  if (!toasts.length) return null
+// Pop-up corner toasts — only shows notifications that are still "visible" (faded out after 5 s)
+// but the notification itself remains in the persistent store.
+function ToastStack({ notifications, visibleIds, setPage }) {
+  const visible = notifications.filter(n => visibleIds.includes(n.id)).slice(0, 8)
+  if (!visible.length) return null
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
-      {toasts.map(t => (
-        <div key={t.id} className={`flex items-center gap-2.5 px-4 py-2.5 rounded-lg text-sm font-medium shadow-xl border pointer-events-auto ${
+    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+      {visible.map(t => {
+        const colors =
           t.type === 'online'  ? 'bg-emerald-900/95 border-emerald-600/40 text-emerald-200' :
           t.type === 'offline' ? 'bg-slate-800/95  border-slate-600/40  text-slate-300'    :
           t.type === 'new'     ? 'bg-indigo-900/95 border-indigo-500/40 text-indigo-200'   :
+          t.type === 'update'  ? 'bg-amber-900/95  border-amber-600/40  text-amber-200'    :
                                  'bg-[#0f0f20]/95  border-[#1a1a30]     text-slate-300'
-        }`}>
-          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-            t.type === 'online'  ? 'bg-emerald-400' :
-            t.type === 'offline' ? 'bg-slate-500'   :
-            t.type === 'new'     ? 'bg-indigo-400'  : 'bg-slate-400'
-          }`} />
-          {t.msg}
-        </div>
-      ))}
+        const dot =
+          t.type === 'online'  ? 'bg-emerald-400' :
+          t.type === 'offline' ? 'bg-slate-500'   :
+          t.type === 'new'     ? 'bg-indigo-400'  :
+          t.type === 'update'  ? 'bg-amber-400'   : 'bg-slate-400'
+        const hasNav = !!(t.navigate?.page || t.navigate?.href)
+        const handleNav = () => {
+          if (t.navigate?.page) setPage(t.navigate.page)
+          if (t.navigate?.href) window.open(t.navigate.href, '_blank', 'noopener,noreferrer')
+        }
+        return (
+          <div
+            key={t.id}
+            onClick={hasNav ? handleNav : undefined}
+            className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium shadow-xl border min-w-[220px] max-w-[340px] ${
+              colors} ${hasNav ? 'cursor-pointer hover:brightness-110 transition-[filter]' : ''}`}
+          >
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dot}`} />
+            <span className="flex-1 leading-snug">{t.msg}</span>
+            {hasNav && <span className="text-xs opacity-60 flex-shrink-0">→</span>}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -60,15 +78,80 @@ export default function App() {
   const [lastScanDurationMs,      setLastScanDurationMs]      = useState(() => { const v = localStorage.getItem('claudette:lastScanMs'); return v ? Number(v) : null })
   const [lastDeepScanDurationMs,  setLastDeepScanDurationMs]  = useState(() => { const v = localStorage.getItem('claudette:lastDeepScanMs'); return v ? Number(v) : null })
 
-  const [toasts, setToasts] = useState([])
-  const addToast = useCallback((msg, type = 'info') => {
+  // ── Persistent notifications (localStorage) + ephemeral pop-up toasts ────
+  const [notifications, setNotifications] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('claudette:notifications') ?? '[]') }
+    catch { return [] }
+  })
+  const [unreadCount, setUnreadCount] = useState(() =>
+    parseInt(localStorage.getItem('claudette:notif-unread') ?? '0', 10)
+  )
+  // IDs currently showing as pop-up toasts in the corner (fade out after 5 s)
+  const [visibleToastIds, setVisibleToastIds] = useState([])
+
+  // navigate: { page: 'network' } | { href: 'https://...' } | null
+  const addToast = useCallback((msg, type = 'info', navigate = null) => {
     const id = Date.now() + Math.random()
-    setToasts(prev => [...prev.slice(-4), { id, msg, type }])
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000)
+    const notif = { id, msg, type, navigate, ts: Date.now() }
+    setNotifications(prev => {
+      const next = [notif, ...prev].slice(0, 50)   // newest-first, max 50
+      localStorage.setItem('claudette:notifications', JSON.stringify(next))
+      return next
+    })
+    setUnreadCount(c => {
+      const next = c + 1
+      localStorage.setItem('claudette:notif-unread', String(next))
+      return next
+    })
+    setVisibleToastIds(prev => [...prev, id])
+    setTimeout(() => setVisibleToastIds(prev => prev.filter(x => x !== id)), 5000)
+  }, [])
+
+  const dismissNotification = useCallback((id) => {
+    setNotifications(prev => {
+      const next = prev.filter(n => n.id !== id)
+      localStorage.setItem('claudette:notifications', JSON.stringify(next))
+      return next
+    })
+  }, [])
+
+  const clearAllNotifications = useCallback(() => {
+    setNotifications([])
+    localStorage.removeItem('claudette:notifications')
+    setUnreadCount(0)
+    localStorage.removeItem('claudette:notif-unread')
+  }, [])
+
+  const markAllRead = useCallback(() => {
+    setUnreadCount(0)
+    localStorage.removeItem('claudette:notif-unread')
   }, [])
 
   // ── Auth state ────────────────────────────────────────────────────────────
   const [auth, setAuth] = useState({ checking: true, registered: false, authenticated: false, username: null })
+
+  // ── Update check ──────────────────────────────────────────────────────────
+  const [updateInfo, setUpdateInfo] = useState(null)  // { current, latest, updateAvailable, releaseUrl }
+  const hasToastedUpdate = useRef(false)
+
+  const checkForUpdates = useCallback(async () => {
+    try {
+      const data = await api.system.version()
+      setUpdateInfo(data)
+      if (data.updateAvailable && !hasToastedUpdate.current) {
+        hasToastedUpdate.current = true
+        addToast(`Update available: v${data.latest}`, 'update', { page: 'about' })
+      }
+    } catch { /* silently fail — server may not be ready */ }
+  }, [addToast])
+
+  // Check on login and every 4 hours while the tab is open
+  useEffect(() => {
+    if (!auth.authenticated) return
+    checkForUpdates()
+    const id = setInterval(checkForUpdates, 4 * 60 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [auth.authenticated, checkForUpdates])
 
   // Check auth first — everything else waits until this resolves
   useEffect(() => {
@@ -189,15 +272,15 @@ export default function App() {
             if (!hit) return d
             if (hit.status !== d.status) {
               const name = d.label || d.hostname || d.ip
-              if (hit.status === 'online' || hit.status === 'filtered') addToast(`${name} is back online`, 'online')
-              else addToast(`${name} went offline`, 'offline')
+              if (hit.status === 'online' || hit.status === 'filtered') addToast(`${name} is back online`, 'online', { page: 'network' })
+              else addToast(`${name} went offline`, 'offline', { page: 'network' })
             }
             return { ...d, status: hit.status, latency: hit.latency ?? d.latency, detectedGateway: hit.detectedGateway ?? d.detectedGateway }
           })
           // Append any brand-new devices discovered by the sweep
           const existingIps = new Set(prev.devices.map(d => d.ip))
           const added = (data.newDevices ?? []).filter(d => !existingIps.has(d.ip))
-          added.forEach(d => addToast(`New device: ${d.label || d.hostname || d.ip}`, 'new'))
+          added.forEach(d => addToast(`New device: ${d.label || d.hostname || d.ip}`, 'new', { page: 'network' }))
           return { ...prev, devices: [...updated, ...added] }
         })
       }
@@ -327,6 +410,12 @@ export default function App() {
         onShowWizard={() => setShowWizard(true)}
         username={auth.username}
         onLogout={handleLogout}
+        updateInfo={updateInfo}
+        notifications={notifications}
+        unreadCount={unreadCount}
+        onDismissNotification={dismissNotification}
+        onClearNotifications={clearAllNotifications}
+        onMarkAllRead={markAllRead}
       >
         <Page
           services={services}
@@ -347,6 +436,8 @@ export default function App() {
           lastDeepScanDurationMs={lastDeepScanDurationMs}
           setPage={setPage}
           preSelectedIp={page === 'network' ? selectedDeviceIp : null}
+          updateInfo={updateInfo}
+          onCheckUpdates={checkForUpdates}
         />
       </Layout>
       {dbErrors.length > 0 && (
@@ -371,7 +462,7 @@ export default function App() {
           </div>
         </div>
       )}
-      <ToastStack toasts={toasts} />
+      <ToastStack notifications={notifications} visibleIds={visibleToastIds} setPage={setPage} />
         </>
       )}
     </>

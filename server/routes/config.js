@@ -59,6 +59,7 @@ router.post('/', (req, res) => {
       deep_scan_hour:           Math.min(23, Math.max(0, (n => Number.isFinite(n) ? n : 4)(parseInt(body.schedule?.deep_scan_hour)))),
       speedtest_interval_hours: Math.max(1, (n => Number.isFinite(n) ? n : 1)(parseInt(body.schedule?.speedtest_interval_hours))),
       backup_interval_days:     Math.max(0, (n => Number.isFinite(n) ? n : 0)(parseInt(body.schedule?.backup_interval_days))),
+      backup_keep_days:         Math.min(365, Math.max(1, (n => Number.isFinite(n) ? n : 7)(parseInt(body.schedule?.backup_keep_days)))),
     },
   }
   const existingNetwork = loadConfig()?.network ?? {}

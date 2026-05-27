@@ -296,18 +296,24 @@ export default function Reports() {
           device: '',
         })),
         // Speed tests
-        ...(speedData.results ?? []).map(r => ({
-          section: 'speedtest',
-          timestamp: fmtLocalTs(r.ts),
-          event: 'speedtest',
-          detail: [
-            r.downloadMbps != null ? `down:${r.downloadMbps}Mbps` : '',
-            r.uploadMbps   != null ? `up:${r.uploadMbps}Mbps` : '',
-            r.latencyMs    != null ? `lat:${r.latencyMs}ms` : '',
-            r.server ? `srv:${r.server}` : '',
-          ].filter(Boolean).join(' '),
-          device: '',
-        })),
+        ...(speedData.results ?? []).map(r => {
+          const pDown = ispConfig?.plan_download_mbps ?? 0
+          const pUp   = ispConfig?.plan_upload_mbps   ?? 0
+          const dPct  = pDown > 0 && r.download_mbps != null ? ` (${Math.round(r.download_mbps / pDown * 100)}%)` : ''
+          const uPct  = pUp   > 0 && r.upload_mbps   != null ? ` (${Math.round(r.upload_mbps   / pUp   * 100)}%)` : ''
+          return {
+            section: 'speedtest',
+            timestamp: fmtLocalTs(r.ts),
+            event: 'speedtest',
+            detail: [
+              r.download_mbps != null ? `down:${r.download_mbps}Mbps${dPct}` : '',
+              r.upload_mbps   != null ? `up:${r.upload_mbps}Mbps${uPct}` : '',
+              r.ping_ms       != null ? `ping:${r.ping_ms}ms` : '',
+              r.server_name ?? r.server_host ? `srv:${r.server_name ?? r.server_host}` : '',
+            ].filter(Boolean).join(' '),
+            device: r.client_ip ?? '',
+          }
+        }),
         // All events
         ...(evData.events ?? []).map(e => ({
           section: e.source ?? 'event',
@@ -999,7 +1005,31 @@ export default function Reports() {
                   })()}
 
                   <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-4">
-                    <p className="text-xs font-medium text-slate-400 mb-3">Download &amp; Upload Trend</p>
+                    <div className="flex items-start justify-between mb-3">
+                      <p className="text-xs font-medium text-slate-400">Download &amp; Upload Trend</p>
+                      <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+                        <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                          <span className="inline-block w-5 border-t-2 border-emerald-500 rounded" />
+                          Download
+                        </span>
+                        <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                          <span className="inline-block w-5 border-t-2 border-sky-400 rounded" />
+                          Upload
+                        </span>
+                        {planDown > 0 && (
+                          <span className="flex items-center gap-1.5 text-[10px] text-emerald-400/70">
+                            <span className="inline-block w-5 border-t-2 border-dashed border-emerald-500/70" />
+                            Plan ↓ {planDown} Mbps
+                          </span>
+                        )}
+                        {planUp > 0 && (
+                          <span className="flex items-center gap-1.5 text-[10px] text-sky-400/70">
+                            <span className="inline-block w-5 border-t-2 border-dashed border-sky-400/70" />
+                            Plan ↑ {planUp} Mbps
+                          </span>
+                        )}
+                      </div>
+                    </div>
                     <ResponsiveContainer width="100%" height={180}>
                       <LineChart data={[...rows].reverse()} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
@@ -1009,9 +1039,8 @@ export default function Reports() {
                         <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                         <Line type="monotone" dataKey="download_mbps" name="Download" stroke="#10b981" dot={{ r: 3 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
                         <Line type="monotone" dataKey="upload_mbps"   name="Upload"   stroke="#38bdf8" dot={{ r: 3 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                        {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.45} label={{ value: `SLA ↓${planDown}`, fill: '#10b981', fontSize: 9, opacity: 0.65 }} />}
-                        {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.45} label={{ value: `SLA ↑${planUp}`,   fill: '#38bdf8', fontSize: 9, opacity: 0.65 }} />}
-                        <Legend wrapperStyle={{ fontSize: 11, color: '#64748b' }} />
+                        {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.6} label={{ value: `${planDown} Mbps`, fill: '#10b981', fontSize: 9, opacity: 0.8 }} />}
+                        {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.6} label={{ value: `${planUp} Mbps`,   fill: '#38bdf8', fontSize: 9, opacity: 0.8 }} />}
                       </LineChart>
                     </ResponsiveContainer>
                   </div>

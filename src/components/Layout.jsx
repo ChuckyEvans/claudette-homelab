@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Shield, ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, Wand2, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Shield, ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, Wand2, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink } from 'lucide-react'
 import claudetteLogo from '/favicon.svg'
 
 const NAV = [
@@ -24,7 +24,7 @@ function Tooltip({ text, side = 'right' }) {
   )
 }
 
-export default function Layout({ page, setPage, services, threats, onShowWizard, username, onLogout, children }) {
+export default function Layout({ page, setPage, services, threats, onShowWizard, username, onLogout, updateInfo, notifications = [], unreadCount = 0, onDismissNotification, onClearNotifications, onMarkAllRead, children }) {
   const failCount = services?.results?.filter(r => !r.ok).length ?? 0
   const allOk     = failCount === 0
 
@@ -33,6 +33,23 @@ export default function Layout({ page, setPage, services, threats, onShowWizard,
     localStorage.setItem('sidebar-collapsed', String(!c))
     return !c
   })
+
+  const [notifOpen, setNotifOpen] = useState(false)
+  const openNotif = () => { setNotifOpen(true); onMarkAllRead?.() }
+  const closeNotif = () => setNotifOpen(false)
+
+  const notifColors = (type) =>
+    type === 'online'  ? 'bg-emerald-400' :
+    type === 'offline' ? 'bg-slate-500'   :
+    type === 'new'     ? 'bg-indigo-400'  :
+    type === 'update'  ? 'bg-amber-400'   : 'bg-slate-400'
+
+  const formatTs = (ts) => {
+    if (!ts) return ''
+    const d = new Date(ts)
+    return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) +
+           ' ' + d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -53,6 +70,23 @@ export default function Layout({ page, setPage, services, threats, onShowWizard,
           {collapsed && (
             <img src={claudetteLogo} alt="Claudette" className="w-7 h-7" />
           )}
+
+          {/* Bell with unread badge */}
+          <div className="relative flex-shrink-0">
+            <button
+              onClick={openNotif}
+              title="Notifications"
+              className="p-1.5 rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors"
+            >
+              <Bell className="w-3.5 h-3.5" />
+            </button>
+            {unreadCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 bg-amber-500 text-[10px] font-bold text-white rounded-full flex items-center justify-center leading-none pointer-events-none">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </div>
+
           <button
             onClick={toggle}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -156,6 +190,73 @@ export default function Layout({ page, setPage, services, threats, onShowWizard,
       <main className="flex-1 overflow-auto">
         {children}
       </main>
+
+      {/* ── Notification panel ─────────────────────────────────────────────── */}
+      {notifOpen && (
+        <>
+          {/* Backdrop */}
+          <div className="fixed inset-0 z-40" onClick={closeNotif} />
+
+          {/* Panel */}
+          <div className="fixed top-0 right-0 h-screen w-80 z-50 bg-[#080812] border-l border-[#1a1a30] flex flex-col shadow-2xl">
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[#1a1a30] flex-shrink-0">
+              <span className="text-sm font-semibold text-slate-200">Notifications</span>
+              <div className="flex items-center gap-2">
+                {notifications.length > 0 && (
+                  <button
+                    onClick={onClearNotifications}
+                    className="text-xs text-slate-500 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-red-500/10"
+                  >
+                    Clear all
+                  </button>
+                )}
+                <button onClick={closeNotif} className="p-1 text-slate-500 hover:text-slate-200 transition-colors rounded">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto divide-y divide-[#1a1a30]">
+              {notifications.length === 0 ? (
+                <p className="text-xs text-slate-600 text-center py-10">No notifications</p>
+              ) : notifications.map(n => {
+                const hasNav = !!(n.navigate?.page || n.navigate?.href)
+                const handleNav = () => {
+                  if (n.navigate?.page) { setPage(n.navigate.page); closeNotif() }
+                  if (n.navigate?.href) window.open(n.navigate.href, '_blank', 'noopener,noreferrer')
+                }
+                return (
+                  <div key={n.id} className="flex items-start gap-3 px-4 py-3 hover:bg-white/[0.03] group">
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${notifColors(n.type)}`} />
+                    <div className="flex-1 min-w-0">
+                      <p
+                        onClick={hasNav ? handleNav : undefined}
+                        className={`text-xs text-slate-300 leading-snug ${hasNav ? 'cursor-pointer hover:text-white' : ''}`}
+                      >
+                        {n.msg}
+                        {hasNav && <ExternalLink className="inline w-3 h-3 ml-1 opacity-50" />}
+                      </p>
+                      {n.ts && (
+                        <p className="text-[10px] text-slate-600 mt-0.5">{formatTs(n.ts)}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => onDismissNotification?.(n.id)}
+                      className="flex-shrink-0 opacity-0 group-hover:opacity-50 hover:!opacity-100 transition-opacity text-slate-400 p-0.5 rounded"
+                      aria-label="Dismiss"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
