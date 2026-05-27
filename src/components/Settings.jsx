@@ -285,6 +285,7 @@ export default function Settings({ onOpenWizard }) {
   const [theme,                 setTheme]                 = useState('starfield')
   const [services,              setServices]              = useState([])
   const [backupIntervalDays,    setBackupIntervalDays]    = useState(0)
+  const [backupKeepDays,        setBackupKeepDays]        = useState(7)
   const [backingUp,             setBackingUp]             = useState(false)
   const [restoring,             setRestoring]             = useState(false)
   const restoreInputRef = useRef(null)
@@ -314,6 +315,7 @@ export default function Settings({ onOpenWizard }) {
         setTheme(cfg.ui?.theme ?? 'starfield')
         setServices(cfg.services ?? [])
         setBackupIntervalDays(cfg.schedule?.backup_interval_days ?? 0)
+        setBackupKeepDays(cfg.schedule?.backup_keep_days ?? 7)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -331,6 +333,7 @@ export default function Settings({ onOpenWizard }) {
     deep_scan_hour:           parseInt(deepScanHour),
     speedtest_interval_hours: parseInt(speedtestInterval),
     backup_interval_days:     parseInt(backupIntervalDays) || 0,
+    backup_keep_days:         Math.max(1, parseInt(backupKeepDays) || 7),
   })
 
   const ispPayload = () => ({
@@ -624,11 +627,19 @@ export default function Settings({ onOpenWizard }) {
             <div className="space-y-4">
               <Field
                 label="Auto-backup every N days (0 = disabled)"
-                hint="Saves a backup of the database and config to the server's data/backups/ folder. Backups older than 7 days are deleted automatically."
+                hint="Creates a .claudette.gz backup in the claudette-data Docker volume on the Pi (/app/data/backups/). Same disk as the database — useful for accidental changes, not hardware failure. For offsite copies, use Backup Now."
                 type="number" min="0" max="365"
                 value={backupIntervalDays}
                 onChange={e => setBackupIntervalDays(e.target.value)}
                 placeholder="0"
+              />
+              <Field
+                label="Keep auto-backups for (days)"
+                hint="Auto-backups older than this are deleted from the Pi. Manual downloads are not affected."
+                type="number" min="1" max="365"
+                value={backupKeepDays}
+                onChange={e => setBackupKeepDays(e.target.value)}
+                placeholder="7"
               />
               <div className="flex items-center gap-3 pt-1">
                 {/* Manual backup download */}
@@ -656,7 +667,7 @@ export default function Settings({ onOpenWizard }) {
                 <input
                   ref={restoreInputRef}
                   type="file"
-                  accept=".claudette"
+                  accept=".claudette.gz"
                   className="hidden"
                   onChange={async e => {
                     const file = e.target.files?.[0]
@@ -667,8 +678,8 @@ export default function Settings({ onOpenWizard }) {
                     }
                     try {
                       setRestoring(true)
-                      const text = await file.text()
-                      await api.system.restore(text)
+                      const buf = await file.arrayBuffer()
+                      await api.system.restore(buf)
                       showToast('Restore complete — reloading…')
                       setTimeout(() => window.location.reload(), 1500)
                     } catch (err) {
@@ -689,7 +700,7 @@ export default function Settings({ onOpenWizard }) {
                     : <><Upload className="w-3.5 h-3.5" />Restore from File</>}
                 </button>
               </div>
-              <p className="text-[11px] text-slate-600">Backup files (.claudette) contain the full database and config. Keep them somewhere safe.</p>
+              <p className="text-[11px] text-slate-600">Backup files (.claudette.gz) are gzip-compressed and contain the full database and config. Keep them somewhere safe.</p>
             </div>
           </section>
 

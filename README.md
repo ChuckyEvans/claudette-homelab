@@ -16,7 +16,7 @@ A self-hosted home network monitoring dashboard. Runs in Docker on a Raspberry P
 | **Speed test** | Scheduled download/upload/ping tests. Exportable to PDF or CSV. |
 | **System stats** | CPU, memory, disk, network usage of the host running Claudette. |
 | **Audit log** | Every scan, device change, and user action timestamped to the second. |
-| **Backup / restore** | Download a `.claudette` bundle (config + SQLite db). Auto-backup every N days. |
+| **Backup / restore** | Download a `.claudette.gz` bundle (gzip-compressed config + SQLite db). Auto-backup every N days with configurable retention. |
 | **Reports** | PDF and CSV exports for outages, speed history, device inventory. Persistent filter bars on every tab. |
 | **Auth** | Single-user login with bcrypt passwords and JWT session cookies. |
 | **Kodi addon** | Optional Python addon for LibreELEC / Kodi — browse the dashboard from your TV. |
@@ -132,6 +132,7 @@ schedule:
   threat_interval_hours: 6      # CVE feed refresh frequency
   deep_scan_hour: 4             # Hour (0–23) for the nightly full port scan
   backup_interval_days: 7       # Auto-backup frequency (0 = disabled)
+  backup_keep_days: 7           # How many days to keep auto-backups
 
 isp:
   name: MyISP
@@ -165,11 +166,11 @@ Services are configured through the UI (Settings → Services) or directly in th
 
 All data lives in a SQLite database at `/app/data/state.db` inside the container. The Docker volume `claudette-data` persists this across container restarts.
 
-**Manual backup**: Settings → Backup & Restore → *Backup Now* — downloads a `.claudette` file (JSON bundle containing the config YAML and a base64-encoded SQLite binary).
+**Manual backup**: Settings → Backup & Restore → *Backup Now* — downloads a `.claudette.gz` file (gzip-compressed JSON bundle containing the config YAML and base64-encoded SQLite binary; typically 85–90% smaller than the raw data).
 
-**Restore**: Settings → Backup & Restore → *Restore from File* — upload a `.claudette` file. The server validates and replaces the database and config, then restarts cleanly.
+**Restore**: Settings → Backup & Restore → *Restore from File* — upload a `.claudette.gz` file. The server validates and replaces the database and config, then restarts cleanly.
 
-**Auto-backup**: set `backup_interval_days` in config. Backups are saved to `/app/data/backups/` and files older than 7 days are pruned automatically.
+**Auto-backup**: set `backup_interval_days` in config (0 = disabled). Backups are saved to `/app/data/backups/` as `.claudette.gz` files. Set `backup_keep_days` to control how long they are kept (default 7 days).
 
 ---
 

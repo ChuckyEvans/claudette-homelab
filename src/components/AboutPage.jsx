@@ -1,7 +1,4 @@
-import { useState } from 'react'
 import { Wand2, RefreshCw, CheckCircle, XCircle, ExternalLink, Shield, Network, Activity, Cpu, ClipboardList, Tv } from 'lucide-react'
-
-const VERSION = '1.0.0'
 
 const FEATURES = [
   { icon: Network,      label: 'Network Scanner',     desc: 'Discovers devices on your subnet via nmap. Tracks online/offline status and persists to SQLite.' },
@@ -20,24 +17,9 @@ const STACK = [
   { label: 'Port',      value: '7654 (API)  ·  5173 (dev UI)' },
 ]
 
-export default function AboutPage({ onShowWizard }) {
-  const [updateStatus, setUpdateStatus] = useState(null) // null | 'checking' | 'up-to-date' | 'error'
-
-  const checkUpdates = async () => {
-    setUpdateStatus('checking')
-    try {
-      const res = await fetch(
-        'https://api.github.com/repos/neile/claudette/releases/latest',
-        { signal: AbortSignal.timeout(8000) }
-      )
-      if (!res.ok) throw new Error('not found')
-      const data = await res.json()
-      const latest = (data.tag_name ?? '').replace(/^v/, '')
-      setUpdateStatus(latest && latest !== VERSION ? { newer: latest } : 'up-to-date')
-    } catch {
-      setUpdateStatus('error')
-    }
-  }
+export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates }) {
+  const checking = updateInfo === undefined  // undefined = still loading
+  const versionInfo = updateInfo ?? null
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-10 space-y-10">
@@ -47,7 +29,10 @@ export default function AboutPage({ onShowWizard }) {
         <img src="/favicon.svg" alt="Claudette" className="w-14 h-14 flex-shrink-0" />
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Claudette</h1>
-          <p className="text-slate-500 text-sm mt-0.5">Homelab Monitor · v{VERSION}</p>
+          <p className="text-slate-500 text-sm mt-0.5">
+            Homelab Monitor
+            {versionInfo?.current ? ` · v${versionInfo.current}` : ''}
+          </p>
         </div>
       </div>
 
@@ -56,7 +41,7 @@ export default function AboutPage({ onShowWizard }) {
       </p>
 
       {/* Action buttons */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-3 items-center">
         <button
           onClick={onShowWizard}
           className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
@@ -66,29 +51,35 @@ export default function AboutPage({ onShowWizard }) {
         </button>
 
         <button
-          onClick={checkUpdates}
-          disabled={updateStatus === 'checking'}
+          disabled={checking}
+          onClick={onCheckUpdates}
           className="flex items-center gap-2 bg-[#0f0f1e] hover:bg-[#1a1a30] border border-[#1a1a30] hover:border-indigo-500/40 text-slate-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
         >
-          <RefreshCw className={`w-4 h-4 ${updateStatus === 'checking' ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${checking ? 'animate-spin' : ''}`} />
           Check for Updates
         </button>
 
-        {updateStatus === 'up-to-date' && (
-          <span className="flex items-center gap-1.5 text-emerald-400 text-sm">
-            <CheckCircle className="w-4 h-4" /> You're up to date
-          </span>
-        )}
-        {updateStatus === 'error' && (
-          <span className="flex items-center gap-1.5 text-slate-500 text-sm">
-            <XCircle className="w-4 h-4" /> Couldn't reach GitHub
-          </span>
-        )}
-        {updateStatus?.newer && (
-          <span className="flex items-center gap-1.5 text-amber-400 text-sm">
-            <ExternalLink className="w-4 h-4" />
-            v{updateStatus.newer} available on GitHub
-          </span>
+        {/* Update status badge */}
+        {!checking && versionInfo && (
+          versionInfo.updateAvailable ? (
+            <a
+              href={versionInfo.releaseUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-amber-400 hover:text-amber-300 text-sm transition-colors"
+            >
+              <ExternalLink className="w-4 h-4" />
+              v{versionInfo.latest} available on GitHub
+            </a>
+          ) : versionInfo.error ? (
+            <span className="flex items-center gap-1.5 text-slate-500 text-sm">
+              <XCircle className="w-4 h-4" /> Couldn't reach GitHub
+            </span>
+          ) : versionInfo.latest ? (
+            <span className="flex items-center gap-1.5 text-emerald-400 text-sm">
+              <CheckCircle className="w-4 h-4" /> You're up to date
+            </span>
+          ) : null
         )}
       </div>
 

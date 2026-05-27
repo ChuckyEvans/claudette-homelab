@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Shield, ShieldAlert, Monitor, ChevronDown, ChevronRight, Search } from 'lucide-react'
+import { Shield, ShieldAlert, Monitor, Server, Router, Smartphone, ChevronDown, ChevronRight, Search, Globe, Hash, Cpu, Tag, Activity, Layers, Clock, Calendar } from 'lucide-react'
 
 const PORT_RISK = {
   23:    { risk: 'critical', label: 'Telnet',      note: 'Unencrypted remote shell' },
@@ -50,6 +50,54 @@ const RISK_COLOUR = {
 
 function portRisk(portNum) { return PORT_RISK[portNum] ?? { risk: 'none', label: null, note: null } }
 
+function relTime(ms) {
+  if (!ms) return null
+  const diff = Date.now() - ms
+  if (diff < 60_000) return 'just now'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`
+  return new Date(ms).toLocaleDateString('en-GB')
+}
+
+function inferDeviceType(d) {
+  const v = (d.vendor ?? '').toLowerCase()
+  const h = (d.hostname ?? '').toLowerCase()
+  const os = (d.os ?? '').toLowerCase()
+  if (v.includes('raspberry') || h.includes('pi')) return 'Single-board computer'
+  if (v.includes('cisco') || v.includes('netgear') || v.includes('asus') || v.includes('tp-link') || h.includes('router') || h.includes('gateway')) return 'Router / Access point'
+  if (os.includes('ios') || (v.includes('apple') && !(d.ports?.length))) return 'iPhone / iPad'
+  if (os.includes('android') || v.includes('samsung') || v.includes('huawei') || v.includes('xiaomi') || v.includes('oneplus')) return 'Android device'
+  if (os.includes('windows')) return 'Windows PC'
+  if (os.includes('macos') || os.includes('mac os') || os.includes('darwin')) return 'Mac'
+  if (os.includes('linux') || d.ports?.some(p => p.port === 22)) return 'Linux device'
+  if (v.includes('apple')) return 'Apple device'
+  return null
+}
+
+function guessIcon(device) {
+  const v = (device.vendor ?? '').toLowerCase()
+  const h = (device.hostname ?? '').toLowerCase()
+  const os = (device.os ?? '').toLowerCase()
+  if (v.includes('raspberry') || h.includes('pi')) return Server
+  if (v.includes('cisco') || v.includes('netgear') || v.includes('asus') || v.includes('tp-link') || h.includes('router') || h.includes('gateway')) return Router
+  if (os.includes('ios') || os.includes('android') || v.includes('apple') || v.includes('samsung') || v.includes('huawei') || v.includes('xiaomi') || v.includes('oneplus')) return Smartphone
+  if (os.includes('windows') || os.includes('macos') || os.includes('darwin')) return Monitor
+  if (device.ports?.some(p => [22, 80, 443, 8080].includes(p.port))) return Server
+  return Monitor
+}
+
+function DeviceInfoRow({ icon: Icon, label, value, mono = false }) {
+  if (!value && value !== 0) return null
+  return (
+    <div className="flex items-start gap-3 py-2 border-b border-[#0a0a16] last:border-0">
+      <Icon className="w-3 h-3 text-slate-600 mt-0.5 flex-shrink-0" />
+      <span className="text-[11px] text-slate-500 w-20 flex-shrink-0">{label}</span>
+      <span className={`text-[11px] text-slate-300 flex-1 break-all ${mono ? 'font-mono' : ''}`}>{value}</span>
+    </div>
+  )
+}
+
 function deviceWorstRisk(openPorts) {
   if (!openPorts.length) return 'none'
   return openPorts.reduce((worst, p) => {
@@ -78,37 +126,64 @@ function DeviceRow({ device }) {
     return rb !== ra ? rb - ra : a.port - b.port
   })
   const label = device.label || device.hostname
+  const Icon = guessIcon(device)
+  const deviceType = inferDeviceType(device)
+  const isOnline = device.status === 'online'
+  const isFiltered = device.status === 'filtered'
+
   return (
     <div className="bg-[#0f0f20] border border-[#1a1a30] rounded-xl overflow-hidden">
       <button onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors text-left">
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${c.dot}`} />
-        <Monitor className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+        <Icon className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
         <span className="flex-1 min-w-0 flex flex-col">
-          <span className="font-semibold text-sm text-slate-200 font-mono truncate">{device.ip}</span>
-          {label && <span className="text-[11px] text-slate-500 truncate">{label}</span>}
+          <span className="font-semibold text-sm text-slate-200 font-mono truncate">
+            {label ? <><span className="font-sans text-slate-200">{label}</span></> : device.ip}
+          </span>
+          <span className="text-[11px] text-slate-500 font-mono truncate">
+            {label ? device.ip : device.vendor}
+          </span>
         </span>
-        <span className="text-[11px] text-slate-400 flex-shrink-0 ml-2">{openPorts.length} port{openPorts.length !== 1 ? 's' : ''}</span>
+        <span className={`text-[10px] flex-shrink-0 ${
+          isOnline ? 'text-emerald-500' : isFiltered ? 'text-orange-500' : 'text-slate-600'
+        }`}>{device.status ?? 'unknown'}</span>
+        <span className="text-[11px] text-slate-400 flex-shrink-0 ml-1">{openPorts.length}p</span>
         <RiskBadge risk={worst} />
         {open ? <ChevronDown className="w-3.5 h-3.5 text-slate-700" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-700" />}
       </button>
       {open && (
-        <div className="border-t border-[#1a1a30] divide-y divide-[#0a0a16]">
-          {sortedPorts.length === 0 ? (
-            <p className="px-4 py-3 text-xs text-slate-600 italic">No open ports detected — run a deep scan for full results</p>
-          ) : sortedPorts.map(p => {
-            const info = portRisk(p.port)
-            const rc = RISK_COLOUR[info.risk] ?? RISK_COLOUR.none
-            return (
-              <div key={`${p.port}/${p.protocol}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.015]">
-                <span className={`font-mono text-sm font-medium w-14 flex-shrink-0 ${rc.text}`}>{p.port}</span>
-                <span className="text-[10px] text-slate-600 w-8 flex-shrink-0">{p.protocol ?? 'tcp'}</span>
-                <span className="text-xs text-slate-300 flex-1">{info.label ?? p.service ?? 'unknown'}</span>
-                {info.note && <span className="text-[11px] text-slate-500 flex-shrink-0 text-right max-w-[220px] truncate">{info.note}</span>}
-                {info.risk !== 'none' && <RiskBadge risk={info.risk} />}
-              </div>
-            )
-          })}
+        <div className="border-t border-[#1a1a30]">
+          {/* Device info */}
+          <div className="px-4 py-2">
+            <DeviceInfoRow icon={Globe}    label="IP"          value={device.ip}       mono />
+            <DeviceInfoRow icon={Hash}     label="MAC"         value={device.mac}      mono />
+            <DeviceInfoRow icon={Cpu}      label="Vendor"      value={device.vendor} />
+            <DeviceInfoRow icon={Tag}      label="Type"        value={deviceType} />
+            <DeviceInfoRow icon={Activity} label="Hostname"    value={device.hostname} mono />
+            <DeviceInfoRow icon={Layers}   label="OS"          value={device.os} />
+            <DeviceInfoRow icon={Clock}    label="Latency"     value={device.latency != null ? `${device.latency}ms` : null} />
+            <DeviceInfoRow icon={Calendar} label="First seen"  value={relTime(device.firstSeen)} />
+            <DeviceInfoRow icon={Calendar} label="Last seen"   value={relTime(device.lastSeen)} />
+          </div>
+          {/* Ports */}
+          <div className="border-t border-[#1a1a30] divide-y divide-[#0a0a16]">
+            {sortedPorts.length === 0 ? (
+              <p className="px-4 py-3 text-xs text-slate-600 italic">No open ports detected — run a deep scan for full results</p>
+            ) : sortedPorts.map(p => {
+              const info = portRisk(p.port)
+              const rc = RISK_COLOUR[info.risk] ?? RISK_COLOUR.none
+              return (
+                <div key={`${p.port}/${p.protocol}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.015]">
+                  <span className={`font-mono text-sm font-medium w-14 flex-shrink-0 ${rc.text}`}>{p.port}</span>
+                  <span className="text-[10px] text-slate-600 w-8 flex-shrink-0">{p.protocol ?? 'tcp'}</span>
+                  <span className="text-xs text-slate-300 flex-1">{info.label ?? p.service ?? 'unknown'}</span>
+                  {info.note && <span className="text-[11px] text-slate-500 flex-shrink-0 text-right max-w-[220px] truncate">{info.note}</span>}
+                  {info.risk !== 'none' && <RiskBadge risk={info.risk} />}
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>

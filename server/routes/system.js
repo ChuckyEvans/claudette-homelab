@@ -4,8 +4,22 @@ import si from 'systeminformation'
 import os from 'os'
 import fs from 'fs'
 import path from 'path'
+import zlib from 'node:zlib'
+import { fileURLToPath } from 'url'
 import { getDb, getDbPath, getDataDir, resetDb, audit } from '../db.js'
-import { getConfigPath, resetConfig } from '../config.js'
+import { getConfigPath, loadConfig, resetConfig } from '../config.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// Read version from package.json once at startup
+const { version: CURRENT_VERSION } = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8')
+)
+
+// Cache the GitHub release check for 1 hour to avoid rate limits
+let _versionCache = null
+let _versionCacheAt = 0
+const VERSION_CACHE_MS = 60 * 60 * 1000
 
 const router = Router()
 
@@ -117,13 +131,15 @@ function buildBackupBundle() {
   const dbData     = fs.readFileSync(getDbPath())
   const configPath = getConfigPath()
   const configData = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : ''
-  return JSON.stringify({
+  const json = JSON.stringify({
     app:     'claudette',
     version: '1',
     created: Date.now(),
     config:  configData,
     db:      dbData.toString('base64'),
   })
+  // Gzip-compress: base64 SQLite + JSON wrapper compresses ~85-90%
+  return zlib.gzipSync(Buffer.from(json, 'utf8'))
 }
 
 function localDateStr() {
@@ -137,17 +153,18 @@ export function doAutoBackup() {
     const bundle    = buildBackupBundle()
     const backupDir = path.join(getDataDir(), 'backups')
     if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
-    const fname = `claudette-backup-${localDateStr()}-${Date.now()}.claudette`
+    const fname = `claudette-backup-${localDateStr()}-${Date.now()}.claudette.gz`
     fs.writeFileSync(path.join(backupDir, fname), bundle)
-    // Delete auto-backups older than 7 days
-    const cutoff = Date.now() - 7 * 86_400_000
-    const all = fs.readdirSync(backupDir).filter(f => f.endsWith('.claudette'))
+    // Prune old auto-backups based on configured retention (default 7 days)
+    const keepDays = Math.max(1, loadConfig()?.schedule?.backup_keep_days ?? 7)
+    const cutoff = Date.now() - keepDays * 86_400_000
+    const all = fs.readdirSync(backupDir).filter(f => f.startsWith('claudette-backup-'))
     for (const f of all) {
       const stat = fs.statSync(path.join(backupDir, f))
       if (stat.mtimeMs < cutoff) fs.unlinkSync(path.join(backupDir, f))
     }
     audit('backup.auto', { file: fname }, 'system')
-    console.log(`[backup] Auto-backup saved: ${fname}`)
+    console.log(`[backup] Auto-backup saved: ${fname} (${(bundle.length / 1024).toFixed(1)} KB)`)
   } catch (err) {
     console.error('[backup] Auto-backup failed:', err.message)
   }
@@ -157,8 +174,8 @@ export function doAutoBackup() {
 router.post('/backup', (req, res) => {
   try {
     const bundle   = buildBackupBundle()
-    const filename = `claudette-backup-${localDateStr()}.claudette`
-    res.setHeader('Content-Type', 'application/octet-stream')
+    const filename = `claudette-backup-${localDateStr()}.claudette.gz`
+    res.setHeader('Content-Type', 'application/gzip')
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
     res.send(bundle)
     audit('backup.created', { size: bundle.length, actor: req.user?.sub ?? 'user' })
@@ -171,9 +188,17 @@ router.post('/backup', (req, res) => {
 // Accepts the JSON bundle as a raw body (up to 50 MB).
 router.post('/restore', express.raw({ type: '*/*', limit: '50mb' }), (req, res) => {
   try {
+    let bodyBuf = req.body
+    // Require gzip — detect magic bytes 1f 8b
+    if (bodyBuf[0] !== 0x1f || bodyBuf[1] !== 0x8b) {
+      return res.status(400).json({ error: 'Invalid backup file — must be a .claudette.gz file' })
+    }
+    try { bodyBuf = zlib.gunzipSync(bodyBuf) } catch {
+      return res.status(400).json({ error: 'Invalid backup file — could not decompress' })
+    }
     let bundle
     try {
-      bundle = JSON.parse(req.body.toString('utf8'))
+      bundle = JSON.parse(bodyBuf.toString('utf8'))
     } catch {
       return res.status(400).json({ error: 'Invalid backup file — could not parse JSON' })
     }
@@ -215,6 +240,36 @@ router.post('/restore', express.raw({ type: '*/*', limit: '50mb' }), (req, res) 
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+// ── Version / update check ───────────────────────────────────────────────────
+router.get('/version', async (req, res) => {
+  const now = Date.now()
+  if (_versionCache && now - _versionCacheAt < VERSION_CACHE_MS) {
+    return res.json(_versionCache)
+  }
+  try {
+    const ghRes = await fetch(
+      'https://api.github.com/repos/ChuckyEvans/claudette-homelab/releases/latest',
+      { headers: { 'User-Agent': 'claudette-homelab' }, signal: AbortSignal.timeout(8000) }
+    )
+    if (!ghRes.ok) throw new Error(`GitHub ${ghRes.status}`)
+    const data = await ghRes.json()
+    const latest = (data.tag_name ?? '').replace(/^v/, '')
+    const updateAvailable = latest && latest !== CURRENT_VERSION
+    _versionCache = {
+      current: CURRENT_VERSION,
+      latest: latest || CURRENT_VERSION,
+      updateAvailable,
+      releaseUrl: updateAvailable ? (data.html_url ?? null) : null,
+    }
+    _versionCacheAt = now
+  } catch {
+    // Return current version even when GitHub is unreachable
+    _versionCache = { current: CURRENT_VERSION, latest: null, updateAvailable: false, releaseUrl: null, error: 'unreachable' }
+    _versionCacheAt = now
+  }
+  res.json(_versionCache)
 })
 
 export default router

@@ -67,6 +67,7 @@ export const api = {
   system: {
     stats:      () => request('/system/stats'),
     interfaces: () => request('/system/interfaces'),
+    version:    () => request('/system/version'),
     backup: async () => {
       const res = await fetch('/api/system/backup', { method: 'POST', credentials: 'include' })
       if (res.status === 401) { notifySessionExpired(); throw new Error('Not authenticated') }
@@ -81,10 +82,10 @@ export const api = {
       link.click()
       URL.revokeObjectURL(link.href)
     },
-    restore: (fileText) => request('/system/restore', {
+    restore: (fileData) => request('/system/restore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream' },
-      body: fileText,
+      body: fileData,
     }),
   },
   config: {
@@ -477,19 +478,29 @@ export async function exportToPdf(reportData, filename = 'report.pdf') {
 
   // ── Speed Test History ───────────────────────────────────────────────────────
   if (reportData.speedtests?.length) {
+    const planDown = isp.plan_download_mbps ?? 0
+    const planUp   = isp.plan_upload_mbps   ?? 0
+    const hasPlan  = planDown > 0 || planUp > 0
     sectionHead('Speed Test History')
     table(
       [
-        { header: 'Date',       key: 'ts',       w: 38 },
-        { header: 'Download',   key: 'download', w: 36 },
-        { header: 'Upload',     key: 'upload',   w: 32 },
-        { header: 'Latency',    key: 'latency',  w: 26 },
-        { header: 'Server',     key: 'server',   w: 48 },
+        { header: 'Date',       key: 'ts',       w: 35 },
+        { header: 'Download',   key: 'download', w: 35 },
+        { header: 'Upload',     key: 'upload',   w: 30 },
+        ...(hasPlan ? [{ header: 'vs Plan', key: 'plan', w: 28 }] : []),
+        { header: 'Latency',    key: 'latency',  w: 22 },
+        { header: 'Server',     key: 'server',   w: hasPlan ? 30 : 58 },
       ],
       reportData.speedtests.slice(0, 50).map(r => ({
         ts:       new Date(r.ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
         download: r.download_mbps != null ? `${r.download_mbps} Mbps` : '—',
         upload:   r.upload_mbps   != null ? `${r.upload_mbps} Mbps`   : '—',
+        plan: (() => {
+          const parts = []
+          if (planDown > 0 && r.download_mbps != null) parts.push(`↓${Math.round(r.download_mbps / planDown * 100)}%`)
+          if (planUp   > 0 && r.upload_mbps   != null) parts.push(`↑${Math.round(r.upload_mbps   / planUp   * 100)}%`)
+          return parts.join(' ') || '—'
+        })(),
         latency:  r.ping_ms       != null ? `${r.ping_ms} ms`         : '—',
         server:   r.server_name   ?? r.server_host ?? '—',
       }))
