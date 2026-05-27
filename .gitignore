@@ -1,0 +1,17 @@
+node_modules/
+dist/
+data/
+.env
+
+# User-specific config (contains private IPs / service URLs) — copy config.example.yaml instead
+config.yaml
+
+# Build artefacts
+*.tar
+output/kodi/*.zip
+
+# Old Python prototype (superseded by Node.js rewrite) — these files remain tracked
+# in git history but should not be re-committed if recreated
+*.py
+pyproject.toml
+requirements.txt

@@ -1,0 +1,52 @@
+{
+  "name": "claudette-ui",
+  "version": "0.0.7",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"node server/index.js\" \"vite\"",
+    "build": "vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "cross-env NODE_ENV=production node server/index.js",
+    "docker:build": "docker build -t claudette:latest .",
+    "docker:run": "docker run -d --name claudette --cap-add=NET_ADMIN --cap-add=NET_RAW -p 7654:7654 -v claudette-data:/app/data claudette:latest",
+    "docker:stop": "docker stop claudette && docker rm claudette",
+    "docker:logs": "docker logs -f claudette",
+    "docker:restart": "npm run docker:stop; npm run docker:run",
+    "docker:rebuild": "npm run docker:build && npm run docker:restart",
+    "docker:deploy-pi": "pwsh -File deploy-pi.ps1",
+    "docker:deploy-pi:linux": "bash scripts/linux/deploy-pi.sh"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "js-yaml": "^4.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^0.441.0",
+    "node-cron": "^3.0.3",
+    "node-sqlite3-wasm": "^0.8.57",
+    "node-ssh": "^13.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "rss-parser": "^3.13.0",
+    "systeminformation": "^5.22.11"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.1",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "html2canvas": "^1.4.1",
+    "jsdom": "^27.0.1",
+    "jspdf": "^4.2.1",
+    "postcss": "^8.4.38",
+    "recharts": "^3.8.1",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.4.0",
+    "vitest": "^4.1.7"
+  }
+}
