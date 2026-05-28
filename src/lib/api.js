@@ -63,6 +63,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ label }),
     }),
+    toggleFavorite: (mac) => request(`/network/device/${encodeURIComponent(mac)}/favorite`, { method: 'POST' }),
   },
   system: {
     stats:      () => request('/system/stats'),

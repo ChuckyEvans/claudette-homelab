@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader } from 'lucide-react'
+import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader, Star } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { deviceThreatLevel } from '../lib/threatMatch.js'
 
@@ -63,15 +63,19 @@ function ipInSubnet(ip, cidr) {
 
 function sortDevices(arr) {
   return [...arr].sort((a, b) => {
-    // 1. Online first
+    // 1. Favorites first
+    const favA = a.favorited ? 0 : 1
+    const favB = b.favorited ? 0 : 1
+    if (favA !== favB) return favA - favB
+    // 2. Online first
     const onA = a.status === 'online' ? 0 : 1
     const onB = b.status === 'online' ? 0 : 1
     if (onA !== onB) return onA - onB
-    // 2. IP numerically
+    // 3. IP numerically
     const ipA = a.ip.split('.').map(Number)
     const ipB = b.ip.split('.').map(Number)
     for (let i = 0; i < 4; i++) if (ipA[i] !== ipB[i]) return ipA[i] - ipB[i]
-    // 3. Hostname alphabetically
+    // 4. Hostname alphabetically
     const ha = a.hostname?.toLowerCase() || ''
     const hb = b.hostname?.toLowerCase() || ''
     return ha.localeCompare(hb)
@@ -100,7 +104,11 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
   const useGroups = subnets.length > 1
 
   // When a specific subnet is selected, filter to just that subnet (flat list)
-  const displayDevices = activeSubnet ? visible.filter(d => ipInSubnet(d.ip, activeSubnet)) : visible
+  const displayDevices = activeSubnet === 'favorites'
+    ? visible.filter(d => d.favorited)
+    : activeSubnet
+      ? visible.filter(d => ipInSubnet(d.ip, activeSubnet))
+      : visible
 
   const groups = useGroups && !activeSubnet ? (() => {
     const assigned = new Set()
@@ -151,6 +159,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
         </div>
         <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
           {isMe && <span className="text-[9px] font-medium text-cyan-400 leading-none">you</span>}
+          {d.favorited && <Star className="w-2.5 h-2.5 text-amber-400 flex-shrink-0" fill="currentColor" />}
           {isFiltered
             ? <span className="text-[10px] text-orange-500/70" title="Ping blocked but ports still respond">filtered</span>
             : isOffline
@@ -194,15 +203,16 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
         </p>
       </div>
 
-      {/* Subnet filter dropdown */}
-      {useGroups && (
+      {/* Subnet / Favorites filter dropdown */}
+      {(useGroups || visible.some(d => d.favorited)) && (
         <div className="px-3 pb-2.5 border-b border-[#1a1a30]">
           <select
             value={activeSubnet ?? ''}
             onChange={e => setActiveSubnet(e.target.value || null)}
             className="w-full bg-[#0f0f20] border border-[#1a1a30] rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500/50 cursor-pointer"
           >
-            <option value="">All subnets ({visible.length})</option>
+            <option value="">All ({visible.length})</option>
+            <option value="favorites">★ Favorites ({visible.filter(d => d.favorited).length})</option>
             {subnets.map(s => {
               const count = visible.filter(d => ipInSubnet(d.ip, s)).length
               return <option key={s} value={s}>{s}  ({count} devices)</option>
@@ -376,6 +386,25 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
           <p className="text-2xl font-bold text-indigo-400">{openPorts.length}</p>
           <p className="text-xs text-slate-400">open ports</p>
         </div>
+        <button
+          onClick={async () => {
+            if (!device.mac) return
+            try {
+              const { favorited } = await api.network.toggleFavorite(device.mac)
+              onDeviceUpdated?.({ ...device, favorited })
+            } catch (err) { console.error('Failed to toggle favorite', err) }
+          }}
+          disabled={!device.mac}
+          title={device.favorited ? 'Remove from favorites' : 'Add to favorites'}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded-lg text-xs transition-colors flex-shrink-0 ${
+            device.favorited
+              ? 'bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25'
+              : 'bg-[#0f0f1e] border-[#1a1a30] hover:border-amber-500/30 text-slate-500 hover:text-amber-400'
+          }`}
+        >
+          <Star className="w-3.5 h-3.5" fill={device.favorited ? 'currentColor' : 'none'} />
+          {device.favorited ? 'Favorited' : 'Favorite'}
+        </button>
         <button
           onClick={() => {
             const key = device.mac || device.ip

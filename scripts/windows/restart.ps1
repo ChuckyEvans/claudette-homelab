@@ -40,6 +40,8 @@ if (-not $SkipBuild) {
     # Retry up to 3 times — the proxy usually recovers within seconds.
     # Classic builder (DOCKER_BUILDKIT=0) uses locally-cached images without
     # contacting auth.docker.io for metadata — bypasses the broken DNS proxy.
+    # If npm ci fails to resolve registry.npmjs.org, set "dns":["8.8.8.8","8.8.4.4"]
+    # in Docker Desktop → Settings → Docker Engine → Apply & Restart.
     $env:DOCKER_BUILDKIT = '0'
     $built = $false
     for ($attempt = 1; $attempt -le 3; $attempt++) {

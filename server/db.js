@@ -77,7 +77,8 @@ export function getDb() {
         os           TEXT,
         ports        TEXT NOT NULL DEFAULT '[]',
         host_scripts TEXT NOT NULL DEFAULT '[]',
-        traceroute   TEXT NOT NULL DEFAULT '[]'
+        traceroute   TEXT NOT NULL DEFAULT '[]',
+        favorited    INTEGER NOT NULL DEFAULT 0
       );
       CREATE UNIQUE INDEX idx_devices_ip     ON devices (ip);
       CREATE        INDEX idx_devices_status ON devices (status);
@@ -136,6 +137,10 @@ export function getDb() {
       // Seed last_online from last_seen for devices that are currently online/filtered
       _db.exec("UPDATE devices SET last_online = last_seen WHERE status IN ('online','filtered')")
       console.log('[db] Added last_online column to devices.')
+    }
+    if (!cols.includes('favorited')) {
+      _db.exec('ALTER TABLE devices ADD COLUMN favorited INTEGER NOT NULL DEFAULT 0')
+      console.log('[db] Added favorited column to devices.')
     }
   }
 
@@ -344,6 +349,7 @@ export function getAllDevices() {
     label: r.label ?? null,
     status: r.status, firstSeen: r.first_seen, lastSeen: r.last_seen,
     updatedAt: r.updated_at ?? null,
+    favorited: r.favorited === 1,
     latency: r.latency, os: r.os,
     ports: JSON.parse(r.ports || '[]'),
     hostScripts: JSON.parse(r.host_scripts || '[]'),
@@ -383,4 +389,12 @@ export function setDeviceLabel(mac, label) {
 
 export function getDeviceLabel(mac) {
   return getDb().get('SELECT label FROM device_labels WHERE mac = ?', [mac])?.label ?? null
+}
+
+export function toggleFavorite(mac) {
+  getDb().run(
+    'UPDATE devices SET favorited = CASE WHEN favorited = 1 THEN 0 ELSE 1 END WHERE mac = ?',
+    [mac]
+  )
+  return getDb().get('SELECT favorited FROM devices WHERE mac = ?', [mac])?.favorited === 1
 }

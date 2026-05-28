@@ -5,7 +5,7 @@ import { createSocket } from 'dgram'
 import { promises as dnsPromises } from 'dns'
 import { loadConfig } from '../config.js'
 import { ipToInt, intToIp, isPrivateIP, isPrivateCIDR, ipInCIDR, getCIDRHosts } from '../utils/ip.js'
-import { audit, auditDevice, upsertDevice, markOffline, touchDeviceStatus, getAllDevices, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel } from '../db.js'
+import { audit, auditDevice, upsertDevice, markOffline, touchDeviceStatus, getAllDevices, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleFavorite } from '../db.js'
 
 const router = Router()
 
@@ -978,6 +978,19 @@ router.put('/device/:mac/label', (req, res) => {
   const idx = _scanResults.findIndex(d => d.mac === mac)
   if (idx !== -1) _scanResults[idx] = { ..._scanResults[idx], label: label.trim() || null }
   res.json({ ok: true, mac, label: label.trim() || null })
+})
+
+// ── Device favorite toggle ─────────────────────────────────────────────────────
+
+router.post('/device/:mac/favorite', (req, res) => {
+  const { mac } = req.params
+  if (!/^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(mac)) {
+    return res.status(400).json({ error: 'Invalid MAC address' })
+  }
+  const favorited = toggleFavorite(mac)
+  const idx = _scanResults.findIndex(d => d.mac === mac)
+  if (idx !== -1) _scanResults[idx] = { ..._scanResults[idx], favorited }
+  res.json({ ok: true, mac, favorited })
 })
 
 export function setBroadcast(fn) {
