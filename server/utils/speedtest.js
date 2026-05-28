@@ -82,7 +82,7 @@ async function getClientMeta() {
     client_lat:     typeof json.latitude  === 'number' ? json.latitude  : null,
     client_lon:     typeof json.longitude === 'number' ? json.longitude : null,
     server_host:    'speed.cloudflare.com',
-    server_name:    `Cloudflare ${json.colo ?? ''}`.trim(),
+    server_name:    `Cloudflare ${typeof json.colo === 'string' ? json.colo : (json.colo?.code ?? json.colo?.iata ?? '')}`.trim(),
     server_location: [json.city, json.regionCode].filter(Boolean).join(', ') || null,
     server_country: json.country ?? null,
   }

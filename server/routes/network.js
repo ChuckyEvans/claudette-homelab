@@ -5,7 +5,7 @@ import { createSocket } from 'dgram'
 import { promises as dnsPromises } from 'dns'
 import { loadConfig } from '../config.js'
 import { ipToInt, intToIp, isPrivateIP, isPrivateCIDR, ipInCIDR, getCIDRHosts } from '../utils/ip.js'
-import { audit, auditDevice, upsertDevice, markOffline, touchDeviceStatus, getAllDevices, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleFavorite } from '../db.js'
+import { audit, auditDevice, upsertDevice, markOffline, touchDeviceStatus, getAllDevices, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleFavorite, toggleFlagged } from '../db.js'
 
 const router = Router()
 
@@ -991,6 +991,19 @@ router.post('/device/:mac/favorite', (req, res) => {
   const idx = _scanResults.findIndex(d => d.mac === mac)
   if (idx !== -1) _scanResults[idx] = { ..._scanResults[idx], favorited }
   res.json({ ok: true, mac, favorited })
+})
+
+// ── Device flagged (pest) toggle ───────────────────────────────────────────────
+
+router.post('/device/:mac/flagged', (req, res) => {
+  const { mac } = req.params
+  if (!/^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(mac)) {
+    return res.status(400).json({ error: 'Invalid MAC address' })
+  }
+  const flagged = toggleFlagged(mac)
+  const idx = _scanResults.findIndex(d => d.mac === mac)
+  if (idx !== -1) _scanResults[idx] = { ..._scanResults[idx], flagged }
+  res.json({ ok: true, mac, flagged })
 })
 
 export function setBroadcast(fn) {

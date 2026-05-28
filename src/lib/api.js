@@ -64,6 +64,7 @@ export const api = {
       body: JSON.stringify({ label }),
     }),
     toggleFavorite: (mac) => request(`/network/device/${encodeURIComponent(mac)}/favorite`, { method: 'POST' }),
+    toggleFlagged:  (mac) => request(`/network/device/${encodeURIComponent(mac)}/flagged`,  { method: 'POST' }),
   },
   system: {
     stats:      () => request('/system/stats'),

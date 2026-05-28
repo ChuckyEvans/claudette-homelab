@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { Shield, ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink } from 'lucide-react'
 const claudetteLogo = '/favicon.svg'
 
@@ -24,6 +24,10 @@ function Tooltip({ text, side = 'right' }) {
   )
 }
 
+const SIDEBAR_MIN = 160
+const SIDEBAR_MAX = 400
+const SIDEBAR_DEFAULT = 208
+
 export default function Layout({ page, setPage, services, threats, username, onLogout, updateInfo, notifications = [], unreadCount = 0, onDismissNotification, onClearNotifications, onMarkAllRead, children }) {
   const failCount = services?.results?.filter(r => !r.ok).length ?? 0
   const allOk     = failCount === 0
@@ -33,6 +37,33 @@ export default function Layout({ page, setPage, services, threats, username, onL
     localStorage.setItem('sidebar-collapsed', String(!c))
     return !c
   })
+
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = parseInt(localStorage.getItem('sidebar-width'))
+    return !isNaN(saved) ? Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, saved)) : SIDEBAR_DEFAULT
+  })
+  const [isDragging, setIsDragging] = useState(false)
+
+  const onDragStart = useCallback((e) => {
+    e.preventDefault()
+    setIsDragging(true)
+    const startX = e.clientX
+    const startW = sidebarWidth
+    const onMouseMove = (ev) => {
+      const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + ev.clientX - startX))
+      setSidebarWidth(next)
+    }
+    const onMouseUp = (ev) => {
+      const final = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + ev.clientX - startX))
+      localStorage.setItem('sidebar-width', String(final))
+      setSidebarWidth(final)
+      setIsDragging(false)
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [sidebarWidth])
 
   const [notifOpen, setNotifOpen] = useState(false)
   const openNotif = () => { setNotifOpen(true); onMarkAllRead?.() }
@@ -54,7 +85,10 @@ export default function Layout({ page, setPage, services, threats, username, onL
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
-      <aside className={`${collapsed ? 'w-14' : 'w-52'} bg-[#080812] border-r border-[#1a1a30] flex flex-col flex-shrink-0 transition-all duration-200`}>
+      <aside
+        className={`relative bg-[#080812] border-r border-[#1a1a30] flex flex-col flex-shrink-0${isDragging ? '' : ' transition-[width] duration-200'}`}
+        style={{ width: collapsed ? 56 : sidebarWidth }}
+      >
 
         {/* Logo + collapse toggle */}
         <div className={`border-b border-[#1a1a30] flex items-center ${collapsed ? 'flex-col gap-2 py-3 px-2' : 'px-4 py-4 gap-2'}`}>
@@ -170,6 +204,13 @@ export default function Layout({ page, setPage, services, threats, username, onL
             <Tooltip text={allOk ? 'All services are responding normally' : `${failCount} service${failCount > 1 ? 's' : ''} failing — check the Dashboard`} />
           </div>
         </div>
+        {/* Drag-to-resize handle */}
+        {!collapsed && (
+          <div
+            onMouseDown={onDragStart}
+            className="absolute right-0 top-0 h-full w-1 cursor-col-resize z-10 hover:bg-indigo-500/40 active:bg-indigo-500/60 transition-colors"
+          />
+        )}
       </aside>
 
       {/* Main */}

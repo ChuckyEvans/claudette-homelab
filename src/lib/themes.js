@@ -65,7 +65,7 @@ export const THEMES = [
   },
 ]
 
-export const DEFAULT_THEME = 'starfield'
+export const DEFAULT_THEME = 'dark'
 
 export const VALID_THEME_IDS = THEMES.map(t => t.id)
 

@@ -78,7 +78,8 @@ export function getDb() {
         ports        TEXT NOT NULL DEFAULT '[]',
         host_scripts TEXT NOT NULL DEFAULT '[]',
         traceroute   TEXT NOT NULL DEFAULT '[]',
-        favorited    INTEGER NOT NULL DEFAULT 0
+        favorited    INTEGER NOT NULL DEFAULT 0,
+        flagged      INTEGER NOT NULL DEFAULT 0
       );
       CREATE UNIQUE INDEX idx_devices_ip     ON devices (ip);
       CREATE        INDEX idx_devices_status ON devices (status);
@@ -141,6 +142,10 @@ export function getDb() {
     if (!cols.includes('favorited')) {
       _db.exec('ALTER TABLE devices ADD COLUMN favorited INTEGER NOT NULL DEFAULT 0')
       console.log('[db] Added favorited column to devices.')
+    }
+    if (!cols.includes('flagged')) {
+      _db.exec('ALTER TABLE devices ADD COLUMN flagged INTEGER NOT NULL DEFAULT 0')
+      console.log('[db] Added flagged column to devices.')
     }
   }
 
@@ -350,6 +355,7 @@ export function getAllDevices() {
     status: r.status, firstSeen: r.first_seen, lastSeen: r.last_seen,
     updatedAt: r.updated_at ?? null,
     favorited: r.favorited === 1,
+    flagged:   r.flagged   === 1,
     latency: r.latency, os: r.os,
     ports: JSON.parse(r.ports || '[]'),
     hostScripts: JSON.parse(r.host_scripts || '[]'),
@@ -397,4 +403,12 @@ export function toggleFavorite(mac) {
     [mac]
   )
   return getDb().get('SELECT favorited FROM devices WHERE mac = ?', [mac])?.favorited === 1
+}
+
+export function toggleFlagged(mac) {
+  getDb().run(
+    'UPDATE devices SET flagged = CASE WHEN flagged = 1 THEN 0 ELSE 1 END WHERE mac = ?',
+    [mac]
+  )
+  return getDb().get('SELECT flagged FROM devices WHERE mac = ?', [mac])?.flagged === 1
 }

@@ -367,6 +367,15 @@ export default function App() {
   }
   const Page = pages[page] || Dashboard
 
+  const [pageLoading, setPageLoading] = useState(false)
+  const navigateTo = useCallback((newPage) => {
+    if (newPage === page) return
+    setPageLoading(true)
+    setPage(newPage)
+    // One frame is enough for the new component to mount and take over
+    requestAnimationFrame(() => setTimeout(() => setPageLoading(false), 120))
+  }, [page])
+
   return (
     <>
       {/* ── Auth gate — nothing renders until authenticated ── */}
@@ -407,7 +416,7 @@ export default function App() {
       )}
       <Layout
         page={page}
-        setPage={setPage}
+        setPage={navigateTo}
         services={services}
         threats={threats}
         username={auth.username}
@@ -419,6 +428,11 @@ export default function App() {
         onClearNotifications={clearAllNotifications}
         onMarkAllRead={markAllRead}
       >
+        {pageLoading && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#080812]/60 backdrop-blur-[2px] pointer-events-none">
+            <span className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
         <Page
           services={services}
           threats={threats}
@@ -436,7 +450,7 @@ export default function App() {
           deepScan={deepScan}
           lastScanDurationMs={lastScanDurationMs}
           lastDeepScanDurationMs={lastDeepScanDurationMs}
-          setPage={setPage}
+          setPage={navigateTo}
           preSelectedIp={page === 'network' ? selectedDeviceIp : null}
           updateInfo={updateInfo}
           onCheckUpdates={checkForUpdates}

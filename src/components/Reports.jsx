@@ -1176,7 +1176,7 @@ export default function Reports() {
                               <td className="px-3 py-1.5 text-right text-violet-400">{r.ping_ms ?? '—'} ms</td>
                               <td className="px-3 py-1.5 text-slate-400 max-w-[140px] truncate">{r.client_isp ?? '—'}</td>
                               <td className="px-3 py-1.5 text-slate-500 font-mono">{r.client_ip ?? '—'}</td>
-                              <td className="px-3 py-1.5 text-slate-500 truncate max-w-[160px]">{r.server_name ?? r.server_host ?? '—'}</td>
+                              <td className="px-3 py-1.5 text-slate-500 truncate max-w-[160px]">{String(r.server_name ?? r.server_host ?? '—').replace(' [object Object]', '')}</td>
                             </tr>
                             )
                           })}

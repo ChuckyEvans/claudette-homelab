@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, ChevronDown, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader, Star, MoreHorizontal } from 'lucide-react'
+import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, ChevronDown, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader, Star, MoreHorizontal, Bug } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { deviceThreatLevel } from '../lib/threatMatch.js'
 
@@ -112,9 +112,11 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
   // When a specific subnet is selected, filter to just that subnet (flat list)
   const displayDevices = activeSubnet === 'favorites'
     ? visible.filter(d => d.favorited)
-    : activeSubnet
-      ? visible.filter(d => ipInSubnet(d.ip, activeSubnet))
-      : visible
+    : activeSubnet === 'flagged'
+      ? visible.filter(d => d.flagged)
+      : activeSubnet
+        ? visible.filter(d => ipInSubnet(d.ip, activeSubnet))
+        : visible
 
   const groups = useGroups && !activeSubnet ? (() => {
     const assigned = new Set()
@@ -215,6 +217,24 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
                 {d.favorited ? 'Unfav' : 'Fav'}
               </button>
             )}
+            {d.mac && (
+              <button
+                onClick={() => {
+                  api.network.toggleFlagged(d.mac)
+                    .then(({ flagged }) => onDeviceUpdated?.({ ...d, flagged }))
+                    .catch(console.error)
+                  setMenuIp(null)
+                }}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                  d.flagged
+                    ? 'border-red-500/40 text-red-400 bg-red-500/10 hover:bg-red-500/20'
+                    : 'border-red-500/20 text-red-400 hover:bg-red-500/10'
+                }`}
+              >
+                <Bug className="w-3 h-3" />
+                {d.flagged ? 'Unflag' : 'Flag pest'}
+              </button>
+            )}
             <button
               onClick={() => {
                 const key = d.mac || d.ip
@@ -271,7 +291,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
       </div>
 
       {/* Subnet / Favorites filter dropdown */}
-      {(useGroups || visible.some(d => d.favorited)) && (
+      {(useGroups || visible.some(d => d.favorited) || visible.some(d => d.flagged)) && (
         <div className="px-3 pb-2.5 border-b border-[#1a1a30]">
           <select
             value={activeSubnet ?? ''}
@@ -280,6 +300,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
           >
             <option value="">All ({visible.length})</option>
             <option value="favorites">★ Favorites ({visible.filter(d => d.favorited).length})</option>
+            {visible.some(d => d.flagged) && <option value="flagged">🐞 Pests ({visible.filter(d => d.flagged).length})</option>}
             {subnets.map(s => {
               const count = visible.filter(d => ipInSubnet(d.ip, s)).length
               return <option key={s} value={s}>{s}  ({count} devices)</option>
@@ -433,6 +454,9 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
           {device.favorited && (
             <Star className="absolute -top-1.5 -right-1.5 w-4 h-4 text-amber-400 drop-shadow" fill="currentColor" />
           )}
+          {device.flagged && !device.favorited && (
+            <Bug className="absolute -top-1.5 -right-1.5 w-4 h-4 text-red-400 drop-shadow" />
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -473,6 +497,24 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
           }`}
         >
           <Star className="w-4 h-4" fill={device.favorited ? 'currentColor' : 'none'} />
+        </button>
+        <button
+          onClick={async () => {
+            if (!device.mac) return
+            try {
+              const { flagged } = await api.network.toggleFlagged(device.mac)
+              onDeviceUpdated?.({ ...device, flagged })
+            } catch (err) { console.error('Failed to toggle pest flag', err) }
+          }}
+          disabled={!device.mac}
+          title={device.flagged ? 'Remove pest flag' : 'Flag as pest'}
+          className={`p-2 border rounded-lg transition-colors flex-shrink-0 ${
+            device.flagged
+              ? 'bg-red-500/15 border-red-500/40 text-red-400 hover:bg-red-500/25'
+              : 'bg-[#0f0f1e] border-[#1a1a30] hover:border-red-500/30 text-slate-500 hover:text-red-400'
+          }`}
+        >
+          <Bug className="w-4 h-4" />
         </button>
         <button
           onClick={() => {
