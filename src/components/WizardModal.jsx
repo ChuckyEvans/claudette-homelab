@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Zap, ChevronRight, Network, Server, Check, X, Info, FileEdit, Lock, Eye, EyeOff, Plus, Clock, Palette } from 'lucide-react'
+import { Zap, ChevronRight, Network, Server, Check, X, Info, FileEdit, Lock, Eye, EyeOff, Plus, Clock, Palette, Wifi } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { THEMES, applyTheme } from '../lib/themes.js'
 const claudetteLogo = '/favicon.svg'
