@@ -83,6 +83,13 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
   const [filter, setFilter] = useState('')
   const [collapsed, setCollapsed] = useState({})
   const [activeSubnet, setActiveSubnet] = useState(null)
+  const [, setTick] = useState(0)
+
+  useEffect(() => {
+    const handler = () => setTick(t => t + 1)
+    window.addEventListener('claudette:my-device-changed', handler)
+    return () => window.removeEventListener('claudette:my-device-changed', handler)
+  }, [])
 
   const visible = devices.filter(d => {
     if (!filter) return true
@@ -112,7 +119,10 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
     const isSelected = selected?.ip === d.ip
     const isOffline   = d.status === 'offline'
     const isFiltered  = d.status === 'filtered'
-    const isMe = Array.isArray(myIp) ? myIp.includes(d.ip) : myIp === d.ip
+    const myDevice = localStorage.getItem('claudette:my-device')
+    const isMe = myDevice
+      ? (d.mac && d.mac === myDevice) || d.ip === myDevice
+      : Array.isArray(myIp) ? myIp.includes(d.ip) : myIp === d.ip
     const openPorts = d.ports?.filter(p => p.state === 'open') ?? []
     return (
       <button
@@ -274,7 +284,14 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
   const [labelEdit, setLabelEdit]   = useState(false)
   const [labelValue, setLabelValue] = useState(device.label ?? '')
   const [portSearch, setPortSearch] = useState('')
+  const [, setTick] = useState(0)
   const labelRef = useRef(null)
+
+  useEffect(() => {
+    const handler = () => setTick(t => t + 1)
+    window.addEventListener('claudette:my-device-changed', handler)
+    return () => window.removeEventListener('claudette:my-device-changed', handler)
+  }, [])
   const Icon = guessIcon(device)
   const d = scanData ?? device
   const openPorts = (d.ports ?? []).filter(p => p.state === 'open')
@@ -359,6 +376,25 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
           <p className="text-2xl font-bold text-indigo-400">{openPorts.length}</p>
           <p className="text-xs text-slate-400">open ports</p>
         </div>
+        <button
+          onClick={() => {
+            const key = device.mac || device.ip
+            const current = localStorage.getItem('claudette:my-device')
+            if (current === key) localStorage.removeItem('claudette:my-device')
+            else localStorage.setItem('claudette:my-device', key)
+            // force re-render by toggling a dummy state if needed — use window event
+            window.dispatchEvent(new Event('claudette:my-device-changed'))
+          }}
+          title={localStorage.getItem('claudette:my-device') === (device.mac || device.ip) ? 'Unmark as my device' : 'Mark as my device'}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded-lg text-xs transition-colors flex-shrink-0 ${
+            localStorage.getItem('claudette:my-device') === (device.mac || device.ip)
+              ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/25'
+              : 'bg-[#0f0f1e] border-[#1a1a30] hover:border-cyan-500/30 text-slate-500 hover:text-cyan-400'
+          }`}
+        >
+          <Monitor className="w-3.5 h-3.5" />
+          {localStorage.getItem('claudette:my-device') === (device.mac || device.ip) ? 'My device' : 'My device?'}
+        </button>
         <button
           onClick={() => hasCachedPorts && setConfirm({
             message: `Are you sure you want to clear all discovered ports for ${device.hostname || device.ip}?`,
@@ -882,11 +918,20 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
   const [myIp, setMyIp] = useState(null)
 
   // Use WebRTC ICE candidates to discover the browser's actual LAN IP(s).
+  // Check for manual override first
+  useEffect(() => {
+    const override = localStorage.getItem('claudette:my-ip')
+    if (override) setMyIp([override])
+  }, [])
+
   // This works correctly even when cross-subnet NAT is involved (e.g. TP-Link
   // Deco mesh where the server would otherwise see the Deco's IP, not the
   // client's real 192.168.68.x address).
   useEffect(() => {
+    if (localStorage.getItem('claudette:my-ip')) return  // manual override takes precedence
+    if (localStorage.getItem('claudette:my-device')) return  // manual device mark takes precedence
     let cancelled = false
+    let timeoutId
     try {
       const pc = new RTCPeerConnection({ iceServers: [] })
       pc.createDataChannel('')
@@ -903,19 +948,29 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
             !ip.endsWith('.1') &&
             !ip.endsWith('.254')) ips.add(ip)
       }
-      pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => {})
-      setTimeout(() => {
-        pc.close()
+      const finish = () => {
+        clearTimeout(timeoutId)
+        try { pc.close() } catch { /* ignore */ }
         if (!cancelled && ips.size > 0) setMyIp([...ips])
-      }, 2000)
+      }
+      // Prefer waiting for ICE gathering to complete rather than a fixed cutoff —
+      // on some machines/browsers gathering 192.168.68.x takes longer than 2 s.
+      pc.onicegatheringstatechange = () => {
+        if (pc.iceGatheringState === 'complete') finish()
+      }
+      pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => {})
+      // Hard cap: 4 s in case onicegatheringstatechange never fires
+      timeoutId = setTimeout(finish, 4000)
     } catch { /* WebRTC unavailable */ }
-    return () => { cancelled = true }
+    return () => { cancelled = true; clearTimeout(timeoutId) }
   }, [])
 
   // Identify the user's own device IP from the server's view of the HTTP connection.
   // Only used as a fallback when WebRTC yielded no results — on cross-subnet setups
   // (e.g. TP-Link Deco mesh) the server sees the gateway IP, not the real device IP.
   useEffect(() => {
+    if (localStorage.getItem('claudette:my-ip')) return  // manual override takes precedence
+    if (localStorage.getItem('claudette:my-device')) return  // manual device mark takes precedence
     api.network.myIp().then(r => {
       if (r.ip) setMyIp(prev => {
         // If WebRTC already found at least one IP, trust that over the server's view

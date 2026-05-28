@@ -2,9 +2,10 @@ import { Router } from 'express'
 import { spawn, execSync } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
 import { createSocket } from 'dgram'
+import { promises as dnsPromises } from 'dns'
 import { loadConfig } from '../config.js'
 import { ipToInt, intToIp, isPrivateIP, isPrivateCIDR, ipInCIDR, getCIDRHosts } from '../utils/ip.js'
-import { audit, auditDevice, upsertDevice, markOffline, touchDeviceStatus, getAllDevices, clearAllDevices, clearDevicePorts, setDeviceLabel } from '../db.js'
+import { audit, auditDevice, upsertDevice, markOffline, touchDeviceStatus, getAllDevices, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel } from '../db.js'
 
 const router = Router()
 
@@ -254,10 +255,15 @@ function getSubnets() {
   // subnets array takes priority; fall back to old single-string subnet for backward compat
   const raw = cfg?.network?.subnets ?? (cfg?.network?.subnet ? [cfg.network.subnet] : null)
   if (raw?.length) return raw.filter(s => isPrivateCIDR(s))
-  // Auto-derive from pi host
+  // Auto-derive from server host — exclude Docker bridge range (172.16-31.x.x)
   const host = cfg?.pi?.host ?? '192.168.1.10'
   const parts = host.split('.')
-  if (parts.length === 4) return [`${parts[0]}.${parts[1]}.${parts[2]}.0/24`]
+  if (parts.length === 4) {
+    const second = parseInt(parts[1])
+    // Don't derive a subnet from a Docker/virtual address
+    if (parseInt(parts[0]) === 172 && second >= 16 && second <= 31) return ['192.168.1.0/24']
+    return [`${parts[0]}.${parts[1]}.${parts[2]}.0/24`]
+  }
   return ['192.168.1.0/24']
 }
 
@@ -379,6 +385,43 @@ function parseNmapOutput(output) {
   return devices.filter(d => d.ip && d.ip !== '0.0.0.0')
 }
 
+// ── DHCP leases file ─────────────────────────────────────────────────────────
+// On Pi deployments the leases file is mounted at /data/dhcp.leases.
+// Format (dnsmasq / Pi-hole): <timestamp> <mac> <ip> <hostname> <client-id>
+function readDhcpLeases() {
+  const LEASES_PATH = '/data/dhcp.leases'
+  if (!existsSync(LEASES_PATH)) return {}
+  const map = {}
+  try {
+    for (const line of readFileSync(LEASES_PATH, 'utf8').trim().split('\n')) {
+      const p = line.trim().split(/\s+/)
+      if (p.length >= 4 && p[3] && p[3] !== '*') map[p[2]] = p[3]
+    }
+  } catch { /* ignore */ }
+  return map
+}
+
+// ── DNS PTR reverse lookup ────────────────────────────────────────────────────
+// Uses the system DNS resolver (cross-platform: Windows & Linux).
+// On most home networks the router's DHCP server publishes PTR records,
+// so this resolves names that mDNS/NetBIOS may miss (e.g. Android, smart TVs).
+async function dnsReverseLookup(ips) {
+  const results = {}
+  await Promise.all(ips.map(async ip => {
+    try {
+      const names = await Promise.race([
+        dnsPromises.reverse(ip),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
+      ])
+      if (names.length) {
+        // Strip trailing .local / .home / .lan suffixes for display
+        results[ip] = names[0].replace(/\.(local|home|lan|internal)\.?$/i, '')
+      }
+    } catch { /* NXDOMAIN, timeout, or network error — skip */ }
+  }))
+  return results
+}
+
 // ── NetBIOS name resolution ───────────────────────────────────────────────────
 // Queries UDP port 137 via nmap's nbstat script — works cross-subnet (unicast).
 // Returns { [ip]: netbiosName } for devices that respond.
@@ -461,9 +504,14 @@ export async function performScan(broadcast) {
       const output = isCidr
         ? await runNmap([...NMAP_SWEEP_ARGS, '--stats-every', '2s', batch[0]])
         : await runNmap([...NMAP_SWEEP_ARGS, ...batch])
-      const found = parseNmapOutput(output).map(d => ({ ...d, status: d.status === 'up' ? 'online' : 'offline' }))
+      // Only keep devices that actually responded — offline IPs from the same subnet range
+      // must never be inserted as new DB rows. Previously-seen devices that go missing
+      // will be marked offline by markOffline() below.
+      const found = parseNmapOutput(output)
+        .filter(d => d.status === 'up')
+        .map(d => ({ ...d, status: 'online' }))
       completedBatches++
-      onlineCount += found.filter(d => d.status === 'online').length
+      onlineCount += found.length
       const percent = Math.round((completedBatches / allBatches.length) * 100)
       if (broadcast) broadcast('scan_progress', { percent, devicesFound: onlineCount })
       return found
@@ -488,6 +536,20 @@ export async function performScan(broadcast) {
     // mDNS passive map — populated by the background sniffer
     for (const d of _scanResults) {
       if (!d.hostname && _mdnsMap[d.ip]) d.hostname = _mdnsMap[d.ip]
+    }
+
+    // DHCP leases file — most reliable on Pi (dnsmasq / Pi-hole)
+    const leases = readDhcpLeases()
+    for (const d of _scanResults) {
+      if (!d.hostname && leases[d.ip]) d.hostname = leases[d.ip]
+    }
+
+    // DNS PTR reverse lookup — cross-platform (Windows + Linux), uses system resolver
+    // 2s per-IP timeout prevents stalling when router has no PTR records
+    const noNameDns = _scanResults.filter(d => !d.hostname && d.status === 'online')
+    if (noNameDns.length) {
+      const dnsNames = await dnsReverseLookup(noNameDns.map(d => d.ip))
+      for (const d of noNameDns) { if (dnsNames[d.ip]) d.hostname = dnsNames[d.ip] }
     }
 
     // NetBIOS — unicast UDP 137, works cross-subnet (Windows/Samba)
@@ -537,6 +599,11 @@ export async function performScan(broadcast) {
     for (const d of wentOffline) {
       auditDevice('device.offline', d.mac, d.ip, d.hostname, {})
     }
+
+    // Prune phantom devices — IPs that were bulk-inserted as offline by old
+    // scan behaviour and have never actually responded to any probe.
+    // Keeps devices that hide from ping but have discovered ports (real devices).
+    clearPhantomDevices()
 
     // Merge firstSeen/lastSeen AND all enriched fields (ports, os, vendor, label)
     // from DB back into results so the scan_complete payload is complete.

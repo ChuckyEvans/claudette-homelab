@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Shield, ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, Wand2, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink } from 'lucide-react'
+import { Shield, ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink } from 'lucide-react'
 import claudetteLogo from '/favicon.svg'
 
 const NAV = [
@@ -24,7 +24,7 @@ function Tooltip({ text, side = 'right' }) {
   )
 }
 
-export default function Layout({ page, setPage, services, threats, onShowWizard, username, onLogout, updateInfo, notifications = [], unreadCount = 0, onDismissNotification, onClearNotifications, onMarkAllRead, children }) {
+export default function Layout({ page, setPage, services, threats, username, onLogout, updateInfo, notifications = [], unreadCount = 0, onDismissNotification, onClearNotifications, onMarkAllRead, children }) {
   const failCount = services?.results?.filter(r => !r.ok).length ?? 0
   const allOk     = failCount === 0
 
@@ -119,20 +119,6 @@ export default function Layout({ page, setPage, services, threats, onShowWizard,
             )
           })}
         </nav>
-
-        {/* Setup Wizard */}
-        <div className={`${collapsed ? 'px-1.5' : 'px-3'} pb-2`}>
-          <div className="relative group">
-            <button
-              onClick={onShowWizard}
-              className={`w-full flex items-center gap-3 ${collapsed ? 'justify-center px-2' : 'px-3'} py-2 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-600/10 transition-all text-sm`}
-            >
-              <Wand2 className="w-4 h-4 flex-shrink-0" />
-              {!collapsed && <span>Setup Wizard</span>}
-            </button>
-            <Tooltip text="Re-run the initial setup wizard" />
-          </div>
-        </div>
 
         {/* User + logout */}
         {username && (

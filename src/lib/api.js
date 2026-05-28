@@ -67,7 +67,7 @@ export const api = {
   system: {
     stats:      () => request('/system/stats'),
     interfaces: () => request('/system/interfaces'),
-    version:    () => request('/system/version'),
+    version:    (force) => request(`/system/version${force ? '?force=1' : ''}`),  
     backup: async () => {
       const res = await fetch('/api/system/backup', { method: 'POST', credentials: 'include' })
       if (res.status === 401) { notifySessionExpired(); throw new Error('Not authenticated') }
@@ -96,6 +96,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     }),
+    reset: () => request('/config', { method: 'DELETE' }),
   },
   audit: {
     get: (params = {}) => {

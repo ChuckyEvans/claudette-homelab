@@ -69,7 +69,7 @@ function Ensure-Builder {
     $builders = docker buildx ls 2>&1
     if ($builders -notmatch $BuilderName) {
         Write-Host "      Creating multi-platform buildx builder..." -ForegroundColor DarkGray
-        docker buildx create --name $BuilderName --driver docker-container --bootstrap | Out-Null
+        docker buildx create --name $BuilderName --driver docker-container --config (Join-Path $ProjectRoot 'buildkitd.toml') --bootstrap | Out-Null
     }
     docker buildx use $BuilderName | Out-Null
 }
@@ -79,17 +79,13 @@ function Ensure-Builder {
 Write-Host "`nDeploying Claudette to ${PiUser}@${PiHost}" -ForegroundColor Cyan
 Write-Host "─────────────────────────────────────────────" -ForegroundColor DarkGray
 
-# ── Quick path: build frontend + sync files into running container ────────────
+# ── Quick path: sync server files only into running container ────────────────
+# Skips the frontend build and Docker image rebuild entirely.
+# Use this when you've only changed server/ files.
 if ($Quick) {
-    Write-Host "`n[1/3] Building frontend..." -ForegroundColor Cyan
-    npm run build
-    if ($LASTEXITCODE -ne 0) { Write-Error "Frontend build failed."; exit 1 }
-    Write-Host "      Built." -ForegroundColor Green
-
-    Write-Host "`n[2/3] Uploading app files to Pi..." -ForegroundColor Cyan
+    Write-Host "`n[1/2] Uploading server files to Pi..." -ForegroundColor Cyan
     $QuickTar = Join-Path $env:TEMP 'claudette-quick.tar'
-    # tar dist/ and server/ — typically 2-3 MB vs 70 MB for full image
-    tar -cf $QuickTar -C $ProjectRoot dist server
+    tar -cf $QuickTar -C $ProjectRoot server
     if ($LASTEXITCODE -ne 0) { Write-Error "tar failed."; exit 1 }
     $sizeMB = [math]::Round((Get-Item $QuickTar).Length / 1MB, 1)
     Write-Host "      Tarball: ${sizeMB} MB" -ForegroundColor DarkGray
@@ -98,7 +94,7 @@ if ($Quick) {
     Remove-Item $QuickTar -Force
     Write-Host "      Uploaded." -ForegroundColor Green
 
-    Write-Host "`n[3/3] Installing files + restarting container..." -ForegroundColor Cyan
+    Write-Host "`n[2/2] Installing files + restarting container..." -ForegroundColor Cyan
     Invoke-Ssh "sudo docker cp /tmp/claudette-quick.tar ${ContainerName}:/tmp/claudette-quick.tar && sudo docker exec ${ContainerName} sh -c 'cd /app && tar xf /tmp/claudette-quick.tar && rm /tmp/claudette-quick.tar' && rm /tmp/claudette-quick.tar && sudo docker restart ${ContainerName}"
     Write-Host "      Done." -ForegroundColor Green
 

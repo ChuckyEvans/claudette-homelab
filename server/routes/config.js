@@ -117,4 +117,17 @@ router.post('/', (req, res) => {
   }
 })
 
+// DELETE /api/config — wipe config file so the setup wizard runs again on next load
+router.delete('/', (req, res) => {
+  try {
+    const p = getConfigPath()
+    if (fs.existsSync(p)) fs.unlinkSync(p)
+    resetConfig()
+    audit('config.deleted', {}, 'user', req.ip)
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 export default router

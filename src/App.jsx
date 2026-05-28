@@ -132,17 +132,20 @@ export default function App() {
 
   // ── Update check ──────────────────────────────────────────────────────────
   const [updateInfo, setUpdateInfo] = useState(null)  // { current, latest, updateAvailable, releaseUrl }
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
   const hasToastedUpdate = useRef(false)
 
-  const checkForUpdates = useCallback(async () => {
+  const checkForUpdates = useCallback(async (force = false) => {
+    setCheckingUpdate(true)
     try {
-      const data = await api.system.version()
+      const data = await api.system.version(force)
       setUpdateInfo(data)
       if (data.updateAvailable && !hasToastedUpdate.current) {
         hasToastedUpdate.current = true
         addToast(`Update available: v${data.latest}`, 'update', { page: 'about' })
       }
     } catch { /* silently fail — server may not be ready */ }
+    finally { setCheckingUpdate(false) }
   }, [addToast])
 
   // Check on login and every 4 hours while the tab is open
@@ -407,7 +410,6 @@ export default function App() {
         setPage={setPage}
         services={services}
         threats={threats}
-        onShowWizard={() => setShowWizard(true)}
         username={auth.username}
         onLogout={handleLogout}
         updateInfo={updateInfo}
@@ -438,6 +440,7 @@ export default function App() {
           preSelectedIp={page === 'network' ? selectedDeviceIp : null}
           updateInfo={updateInfo}
           onCheckUpdates={checkForUpdates}
+          checkingUpdate={checkingUpdate}
         />
       </Layout>
       {dbErrors.length > 0 && (

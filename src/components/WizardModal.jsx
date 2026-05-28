@@ -95,6 +95,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
   const [testResult, setTestResult] = useState(null)
   const [skipTest, setSkipTest] = useState(false)
   const [detecting, setDetecting] = useState(false)
+  const [showSsh, setShowSsh] = useState(false)
   const [newSvc, setNewSvc]     = useState(null) // null | { name, type, url, expect_status }
 
   // Auto-detect host IP + subnet when entering step 1 for a fresh config
@@ -349,12 +350,12 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
                   <Server className="w-4 h-4 text-indigo-400" />
                   <h2 className="text-base font-bold text-white">Network &amp; Server</h2>
                 </div>
-                <p className="text-xs text-slate-500">Your Pi/server details and the subnets to scan.</p>
+                <p className="text-xs text-slate-500">The IP of the machine running Claudette and the subnets to scan.</p>
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
-                    <label className="block text-xs font-medium text-slate-300">Host IP</label>
+                    <label className="block text-xs font-medium text-slate-300">Server IP</label>
                     {form.piHost === '192.168.1.10' && (
                       <span className="text-[10px] text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5 leading-none">example value</span>
                     )}
@@ -366,7 +367,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
                       : <><Network className="w-2.5 h-2.5" /> Auto-detect</>}
                   </button>
                 </div>
-                <p className="text-[11px] text-slate-500">IP address of your Pi or main server</p>
+                <p className="text-[11px] text-slate-500">IP address of this machine (Pi, Windows PC, etc.)</p>
                 <input
                   value={form.piHost}
                   onChange={e => {
@@ -383,8 +384,22 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
                   className={`w-full rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none transition-colors ${form.piHost === '192.168.1.10' ? 'bg-amber-500/5 border border-amber-500/40 focus:border-amber-400/60' : 'bg-[#0a0a18] border border-[#1a1a35] focus:border-indigo-500/60'}`}
                 />
               </div>
-              <Field label="SSH User" value={form.piUser} onChange={setFE('piUser')} placeholder="ubuntu" />
-              <Field label="SSH Key Path" hint="Optional — uses ssh-agent if blank" value={form.sshKey} onChange={setFE('sshKey')} placeholder="~/.ssh/id_rsa" />
+
+              {/* SSH — optional, collapsed by default */}
+              <div>
+                <button type="button" onClick={() => setShowSsh(v => !v)}
+                  className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-300 transition-colors">
+                  <ChevronRight className={`w-3 h-3 transition-transform ${showSsh ? 'rotate-90' : ''}`} />
+                  SSH details (optional — Pi / Linux only)
+                </button>
+                {showSsh && (
+                  <div className="mt-3 space-y-3 pl-4 border-l border-[#1a1a30]">
+                    <p className="text-[11px] text-slate-600">Stored for reference only — not used by the app.</p>
+                    <Field label="SSH User" value={form.piUser} onChange={setFE('piUser')} placeholder="ubuntu" />
+                    <Field label="SSH Key Path" hint="Optional — uses ssh-agent if blank" value={form.sshKey} onChange={setFE('sshKey')} placeholder="~/.ssh/id_rsa" />
+                  </div>
+                )}
+              </div>
 
               {/* Test connection */}
               <div className="space-y-2">

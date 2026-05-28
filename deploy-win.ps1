@@ -14,5 +14,5 @@ param(
     [switch]$SkipBuild
 )
 
-& "$PSScriptRoot\scripts\windows\restart.ps1" @args
+& "$PSScriptRoot\scripts\windows\restart.ps1" @PSBoundParameters
 exit $LASTEXITCODE

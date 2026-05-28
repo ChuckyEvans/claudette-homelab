@@ -1,0 +1,5 @@
+# buildkitd daemon config for the claudette-builder buildx instance.
+# Forces the builder container to use public DNS so it can reach Docker Hub
+# even when Docker Desktop's internal resolver (192.168.65.7) is unhealthy.
+[dns]
+  nameservers = ["8.8.8.8", "8.8.4.4"]

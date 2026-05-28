@@ -1,6 +1,5 @@
 # ── Stage 1: build the Vite frontend ────────────────────────────────────────
-# Run on the BUILD host's native arch (x86-64) so npm/vite don't run under QEMU
-FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 

@@ -414,6 +414,21 @@ export default function Settings({ onOpenWizard }) {
                 <Wand2 className="w-3.5 h-3.5" />Re-run Wizard
               </button>
             )}
+            {onOpenWizard && (
+              <button
+                onClick={async () => {
+                  if (!window.confirm('Delete config.yaml and restart the setup wizard?\n\nThis will NOT delete your scan data or audit log.')) return
+                  try {
+                    await api.config.reset()
+                    window.location.reload()
+                  } catch (e) {
+                    alert('Failed to reset config: ' + e.message)
+                  }
+                }}
+                className="flex items-center gap-2 px-3 py-2 text-red-500/70 hover:text-red-400 border border-red-500/20 hover:border-red-500/40 rounded-lg text-xs transition-colors">
+                <Trash2 className="w-3.5 h-3.5" />Reset Config
+              </button>
+            )}
             <button onClick={save} disabled={saving}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 saved ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/25'

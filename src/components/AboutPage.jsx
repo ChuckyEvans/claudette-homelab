@@ -17,8 +17,7 @@ const STACK = [
   { label: 'Port',      value: '7654 (API)  ·  5173 (dev UI)' },
 ]
 
-export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates }) {
-  const checking = updateInfo === undefined  // undefined = still loading
+export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates, checkingUpdate = false }) {
   const versionInfo = updateInfo ?? null
 
   return (
@@ -51,16 +50,16 @@ export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates }) 
         </button>
 
         <button
-          disabled={checking}
-          onClick={onCheckUpdates}
+          disabled={checkingUpdate}
+          onClick={() => onCheckUpdates(true)}
           className="flex items-center gap-2 bg-[#0f0f1e] hover:bg-[#1a1a30] border border-[#1a1a30] hover:border-indigo-500/40 text-slate-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
         >
-          <RefreshCw className={`w-4 h-4 ${checking ? 'animate-spin' : ''}`} />
-          Check for Updates
+          <RefreshCw className={`w-4 h-4 ${checkingUpdate ? 'animate-spin' : ''}`} />
+          {checkingUpdate ? 'Checking…' : 'Check for Updates'}
         </button>
 
         {/* Update status badge */}
-        {!checking && versionInfo && (
+        {!checkingUpdate && versionInfo && (
           versionInfo.updateAvailable ? (
             <a
               href={versionInfo.releaseUrl}

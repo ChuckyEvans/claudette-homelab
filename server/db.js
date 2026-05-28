@@ -71,6 +71,7 @@ export function getDb() {
         status         TEXT NOT NULL DEFAULT 'offline',
         first_seen   INTEGER NOT NULL,
         last_seen    INTEGER,
+        last_online  INTEGER,
         updated_at   INTEGER,
         latency      INTEGER,
         os           TEXT,
@@ -129,6 +130,12 @@ export function getDb() {
     if (!cols.includes('hostname_stale')) {
       _db.exec('ALTER TABLE devices ADD COLUMN hostname_stale INTEGER NOT NULL DEFAULT 0')
       console.log('[db] Added hostname_stale column to devices.')
+    }
+    if (!cols.includes('last_online')) {
+      _db.exec('ALTER TABLE devices ADD COLUMN last_online INTEGER')
+      // Seed last_online from last_seen for devices that are currently online/filtered
+      _db.exec("UPDATE devices SET last_online = last_seen WHERE status IN ('online','filtered')")
+      console.log('[db] Added last_online column to devices.')
     }
   }
 
@@ -226,9 +233,12 @@ export function upsertDevice(device) {
   // If another device previously held this IP (DHCP reassignment), evict it first
   db.run("DELETE FROM devices WHERE ip = ? AND mac != ?", [device.ip, pk])
 
+  const isActive = device.status === 'online' || device.status === 'filtered'
+  const effectiveStatus = device.status === 'online' ? 'online' : device.status === 'filtered' ? 'filtered' : 'offline'
+
   db.run(`
-    INSERT INTO devices (mac, ip, vendor, hostname, hostname_stale, status, first_seen, last_seen, updated_at, latency, os, ports, host_scripts, traceroute)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO devices (mac, ip, vendor, hostname, hostname_stale, status, first_seen, last_seen, last_online, updated_at, latency, os, ports, host_scripts, traceroute)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(mac) DO UPDATE SET
       ip             = excluded.ip,
       vendor         = COALESCE(excluded.vendor,   devices.vendor),
@@ -240,6 +250,7 @@ export function upsertDevice(device) {
                        END,
       status         = excluded.status,
       last_seen      = excluded.last_seen,
+      last_online    = CASE WHEN excluded.last_online IS NOT NULL THEN excluded.last_online ELSE devices.last_online END,
       updated_at     = excluded.updated_at,
       latency        = excluded.latency,
       os             = COALESCE(excluded.os,       devices.os),
@@ -248,8 +259,8 @@ export function upsertDevice(device) {
       traceroute   = CASE WHEN json_array_length(excluded.traceroute)   > 0 THEN excluded.traceroute   ELSE devices.traceroute   END
   `, [
     pk, device.ip, device.vendor ?? null, device.hostname ?? null, 0,
-    device.status === 'online' ? 'online' : device.status === 'filtered' ? 'filtered' : 'offline',
-    now, now, now,
+    effectiveStatus,
+    now, now, isActive ? now : null, now,
     device.latency ?? null, device.os ?? null,
     JSON.stringify(device.ports ?? []),
     JSON.stringify(device.hostScripts ?? []),
@@ -259,6 +270,34 @@ export function upsertDevice(device) {
 
 export function clearAllDevices() {
   getDb().run('DELETE FROM devices')
+}
+
+/**
+ * Remove phantom entries — IPs that were bulk-inserted by the old scan
+ * behaviour but never actually responded to any probe.
+ *
+ * A device is a phantom if ALL of the following are true:
+ *   1. mac starts with 'noMAC:' — nmap never got an ARP reply, meaning
+ *      the host never responded at all (a real device always yields a MAC
+ *      on the local subnet via ARP, or via a port scan on remote subnets).
+ *   2. last_online IS NULL — never seen as online or filtered.
+ *   3. ports = '[]' — no port data discovered.
+ *
+ * Once a device has a real MAC address it is kept forever — MACs are our
+ * source of truth and survive IP changes (DHCP reassignment).
+ */
+export function clearPhantomDevices() {
+  const db = getDb()
+  const phantoms = db.all(
+    "SELECT mac, ip FROM devices WHERE mac LIKE 'noMAC:%' AND last_online IS NULL AND ports = '[]'"
+  )
+  if (phantoms.length) {
+    db.run(
+      "DELETE FROM devices WHERE mac LIKE 'noMAC:%' AND last_online IS NULL AND ports = '[]'"
+    )
+    console.log(`[db] Pruned ${phantoms.length} phantom offline device(s)`)
+  }
+  return phantoms
 }
 
 export function clearDevicePorts(mac) {

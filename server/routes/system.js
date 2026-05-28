@@ -94,8 +94,18 @@ router.get('/stats', async (req, res) => {
 router.get('/interfaces', async (req, res) => {
   try {
     const ifaces = await si.networkInterfaces()
+    const VIRTUAL_IFACE = /^(docker|veth|br-|virbr|vmnet|vbox|lo|vEthernet|Loopback|isatap|Teredo)/i
     const results = ifaces
-      .filter(i => i.ip4 && !i.internal && i.ip4 !== '127.0.0.1')
+      .filter(i => {
+        if (!i.ip4 || i.internal || i.ip4 === '127.0.0.1') return false
+        if (VIRTUAL_IFACE.test(i.iface)) return false
+        // Exclude Docker-range IPs (172.16-31.x.x) and link-local (169.254.x.x)
+        const first = parseInt(i.ip4.split('.')[0])
+        const second = parseInt(i.ip4.split('.')[1])
+        if (first === 169 && second === 254) return false
+        if (first === 172 && second >= 16 && second <= 31) return false
+        return true
+      })
       .map(i => {
         const prefix = i.ip4_subnet
           ? Math.round(Math.log2(
@@ -245,7 +255,8 @@ router.post('/restore', express.raw({ type: '*/*', limit: '50mb' }), (req, res) 
 // ── Version / update check ───────────────────────────────────────────────────
 router.get('/version', async (req, res) => {
   const now = Date.now()
-  if (_versionCache && now - _versionCacheAt < VERSION_CACHE_MS) {
+  const force = req.query.force === '1'
+  if (!force && _versionCache && now - _versionCacheAt < VERSION_CACHE_MS) {
     return res.json(_versionCache)
   }
   try {

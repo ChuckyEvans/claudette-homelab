@@ -36,8 +36,24 @@ if ($existing) {
 # ── 2. Build image ────────────────────────────────────────────────────────────
 if (-not $SkipBuild) {
     Write-Host "`n[2/3] Building image '$ImageName'..." -ForegroundColor Cyan
-    docker build -t $ImageName .
-    if ($LASTEXITCODE -ne 0) { Write-Error "Docker build failed (exit $LASTEXITCODE)."; exit 1 }
+    # Docker Desktop's DNS proxy (192.168.65.7) is intermittently flaky.
+    # Retry up to 3 times — the proxy usually recovers within seconds.
+    # Classic builder (DOCKER_BUILDKIT=0) uses locally-cached images without
+    # contacting auth.docker.io for metadata — bypasses the broken DNS proxy.
+    $env:DOCKER_BUILDKIT = '0'
+    $built = $false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        docker build -t $ImageName .
+        if ($LASTEXITCODE -eq 0) { $built = $true; break }
+        if ($attempt -lt 3) {
+            Write-Host "      Build failed (DNS timeout?), retrying in 5s... ($attempt/3)" -ForegroundColor Yellow
+            Start-Sleep 5
+        }
+    }
+    if (-not $built) {
+        Write-Error "Docker build failed after 3 attempts. If DNS keeps timing out, restart Docker Desktop and try again."
+        exit 1
+    }
     Write-Host "      Build successful." -ForegroundColor Green
 } else {
     Write-Host "`n[2/3] Skipping build (-SkipBuild flag set)." -ForegroundColor DarkGray

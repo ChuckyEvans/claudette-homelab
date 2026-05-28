@@ -274,8 +274,8 @@ router.get('/outages', (req, res) => {
       outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, uptimeBeforeMs, ongoing: true })
     }
 
-    // Filter to outages that overlap the requested window
-    const windowed = outages.filter(o => (!o.end || o.end >= from) && o.start <= to)
+    // Filter to outages that overlap the requested window — newest first
+    const windowed = outages.filter(o => (!o.end || o.end >= from) && o.start <= to).reverse()
     const totalDowntimeMs = windowed.reduce((s, o) => s + o.durationMs, 0)
     const longestMs = windowed.length ? Math.max(...windowed.map(o => o.durationMs)) : 0
 
