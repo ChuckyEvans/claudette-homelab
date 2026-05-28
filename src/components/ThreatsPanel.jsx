@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Shield, ShieldAlert, Monitor, Server, Router, Smartphone, ChevronDown, ChevronRight, Search, Globe, Hash, Cpu, Tag, Activity, Layers, Clock, Calendar } from 'lucide-react'
+import { Shield, ShieldAlert, Monitor, Server, Router, Smartphone, ChevronDown, ChevronRight, Search, Globe, Hash, Cpu, Tag, Activity, Layers, Clock, Calendar, RefreshCw } from 'lucide-react'
 
 const PORT_RISK = {
   23:    { risk: 'critical', label: 'Telnet',      note: 'Unencrypted remote shell' },
@@ -192,7 +192,7 @@ function DeviceRow({ device }) {
 
 const RISK_FILTERS = ['all', 'critical', 'high', 'medium', 'low', 'none']
 
-export default function ThreatsPanel({ networkScan }) {
+export default function ThreatsPanel({ networkScan, onRefreshThreats }) {
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const devices = networkScan?.devices ?? []
@@ -240,12 +240,21 @@ export default function ThreatsPanel({ networkScan }) {
             {totalExposed > 0 && <span className="ml-1.5 text-orange-400 font-medium">{totalExposed} with high/critical ports</span>}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-1.5 items-center">
           {['critical','high','medium','low'].map(r => counts[r] > 0 && (
             <span key={r} className={`text-[11px] font-medium px-2.5 py-1 rounded-full border ${RISK_COLOUR[r].badge}`}>
               {counts[r]} {r}
             </span>
           ))}
+          {onRefreshThreats && (
+            <button
+              onClick={onRefreshThreats}
+              title="Refresh threat data"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 border border-[#1a1a30] hover:border-[#2a2a45] rounded-lg transition-colors"
+            >
+              <RefreshCw className="w-3 h-3" />Refresh
+            </button>
+          )}
         </div>
       </div>
 

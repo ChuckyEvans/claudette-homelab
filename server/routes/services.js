@@ -131,8 +131,38 @@ export function getHistory() {
 
 // ── Internet connectivity check ───────────────────────────────────────────────
 
-let _prevInternetOk = null
-let _internetResults = []
+let _prevInternetOk    = null
+let _internetResults   = []
+
+// Outage-mode: switch to faster polling while internet is down, restore on recovery
+let _outageMode         = false
+let _outagePollId       = null
+let _outageAttemptCount = 0
+let _outageCheckSecs    = 10   // overridden by setOutageCheckSeconds() on startup/config-save
+let _outageBroadcast    = null
+
+export function setOutageCheckSeconds(n) {
+  _outageCheckSecs = Math.max(5, Math.min(300, Number.isFinite(n) ? n : 10))
+}
+
+function _startOutagePoll() {
+  if (_outagePollId) return
+  _outageAttemptCount = 0
+  console.log(`[internet] Outage mode — polling every ${_outageCheckSecs}s until restored`)
+  _outagePollId = setInterval(() => {
+    checkConnectivity(_outageBroadcast).catch(() => {})
+  }, _outageCheckSecs * 1000)
+}
+
+function _stopOutagePoll() {
+  if (_outagePollId) {
+    clearInterval(_outagePollId)
+    _outagePollId = null
+    console.log(`[internet] Restored — outage poll stopped after ${_outageAttemptCount} fast attempts`)
+  }
+  _outageMode         = false
+  _outageAttemptCount = 0
+}
 
 function pingHost(host) {
   return new Promise(resolve => {
@@ -156,6 +186,9 @@ async function checkHttpHead(url) {
 }
 
 export async function checkConnectivity(broadcast) {
+  // Keep a broadcast ref so the outage poll can broadcast without an argument
+  if (broadcast) _outageBroadcast = broadcast
+
   const cfg = loadConfig()
   const pingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
 
@@ -164,13 +197,36 @@ export async function checkConnectivity(broadcast) {
   _internetResults  = [...pingResults, httpResult]
 
   const ok = _internetResults.some(r => r.ok)
+
+  // Track attempt count while in outage mode
+  if (_outageMode) _outageAttemptCount++
+
+  const justWentDown = ok === false && !_outageMode
+  const justCameUp   = ok === true  && _outageMode
+
   if (_prevInternetOk !== null && _prevInternetOk !== ok) {
     audit(ok ? 'internet.up' : 'internet.down', {
       results: _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))
     })
   }
-  audit('internet.check', { ok, results: _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })) })
+
+  audit('internet.check', {
+    ok,
+    results:          _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
+    outage_mode:      _outageMode,
+    interval_seconds: _outageMode ? _outageCheckSecs : null,
+    attempt_count:    _outageMode ? _outageAttemptCount : null,
+  })
+
   _prevInternetOk = ok
+
+  // Start / stop fast outage polling
+  if (justWentDown) {
+    _outageMode = true
+    _startOutagePoll()
+  } else if (justCameUp) {
+    _stopOutagePoll()
+  }
 
   if (broadcast) broadcast('internet', { results: _internetResults, ok, ts: Date.now() })
   if (broadcast) broadcast('job_done', { job: 'internet', ts: Date.now() })

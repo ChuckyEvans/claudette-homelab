@@ -1,19 +1,20 @@
 # scripts/windows/deploy-pi.ps1
-# Cross-compile an ARM64 image on Windows and deploy it to the Raspberry Pi via SSH.
+# Deploy Claudette to the Raspberry Pi from Windows.
+# Uploads the project source to the Pi and builds the Docker image natively — no cross-compilation needed.
 #
-# Requirements: Docker Desktop (with buildx), OpenSSH client, scp
+# Requirements: OpenSSH client + scp (built into Windows 10+), Docker installed on the Pi.
 #
 # Usage (from repo root):
-#   .\deploy-pi.ps1                          # full build + deploy (reads config.yaml)
-#   .\deploy-pi.ps1 -Quick                   # fast path: build frontend, rsync app files, restart (~8s)
-#   .\deploy-pi.ps1 -SkipBuild               # re-use last claudette-arm64.tar
+#   .\deploy-pi.ps1                          # full deploy: upload source, build on Pi, restart container
+#   .\deploy-pi.ps1 -Quick                   # fast path: sync server/ files only, restart container (~5s)
+#   .\deploy-pi.ps1 -SkipBuild               # skip Docker build, restart using existing image on Pi
 #   .\deploy-pi.ps1 -PiHost 192.168.1.50     # override Pi host
 #
 param(
     [string]$PiHost    = '',   # override Pi IP / hostname
     [string]$PiUser    = '',   # override SSH user
     [string]$SshKey    = '',   # override SSH key path
-    [switch]$SkipBuild,        # skip image rebuild, re-use existing tarball
+    [switch]$SkipBuild,        # skip image rebuild, re-use existing image already on the Pi
     [switch]$Quick,            # fast path: skip Docker, just sync app files into running container
     [string]$KodiHost  = '',   # optional: deploy Kodi addon to this LibreELEC/Kodi host
     [string]$KodiUser  = 'root' # SSH user for Kodi host (LibreELEC default: root)
@@ -46,9 +47,6 @@ if (-not $SshKey) {
 
 $ContainerName = 'claudette'
 $ImageName     = 'claudette:latest'
-$BuilderName   = 'claudette-builder'
-$TarFile       = Join-Path $ProjectRoot 'claudette-arm64.tar'
-$RemoteTar     = '/tmp/claudette-arm64.tar'
 
 $SshArgs = @('-o', 'StrictHostKeyChecking=no', '-o', 'BatchMode=yes')
 if ($SshKey) { $SshArgs += @('-i', $SshKey) }
@@ -63,15 +61,6 @@ function Invoke-Ssh([string]$cmd) {
 function Invoke-SshSilent([string]$cmd) {
     # Returns output without throwing on non-zero exit (for optional probes)
     ssh @SshArgs "${PiUser}@${PiHost}" $cmd 2>$null
-}
-
-function Ensure-Builder {
-    $builders = docker buildx ls 2>&1
-    if ($builders -notmatch $BuilderName) {
-        Write-Host "      Creating multi-platform buildx builder..." -ForegroundColor DarkGray
-        docker buildx create --name $BuilderName --driver docker-container --config (Join-Path $ProjectRoot 'buildkitd.toml') --bootstrap | Out-Null
-    }
-    docker buildx use $BuilderName | Out-Null
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -103,40 +92,29 @@ if ($Quick) {
     exit 0
 }
 
-# ── 1. Build ARM64 image ──────────────────────────────────────────────────────
-Write-Host "`n[1/4] Building ARM64 image (linux/arm64)..." -ForegroundColor Cyan
-
-if ($SkipBuild) {
-    if (-not (Test-Path $TarFile)) {
-        Write-Error "No tarball found at '$TarFile'. Run without -SkipBuild first."
-        exit 1
-    }
-    Write-Host "      Skipping build, using existing tarball." -ForegroundColor DarkGray
+# ── 1. Upload source + build on Pi ───────────────────────────────────────────
+if (-not $SkipBuild) {
+    Write-Host "`n[1/2] Uploading source + building on Pi (native ARM64)..." -ForegroundColor Cyan
+    $SrcTar  = Join-Path $env:TEMP 'claudette-src.tar'
+    $include = @('server','src','package.json','package-lock.json','Dockerfile',
+                 'vite.config.js','postcss.config.js','tailwind.config.js','index.html','.dockerignore')
+    $existing = $include | Where-Object { Test-Path (Join-Path $ProjectRoot $_) }
+    tar -cf $SrcTar -C $ProjectRoot @existing
+    if ($LASTEXITCODE -ne 0) { Write-Error "tar failed."; exit 1 }
+    $sizeMB = [math]::Round((Get-Item $SrcTar).Length / 1MB, 1)
+    Write-Host "      Tarball: ${sizeMB} MB" -ForegroundColor DarkGray
+    scp @SshArgs $SrcTar "${PiUser}@${PiHost}:/tmp/claudette-src.tar"
+    if ($LASTEXITCODE -ne 0) { Write-Error "scp failed."; exit 1 }
+    Remove-Item $SrcTar -Force
+    Write-Host "      Uploaded. Building on Pi (this takes a few minutes)..." -ForegroundColor DarkGray
+    Invoke-Ssh "rm -rf /tmp/claudette-build && mkdir -p /tmp/claudette-build && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm /tmp/claudette-src.tar && cd /tmp/claudette-build && sudo env DOCKER_BUILDKIT=0 docker build -t claudette:latest . && cd / && rm -rf /tmp/claudette-build"
+    Write-Host "      Built." -ForegroundColor Green
 } else {
-    Ensure-Builder
-    docker buildx build `
-        --platform linux/arm64 `
-        --tag      $ImageName  `
-        --output   "type=docker,dest=${TarFile}" `
-        .
-    if ($LASTEXITCODE -ne 0) { Write-Error "Build failed."; exit 1 }
-    $sizeMB = [math]::Round((Get-Item $TarFile).Length / 1MB, 1)
-    Write-Host "      Built. Tarball: ${sizeMB} MB" -ForegroundColor Green
+    Write-Host "`n[1/2] Skipping build — reusing existing image on Pi." -ForegroundColor DarkGray
 }
 
-# ── 2. Copy image to Pi ───────────────────────────────────────────────────────
-Write-Host "`n[2/4] Copying image to Pi..." -ForegroundColor Cyan
-scp @SshArgs $TarFile "${PiUser}@${PiHost}:${RemoteTar}"
-if ($LASTEXITCODE -ne 0) { Write-Error "scp failed."; exit 1 }
-Write-Host "      Copied." -ForegroundColor Green
-
-# ── 3. Load image on Pi ───────────────────────────────────────────────────────
-Write-Host "`n[3/4] Loading image on Pi..." -ForegroundColor Cyan
-Invoke-Ssh "sudo docker load -i ${RemoteTar} && rm -f ${RemoteTar}"
-Write-Host "      Loaded." -ForegroundColor Green
-
-# ── 4. Restart container on Pi ────────────────────────────────────────────────
-Write-Host "`n[4/4] Restarting container on Pi..." -ForegroundColor Cyan
+# ── 2. Restart container on Pi ────────────────────────────────────────────────
+Write-Host "`n[2/2] Restarting container on Pi..." -ForegroundColor Cyan
 
 Invoke-Ssh "sudo docker stop ${ContainerName} 2>/dev/null || true"
 Invoke-Ssh "sudo docker rm   ${ContainerName} 2>/dev/null || true"
@@ -179,7 +157,7 @@ Write-Host "Logs: ssh ${PiUser}@${PiHost} 'docker logs -f ${ContainerName}'`n" -
 
 # ── 5. Deploy Kodi addon (optional) ──────────────────────────────────────────────
 if ($KodiHost) {
-    Write-Host "`n[5/5] Deploying Kodi addon to ${KodiUser}@${KodiHost}..." -ForegroundColor Cyan
+    Write-Host "`n[3/3] Deploying Kodi addon to ${KodiUser}@${KodiHost}..." -ForegroundColor Cyan
     $KodiSshArgs = @('-o', 'StrictHostKeyChecking=no', '-o', 'BatchMode=yes')
     if ($SshKey) { $KodiSshArgs += @('-i', $SshKey) }
     $AddonSrc  = Join-Path $ProjectRoot 'output\kodi\plugin.program.claudette'

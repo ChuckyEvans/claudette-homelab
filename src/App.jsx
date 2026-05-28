@@ -441,6 +441,7 @@ export default function App() {
           updateInfo={updateInfo}
           onCheckUpdates={checkForUpdates}
           checkingUpdate={checkingUpdate}
+          configStatus={configStatus}
         />
       </Layout>
       {dbErrors.length > 0 && (

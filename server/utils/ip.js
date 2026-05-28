@@ -41,7 +41,7 @@ export function ipInCIDR(ip, cidr) {
 
 /** Enumerates all host IPs in a CIDR. Returns null for subnets larger than /16. */
 export function getCIDRHosts(cidr) {
-  const m = cidr.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/)
+  const m = cidr.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,3})$/)
   if (!m) return null
   const prefix = parseInt(m[2])
   if (prefix < 16 || prefix > 32) return null

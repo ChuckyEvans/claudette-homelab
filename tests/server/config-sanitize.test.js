@@ -18,12 +18,13 @@ const VALID_RETENTION_DAYS = [30, 60, 90, 180, 365]
 function buildSchedule(body) {
   const intOrDef = (v, def) => { const n = parseInt(v); return Number.isFinite(n) ? n : def }
   return {
-    check_interval_minutes:   Math.max(1, intOrDef(body.schedule?.check_interval_minutes, 5)),
-    internet_check_minutes:   Math.max(1, intOrDef(body.schedule?.internet_check_minutes, 5)),
-    threat_interval_hours:    Math.max(1, intOrDef(body.schedule?.threat_interval_hours,  6)),
-    ping_interval_minutes:    Math.max(1, intOrDef(body.schedule?.ping_interval_minutes,  5)),
-    deep_scan_hour:           Math.min(23, Math.max(0, intOrDef(body.schedule?.deep_scan_hour, 4))),
-    speedtest_interval_hours: Math.max(1, intOrDef(body.schedule?.speedtest_interval_hours, 1)),
+    check_interval_minutes:       Math.max(1, intOrDef(body.schedule?.check_interval_minutes, 5)),
+    internet_check_minutes:       Math.max(1, intOrDef(body.schedule?.internet_check_minutes, 5)),
+    threat_interval_hours:        Math.max(1, intOrDef(body.schedule?.threat_interval_hours,  6)),
+    ping_interval_minutes:        Math.max(1, intOrDef(body.schedule?.ping_interval_minutes,  5)),
+    deep_scan_hour:               Math.min(23, Math.max(0, intOrDef(body.schedule?.deep_scan_hour, 4))),
+    speedtest_interval_hours:     Math.max(1, intOrDef(body.schedule?.speedtest_interval_hours, 1)),
+    internet_outage_check_seconds: Math.max(5, Math.min(300, intOrDef(body.schedule?.internet_outage_check_seconds, 10))),
   }
 }
 
@@ -133,6 +134,27 @@ describe('buildSchedule()', () => {
   it('falls back to default when value is NaN', () => {
     expect(buildSchedule({ schedule: { check_interval_minutes: 'abc' } }).check_interval_minutes).toBe(5)
     expect(buildSchedule({ schedule: { speedtest_interval_hours: null } }).speedtest_interval_hours).toBe(1)
+  })
+
+  it('internet_outage_check_seconds defaults to 10', () => {
+    expect(buildSchedule({}).internet_outage_check_seconds).toBe(10)
+  })
+
+  it('internet_outage_check_seconds clamps to minimum 5', () => {
+    expect(buildSchedule({ schedule: { internet_outage_check_seconds: 1   } }).internet_outage_check_seconds).toBe(5)
+    expect(buildSchedule({ schedule: { internet_outage_check_seconds: -10 } }).internet_outage_check_seconds).toBe(5)
+  })
+
+  it('internet_outage_check_seconds clamps to maximum 300', () => {
+    expect(buildSchedule({ schedule: { internet_outage_check_seconds: 999 } }).internet_outage_check_seconds).toBe(300)
+  })
+
+  it('internet_outage_check_seconds falls back to 10 on NaN', () => {
+    expect(buildSchedule({ schedule: { internet_outage_check_seconds: 'bad' } }).internet_outage_check_seconds).toBe(10)
+  })
+
+  it('internet_outage_check_seconds accepts valid in-range value', () => {
+    expect(buildSchedule({ schedule: { internet_outage_check_seconds: 30 } }).internet_outage_check_seconds).toBe(30)
   })
 })
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader, Star } from 'lucide-react'
+import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, ChevronDown, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader, Star, MoreHorizontal } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { deviceThreatLevel } from '../lib/threatMatch.js'
 
@@ -83,11 +83,17 @@ function sortDevices(arr) {
 }
 
 // ── Device Tree (left sidebar) ────────────────────────────────────────────────
-function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = {}, subnets = [], threatMap = {}, myIp = null }) {
+function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = {}, subnets = [], threatMap = {}, myIp = null, forcedFilter = null, onDeviceUpdated }) {
   const [filter, setFilter] = useState('')
   const [collapsed, setCollapsed] = useState({})
   const [activeSubnet, setActiveSubnet] = useState(null)
+  const [menuIp, setMenuIp] = useState(null)
   const [, setTick] = useState(0)
+
+  // Sync forced filter from parent (rescan scope dropdown)
+  useEffect(() => {
+    if (forcedFilter !== undefined) setActiveSubnet(forcedFilter)
+  }, [forcedFilter])
 
   useEffect(() => {
     const handler = () => setTick(t => t + 1)
@@ -132,49 +138,110 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
       ? (d.mac && d.mac === myDevice) || d.ip === myDevice
       : Array.isArray(myIp) ? myIp.includes(d.ip) : myIp === d.ip
     const openPorts = d.ports?.filter(p => p.state === 'open') ?? []
+    const tooltip = [
+      `IP: ${d.ip}`,
+      d.mac ? `MAC: ${d.mac}` : null,
+      d.vendor ? `Vendor: ${d.vendor}` : null,
+      d.type ? `Type: ${d.type}` : null,
+      openPorts.length > 0 ? `Open ports: ${openPorts.length}` : null,
+      d.lastSeen ? `Last seen: ${relTime(d.lastSeen)}` : null,
+    ].filter(Boolean).join(' · ')
     return (
-      <button
-        key={d.ip}
-        onClick={() => onSelect(d)}
-        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${
-          isSelected ? 'bg-indigo-600/15 border-r-2 border-indigo-500' : isMe ? 'bg-cyan-500/5 hover:bg-cyan-500/10' : 'hover:bg-white/[0.03]'
-        }`}
-      >
-        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${d.status === 'online' ? 'bg-emerald-400' : d.status === 'filtered' ? 'bg-orange-400' : 'bg-slate-600'}`} />
-        <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-indigo-400' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} />
-        <div className="flex-1 min-w-0">
-          <p className={`text-xs font-medium font-mono truncate flex items-center gap-1 ${isSelected ? 'text-slate-100' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-300'}`}>
-            {d.favorited && <Star className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" />}
-            {d.label ? <span className="font-sans text-indigo-300">{d.label}</span> : d.ip}
-            {portScanProgress[d.ip] != null && <Loader className="w-2.5 h-2.5 flex-shrink-0 text-indigo-400 animate-spin" />}
-          </p>
-          {(d.label ? d.ip : d.hostname) && (
-            <p
-              className={`text-[10px] font-mono truncate ${
-                (isOffline || isFiltered) ? 'text-slate-500' :
-                d.hostnameStale && !d.label ? 'text-slate-500 italic' : 'text-slate-400'
+      <div key={d.ip} className="relative group">
+        <button
+          onClick={() => onSelect(d)}
+          title={tooltip}
+          className={`w-full flex items-center gap-2.5 px-3 py-2.5 pr-8 text-left transition-colors ${
+            isSelected ? 'bg-indigo-600/15 border-r-2 border-indigo-500' : isMe ? 'bg-cyan-500/5 hover:bg-cyan-500/10' : 'hover:bg-white/[0.03]'
+          }`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${d.status === 'online' ? 'bg-emerald-400' : d.status === 'filtered' ? 'bg-orange-400' : 'bg-slate-600'}`} />
+          <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-indigo-400' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} />
+          <div className="flex-1 min-w-0">
+            <p className={`text-xs font-medium font-mono truncate flex items-center gap-1 ${isSelected ? 'text-slate-100' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-300'}`}>
+              {d.favorited && <Star className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" />}
+              {d.label ? <span className="font-sans text-indigo-300">{d.label}</span> : d.ip}
+              {portScanProgress[d.ip] != null && <Loader className="w-2.5 h-2.5 flex-shrink-0 text-indigo-400 animate-spin" />}
+            </p>
+            {(d.label ? d.ip : d.hostname) && (
+              <p
+                className={`text-[10px] font-mono truncate ${
+                  (isOffline || isFiltered) ? 'text-slate-500' :
+                  d.hostnameStale && !d.label ? 'text-slate-500 italic' : 'text-slate-400'
+                }`}
+                title={d.hostnameStale && !d.label ? 'Hostname from previous scan — not confirmed in latest scan' : undefined}
+              >{d.label ? d.ip : d.hostname}</p>
+            )}
+          </div>
+          <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+            {isMe && <span className="text-[9px] font-medium text-cyan-400 leading-none">you</span>}
+            {isFiltered
+              ? <span className="text-[10px] text-orange-500/70" title="Ping blocked but ports still respond">filtered</span>
+              : isOffline
+                ? <span className="text-[10px] text-slate-500">offline</span>
+                : d.latency != null && <span className="text-[10px] font-mono text-slate-400">{d.latency}ms</span>
+            }
+            {openPorts.length > 0 && (
+              <span className={`text-[10px] ${(isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`}>{openPorts.length}p</span>
+            )}
+          </div>
+          {threatMap[d.ip] === 'critical' && <AlertTriangle className="w-3 h-3 text-red-400 flex-shrink-0" title="Critical threat detected" />}
+          {threatMap[d.ip] === 'high'     && <AlertTriangle className="w-3 h-3 text-orange-400 flex-shrink-0" title="High severity threat detected" />}
+          {threatMap[d.ip] === 'medium'   && <AlertCircle   className="w-3 h-3 text-amber-400 flex-shrink-0" title="Medium severity threat detected" />}
+          {isSelected && <ChevronRight className="w-3 h-3 text-indigo-500 flex-shrink-0" />}
+        </button>
+        {/* Ellipsis quick-action toggle */}
+        <button
+          onClick={e => { e.stopPropagation(); setMenuIp(v => v === d.ip ? null : d.ip) }}
+          title="Quick actions"
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded text-slate-600 hover:text-slate-300 hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all"
+        >
+          <MoreHorizontal className="w-3.5 h-3.5" />
+        </button>
+        {/* Inline quick actions */}
+        {menuIp === d.ip && (
+          <div className="flex flex-wrap items-center gap-1 px-2.5 pb-2 pt-0.5 bg-[#0b0b1e] border-b border-[#1a1a30]">
+            {d.mac && (
+              <button
+                onClick={() => {
+                  api.network.toggleFavorite(d.mac)
+                    .then(({ favorited }) => onDeviceUpdated?.({ ...d, favorited }))
+                    .catch(console.error)
+                  setMenuIp(null)
+                }}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border border-amber-500/20 text-amber-400 hover:bg-amber-500/10 transition-colors"
+              >
+                <Star className="w-3 h-3" fill={d.favorited ? 'currentColor' : 'none'} />
+                {d.favorited ? 'Unfav' : 'Fav'}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                const key = d.mac || d.ip
+                const cur = localStorage.getItem('claudette:my-device')
+                if (cur === key) localStorage.removeItem('claudette:my-device')
+                else localStorage.setItem('claudette:my-device', key)
+                window.dispatchEvent(new Event('claudette:my-device-changed'))
+                setMenuIp(null)
+              }}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                localStorage.getItem('claudette:my-device') === (d.mac || d.ip)
+                  ? 'border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10'
+                  : 'border-slate-600/20 text-slate-400 hover:bg-white/5'
               }`}
-              title={d.hostnameStale && !d.label ? 'Hostname from previous scan — not confirmed in latest scan' : undefined}
-            >{d.label ? d.ip : d.hostname}</p>
-          )}
-        </div>
-        <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-          {isMe && <span className="text-[9px] font-medium text-cyan-400 leading-none">you</span>}
-          {isFiltered
-            ? <span className="text-[10px] text-orange-500/70" title="Ping blocked but ports still respond">filtered</span>
-            : isOffline
-              ? <span className="text-[10px] text-slate-500">offline</span>
-              : d.latency != null && <span className="text-[10px] font-mono text-slate-400">{d.latency}ms</span>
-          }
-          {openPorts.length > 0 && (
-            <span className={`text-[10px] ${(isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`}>{openPorts.length}p</span>
-          )}
-        </div>
-        {threatMap[d.ip] === 'critical' && <AlertTriangle className="w-3 h-3 text-red-400 flex-shrink-0" title="Critical threat detected" />}
-        {threatMap[d.ip] === 'high'     && <AlertTriangle className="w-3 h-3 text-orange-400 flex-shrink-0" title="High severity threat detected" />}
-        {threatMap[d.ip] === 'medium'   && <AlertCircle   className="w-3 h-3 text-amber-400 flex-shrink-0" title="Medium severity threat detected" />}
-        {isSelected && <ChevronRight className="w-3 h-3 text-indigo-500 flex-shrink-0" />}
-      </button>
+            >
+              <Monitor className="w-3 h-3" />
+              {localStorage.getItem('claudette:my-device') === (d.mac || d.ip) ? 'Unmark me' : 'My device'}
+            </button>
+            <button
+              onClick={() => { onSelect(d); setMenuIp(null) }}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border border-indigo-500/20 text-indigo-400 hover:bg-indigo-500/10 transition-colors"
+            >
+              <Search className="w-3 h-3" />Scan ports
+            </button>
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -947,6 +1014,17 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
   const [confirm, setConfirm] = useState(null) // { message, onConfirm }
   const [configSubnets, setConfigSubnets] = useState([])
   const [myIp, setMyIp] = useState(null)
+  const [scanDropdownOpen, setScanDropdownOpen] = useState(false)
+  const [scanScopeHint, setScanScopeHint] = useState(null)
+  const scanDropdownRef = useRef(null)
+
+  // Close scan scope dropdown on outside click
+  useEffect(() => {
+    if (!scanDropdownOpen) return
+    const handler = (e) => { if (scanDropdownRef.current && !scanDropdownRef.current.contains(e.target)) setScanDropdownOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [scanDropdownOpen])
 
   // Use WebRTC ICE candidates to discover the browser's actual LAN IP(s).
   // Check for manual override first
@@ -1100,17 +1178,52 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
               {error.includes('nmap') ? 'nmap not found' : 'Scan failed'}
             </div>
           )}
-          <button
-            onClick={() => setConfirm({
-              message: `This will ping-sweep your network and update device statuses.${fmtDur(lastScanDurationMs) ? ` Last run took ${fmtDur(lastScanDurationMs)}.` : ' First run.'} Continue?`,
-              onConfirm: () => { setConfirm(null); onScan() },
-            })}
-            disabled={scanning}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
-          >
-            <Wifi className={`w-4 h-4 ${scanning ? 'animate-pulse' : ''}`} />
-            {scanning ? 'Scanning…' : devices.length > 0 ? 'Re-scan' : 'Scan Network'}
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0" ref={scanDropdownRef}>
+            {/* Split Re-scan button */}
+            <div className="flex relative">
+              <button
+                onClick={() => {
+                  setScanDropdownOpen(false)
+                  setConfirm({
+                    message: `This will ping-sweep your network and update device statuses.${fmtDur(lastScanDurationMs) ? ` Last run took ${fmtDur(lastScanDurationMs)}.` : ' First run.'} Continue?`,
+                    onConfirm: () => { setConfirm(null); onScan() },
+                  })
+                }}
+                disabled={scanning}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-l-lg text-sm font-medium transition-colors border-r border-indigo-700"
+              >
+                <Wifi className={`w-4 h-4 ${scanning ? 'animate-pulse' : ''}`} />
+                {scanning ? 'Scanning…' : devices.length > 0 ? 'Re-scan' : 'Scan Network'}
+                {scanScopeHint === 'favorites' && <span className="text-indigo-200 text-xs">★ Favs</span>}
+                {scanScopeHint && scanScopeHint !== 'favorites' && <span className="text-indigo-200 text-xs font-mono">{scanScopeHint.replace(/\.0\/\d+$/, '.x')}</span>}
+              </button>
+              <button
+                onClick={() => setScanDropdownOpen(v => !v)}
+                disabled={scanning}
+                className="flex items-center px-2 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-r-lg text-sm transition-colors"
+                title="Choose scan scope"
+              >
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${scanDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {scanDropdownOpen && (
+                <div className="absolute top-full left-0 mt-1 w-52 bg-[#0d0d1e] border border-[#2a2a45] rounded-xl shadow-2xl z-50 py-1 overflow-hidden">
+                  <p className="px-3 pt-1.5 pb-1 text-[10px] text-slate-500 uppercase tracking-wide">Scope (sets sidebar filter)</p>
+                  {[{value: null, label: 'All subnets'}, {value: 'favorites', label: '★ Favorites only'}, ...subnets.map(s => ({value: s, label: s}))].map(opt => (
+                    <button
+                      key={opt.value ?? '__all__'}
+                      onClick={() => { setScanScopeHint(opt.value); setScanDropdownOpen(false) }}
+                      className={`w-full px-3 py-2 text-left text-xs transition-colors hover:bg-white/5 ${
+                        scanScopeHint === opt.value ? 'text-indigo-400 font-medium' : 'text-slate-300'
+                      }`}
+                    >
+                      {opt.value && opt.value !== 'favorites' ? <span className="font-mono">{opt.label}</span> : opt.label}
+                      {scanScopeHint === opt.value && <span className="ml-2 text-indigo-500">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
           {!scanning && (
             <button
               onClick={() => setConfirm({
@@ -1225,6 +1338,8 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
               subnets={effectiveSubnets}
               threatMap={threatMap}
               myIp={myIp}
+              forcedFilter={scanScopeHint}
+              onDeviceUpdated={onDeviceUpdated}
             />
           )}
         </div>

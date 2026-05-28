@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react'
 import { Zap, ChevronRight, Network, Server, Check, X, Info, FileEdit, Lock, Eye, EyeOff, Plus, Clock, Palette } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { THEMES, applyTheme } from '../lib/themes.js'
-import claudetteLogo from '/favicon.svg'
+const claudetteLogo = '/favicon.svg'
 
 const STEPS = [
   { label: 'Network' },
   { label: 'Services' },
   { label: 'Schedule' },
+  { label: 'ISP / SLA' },
   { label: 'Appearance' },
   { label: 'Done' },
 ]
@@ -68,7 +69,7 @@ function Field({ label, hint, needsConfig = false, ...inputProps }) {
 }
 
 export default function WizardModal({ onComplete, onSkip, configExists = false, configValid = false, configOutdated = false, needsAccount = false, onRegistered }) {
-  // step -1 = create account, 0 = welcome, 1 = network+server, 2 = services, 3 = schedule, 4 = done
+  // step -1 = create account, 0 = welcome, 1 = network+server, 2 = services, 3 = schedule, 4 = ISP/SLA, 5 = appearance, 6 = done
   const [step, setStep] = useState(needsAccount ? -1 : 0)
   const [acct, setAcct] = useState({ username: '', password: '', confirm: '' })
   const [showPw, setShowPw] = useState(false)
@@ -81,6 +82,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
     subnets: ['192.168.1.0/24'],
     checkInterval: 5,
     internetCheckInterval: 5,
+    internetOutageCheckSecs: 10,
     speedtestInterval: 1,
     threatInterval: 6,
     deepScanHour: 4,
@@ -88,6 +90,11 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
     connectivityHosts: ['1.1.1.1'],
     services: [],
     theme:    'starfield',
+    ispName: '',
+    ispConnectionType: 'fibre',
+    ispExpectedUptime: 100,
+    ispPlanDown: 0,
+    ispPlanUp: 0,
   })
   const [saving, setSaving]     = useState(false)
   const [error, setError]       = useState(null)
@@ -132,6 +139,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
           subnets:        cfg.network?.subnets ?? (cfg.network?.subnet ? [cfg.network.subnet] : (cfg.pi?.host ? [subnetFromHost(cfg.pi.host)] : ['192.168.1.0/24'])),
           checkInterval:  cfg.schedule?.check_interval_minutes ?? 5,
           internetCheckInterval: cfg.schedule?.internet_check_minutes ?? 5,
+          internetOutageCheckSecs: cfg.schedule?.internet_outage_check_seconds ?? 10,
           speedtestInterval: cfg.schedule?.speedtest_interval_hours ?? 1,
           threatInterval: cfg.schedule?.threat_interval_hours  ?? 6,
           deepScanHour:   cfg.schedule?.deep_scan_hour         ?? 4,
@@ -139,6 +147,11 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
           connectivityHosts: cfg.network?.connectivity_hosts   ?? ['1.1.1.1'],
           services:       cfg.services ?? [],
           theme:          cfg.ui?.theme  ?? 'dark',
+          ispName:            cfg.isp?.name             ?? '',
+          ispConnectionType:  cfg.isp?.connection_type  ?? 'fibre',
+          ispExpectedUptime:  cfg.isp?.expected_uptime  ?? 100,
+          ispPlanDown:        cfg.isp?.plan_download_mbps ?? 0,
+          ispPlanUp:          cfg.isp?.plan_upload_mbps   ?? 0,
         })
       }).catch(() => {})
     }
@@ -177,12 +190,19 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
       await api.config.save({
         pi:       { host: form.piHost, ssh_user: form.piUser, ssh_key: form.sshKey },
         network:  { subnets: form.subnets.filter(s => s.trim()), connectivity_hosts: form.connectivityHosts.filter(h => h.trim()) },
-        schedule: { check_interval_minutes: parseInt(form.checkInterval) || 5, internet_check_minutes: parseInt(form.internetCheckInterval) || 5, speedtest_interval_hours: parseInt(form.speedtestInterval) || 1, threat_interval_hours: parseInt(form.threatInterval) || 6, deep_scan_hour: parseInt(form.deepScanHour) ?? 4 },
+        schedule: { check_interval_minutes: parseInt(form.checkInterval) || 5, internet_check_minutes: parseInt(form.internetCheckInterval) || 5, internet_outage_check_seconds: Math.max(5, parseInt(form.internetOutageCheckSecs) || 10), speedtest_interval_hours: parseInt(form.speedtestInterval) || 1, threat_interval_hours: parseInt(form.threatInterval) || 6, deep_scan_hour: parseInt(form.deepScanHour) ?? 4 },
         retention: { days: parseInt(form.retentionDays) || 90 },
         services: form.services.filter(s => s.name && s.url),
         ui:       { theme: form.theme },
+        isp: {
+          name:               (form.ispName || '').trim(),
+          connection_type:    form.ispConnectionType || 'fibre',
+          expected_uptime:    parseFloat(form.ispExpectedUptime) || 100,
+          plan_download_mbps: parseFloat(form.ispPlanDown) || 0,
+          plan_upload_mbps:   parseFloat(form.ispPlanUp)   || 0,
+        },
       })
-      setStep(5)
+      setStep(6)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -208,7 +228,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
         </div>
 
         <div className="px-8 py-6 overflow-y-auto flex-1">
-          {step > 0 && step < 5 && <StepDots current={step - 1} total={4} />}
+          {step > 0 && step < 6 && <StepDots current={step - 1} total={5} />}
 
           {/* Step -1 — Create account */}
           {step === -1 && (
@@ -630,6 +650,25 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
               </div>
 
               <div className="space-y-1.5">
+                <label className={`block text-xs font-medium ${configOutdated ? 'text-amber-400' : 'text-slate-300'}`}>
+                  Outage fast-poll interval
+                  {configOutdated && <span className="ml-1.5 text-[10px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full">New</span>}
+                </label>
+                <p className="text-[11px] text-slate-500">How often to ping during an active outage (seconds)</p>
+                <div className="flex items-center gap-3">
+                  <input type="number" min="5" max="300"
+                    value={form.internetOutageCheckSecs}
+                    onChange={e => setForm(p => ({ ...p, internetOutageCheckSecs: Math.max(5, parseInt(e.target.value) || 10) }))}
+                    className={`w-24 rounded-lg px-3 py-2.5 text-sm text-slate-200 text-center focus:outline-none transition-colors ${
+                      configOutdated
+                        ? 'bg-amber-950/30 border border-amber-500/40 focus:border-amber-400'
+                        : 'bg-[#0a0a18] border border-[#1a1a35] focus:border-indigo-500/60'
+                    }`} />
+                  <span className="text-xs text-slate-500">seconds (min 5)</span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
                 <label className="block text-xs font-medium text-slate-300">Speed test interval</label>
                 <p className="text-[11px] text-slate-500">How often to run a full download/upload speed test</p>
                 <div className="flex items-center gap-3">
@@ -713,8 +752,93 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
             </div>
           )}
 
-          {/* Step 4 — Appearance */}
+          {/* Step 4 — ISP / SLA */}
           {step === 4 && (
+            <div className="space-y-5">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Wifi className="w-4 h-4 text-indigo-400" />
+                  <h2 className="text-base font-bold text-white">ISP / Internet SLA</h2>
+                </div>
+                <p className="text-xs text-slate-500">Used for uptime SLA reporting and the ISP report export. All fields are optional.</p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className={`block text-xs font-medium ${configOutdated && !form.ispName ? 'text-amber-400' : 'text-slate-300'}`}>ISP Name
+                    {configOutdated && !form.ispName && <span className="ml-1.5 text-[10px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full">New</span>}
+                  </label>
+                  <input value={form.ispName} onChange={e => setForm(p => ({ ...p, ispName: e.target.value }))}
+                    placeholder="e.g. MetroFibre"
+                    className={`w-full rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none transition-colors ${
+                      configOutdated && !form.ispName
+                        ? 'bg-amber-950/30 border border-amber-500/40 focus:border-amber-400'
+                        : 'bg-[#0a0a18] border border-[#1a1a35] focus:border-indigo-500/60'
+                    }`} />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-slate-300">Connection Type</label>
+                  <select value={form.ispConnectionType} onChange={e => setForm(p => ({ ...p, ispConnectionType: e.target.value }))}
+                    className="w-full bg-[#0a0a18] border border-[#1a1a35] rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/60 transition-colors">
+                    {['fibre','dsl','lte','cable','satellite','broadband'].map(t => (
+                      <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className={`block text-xs font-medium ${configOutdated && form.ispExpectedUptime === 100 ? 'text-amber-400' : 'text-slate-300'}`}>Expected Uptime %
+                    {configOutdated && form.ispExpectedUptime === 100 && <span className="ml-1.5 text-[10px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full">New</span>}
+                  </label>
+                  <p className="text-[11px] text-slate-500">Your ISP's guaranteed uptime (SLA target)</p>
+                  <input type="number" min="90" max="100" step="0.001"
+                    value={form.ispExpectedUptime}
+                    onChange={e => setForm(p => ({ ...p, ispExpectedUptime: e.target.value }))}
+                    className={`w-32 rounded-lg px-3 py-2.5 text-sm text-slate-200 text-center focus:outline-none transition-colors ${
+                      configOutdated && form.ispExpectedUptime === 100
+                        ? 'bg-amber-950/30 border border-amber-500/40 focus:border-amber-400'
+                        : 'bg-[#0a0a18] border border-[#1a1a35] focus:border-indigo-500/60'
+                    }`} />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-slate-300">Plan Download (Mbps)</label>
+                    <input type="number" min="0" max="10000" step="1"
+                      value={form.ispPlanDown || ''}
+                      onChange={e => setForm(p => ({ ...p, ispPlanDown: e.target.value }))}
+                      placeholder="e.g. 250"
+                      className="w-full bg-[#0a0a18] border border-[#1a1a35] rounded-lg px-3 py-2.5 text-sm text-slate-200 text-center placeholder-slate-600 focus:outline-none focus:border-indigo-500/60 transition-colors" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-slate-300">Plan Upload (Mbps)</label>
+                    <input type="number" min="0" max="10000" step="1"
+                      value={form.ispPlanUp || ''}
+                      onChange={e => setForm(p => ({ ...p, ispPlanUp: e.target.value }))}
+                      placeholder="e.g. 50"
+                      className="w-full bg-[#0a0a18] border border-[#1a1a35] rounded-lg px-3 py-2.5 text-sm text-slate-200 text-center placeholder-slate-600 focus:outline-none focus:border-indigo-500/60 transition-colors" />
+                  </div>
+                </div>
+              </div>
+
+              {error && (
+                <p className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{error}</p>
+              )}
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setStep(3)} className="flex-1 border border-[#1a1a35] text-slate-400 hover:text-slate-200 rounded-xl py-2.5 text-sm transition-colors">
+                  Back
+                </button>
+                <button onClick={() => setStep(5)}
+                  className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2.5 text-sm font-semibold transition-colors">
+                  Next <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 5 — Appearance */}
+          {step === 5 && (
             <div className="space-y-5">
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -747,7 +871,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
                 <p className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{error}</p>
               )}
               <div className="flex gap-3 pt-2">
-                <button onClick={() => setStep(3)} className="flex-1 border border-[#1a1a35] text-slate-400 hover:text-slate-200 rounded-xl py-2.5 text-sm transition-colors">
+                <button onClick={() => setStep(4)} className="flex-1 border border-[#1a1a35] text-slate-400 hover:text-slate-200 rounded-xl py-2.5 text-sm transition-colors">
                   Back
                 </button>
                 <button onClick={handleSave} disabled={saving}
@@ -758,8 +882,8 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
             </div>
           )}
 
-          {/* Step 5 — Done */}
-          {step === 5 && (
+          {/* Step 6 — Done */}
+          {step === 6 && (
             <div className="text-center py-4">
               <div className="w-16 h-16 bg-emerald-500/15 rounded-2xl flex items-center justify-center mx-auto mb-5">
                 <Check className="w-8 h-8 text-emerald-400" />

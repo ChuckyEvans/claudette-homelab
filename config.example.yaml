@@ -18,7 +18,8 @@ network:
 
 schedule:
   check_interval_minutes: 5   # Service check frequency: 1, 2, 5, 10, 15, 30, or 60 (= every hour on the dot)
-  internet_check_minutes: 5   # Internet connectivity check frequency (same options)
+  internet_check_minutes: 5             # Internet connectivity check frequency (same options)
+  internet_outage_check_seconds: 10     # Fast-poll interval (seconds) during an outage — min 5, max 300
   ping_interval_minutes: 5    # Ping sweep frequency (same options)
   speedtest_interval_hours: 1  # Speed test frequency: 1, 2, 3, 4, 6, 12, or 24 (= once a day)
   threat_interval_hours: 6    # CVE / threat intelligence refresh frequency (same options)

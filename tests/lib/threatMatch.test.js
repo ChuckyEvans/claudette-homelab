@@ -197,3 +197,67 @@ describe('deviceThreatLevel()', () => {
     expect(deviceThreatLevel('10.0.0.1', threats, devices)).toBe('critical')
   })
 })
+
+// ── Branch coverage — null/undefined paths ────────────────────────────────────
+
+describe('tokenize — null/undefined input (line 26 ?? branch)', () => {
+  it('handles null package gracefully — does not throw', () => {
+    const result = matchDevices(
+      { package: null, title: 'nginx buffer overflow', severity: 'high' },
+      [device('10.0.0.1', 'nginx')],
+      []
+    )
+    expect(result.some(d => d.ip === '10.0.0.1')).toBe(true)
+  })
+
+  it('handles undefined title gracefully — does not throw', () => {
+    const result = matchDevices(
+      { package: 'nginx', title: undefined, severity: 'high' },
+      [device('10.0.0.1', 'nginx')],
+      []
+    )
+    expect(result.some(d => d.ip === '10.0.0.1')).toBe(true)
+  })
+})
+
+describe('matchDevices() — service name does not match (line 52 false branch)', () => {
+  it('ignores services whose name tokens do not overlap with threat tokens', () => {
+    // 'apache' service name does not match 'nginx' threat — service is skipped
+    const devices  = [device('10.0.0.1', 'nginx')]
+    const services = [service('apache proxy', 'http://10.0.0.5:80')]
+    const result   = matchDevices(threat('nginx', 'nginx heap overflow'), devices, services)
+    // Device still matched via hostname, but service IP should not appear
+    expect(result.some(d => d.ip === '10.0.0.5')).toBe(false)
+    expect(result.some(d => d.ip === '10.0.0.1')).toBe(true)
+  })
+})
+
+describe('matchDevices() — device missing hostname property (line 60 ?? branch)', () => {
+  it('handles device without hostname field when resolving service URL', () => {
+    // Device has no hostname property — d.hostname is undefined → ?? '' prevents crash
+    const dev     = { ip: '192.168.1.20', label: 'mybox', status: 'online' }
+    const services = [service('mybox service', 'http://mybox:8080')]
+    const result   = matchDevices(threat('mybox', 'Mybox vulnerability'), [dev], services)
+    // mybox hostname resolved via label match fallback path
+    expect(() => matchDevices(threat('mybox', 'Mybox vulnerability'), [dev], services)).not.toThrow()
+  })
+})
+
+describe('matchDevices() — service IP not in device list (line 77 ?? branch)', () => {
+  it('returns stub { ip } object when service IP has no matching device', () => {
+    // 10.0.0.99 is in service URL but not in devices — ?? { ip } fallback used
+    const devices  = [device('10.0.0.1', 'unrelated')]
+    const services = [service('nginx cache', 'http://10.0.0.99:80')]
+    const result   = matchDevices(threat('nginx', 'nginx cache exploit'), devices, services)
+    expect(result.some(d => d.ip === '10.0.0.99')).toBe(true)
+  })
+})
+
+describe('deviceThreatLevel() — unknown severity (line 90 ?? branch)', () => {
+  it('treats unknown severity as level 0 — never beats worst', () => {
+    // 'info' is not in SEV_ORDER → level = 0 → skipped immediately
+    const devs    = [device('10.0.0.1', 'nginx')]
+    const threats = [{ package: 'nginx', title: 'Nginx informational note', severity: 'info' }]
+    expect(deviceThreatLevel('10.0.0.1', threats, devs)).toBeNull()
+  })
+})

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Shield, ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink } from 'lucide-react'
-import claudetteLogo from '/favicon.svg'
+const claudetteLogo = '/favicon.svg'
 
 const NAV = [
   { id: 'network',   label: 'Network',   icon: Network,         hint: 'Scan & map all devices on your LAN' },

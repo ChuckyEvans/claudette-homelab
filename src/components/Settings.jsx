@@ -221,7 +221,7 @@ function ServiceRow({ svc, idx, onSave, onDelete }) {
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function Settings({ onOpenWizard }) {
+export default function Settings({ onOpenWizard, configStatus }) {
   const [loading, setLoading] = useState(true)
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
@@ -284,8 +284,9 @@ export default function Settings({ onOpenWizard }) {
   const [ispSupportEmail,       setIspSupportEmail]       = useState('')
   const [theme,                 setTheme]                 = useState('starfield')
   const [services,              setServices]              = useState([])
-  const [backupIntervalDays,    setBackupIntervalDays]    = useState(0)
-  const [backupKeepDays,        setBackupKeepDays]        = useState(7)
+  const [backupIntervalDays,        setBackupIntervalDays]        = useState(0)
+  const [backupKeepDays,             setBackupKeepDays]             = useState(7)
+  const [internetOutageCheckSecs,    setInternetOutageCheckSecs]    = useState(10)
   const [backingUp,             setBackingUp]             = useState(false)
   const [restoring,             setRestoring]             = useState(false)
   const restoreInputRef = useRef(null)
@@ -316,6 +317,7 @@ export default function Settings({ onOpenWizard }) {
         setServices(cfg.services ?? [])
         setBackupIntervalDays(cfg.schedule?.backup_interval_days ?? 0)
         setBackupKeepDays(cfg.schedule?.backup_keep_days ?? 7)
+        setInternetOutageCheckSecs(cfg.schedule?.internet_outage_check_seconds ?? 10)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -332,8 +334,9 @@ export default function Settings({ onOpenWizard }) {
     ping_interval_minutes:    parseInt(pingInterval),
     deep_scan_hour:           parseInt(deepScanHour),
     speedtest_interval_hours: parseInt(speedtestInterval),
-    backup_interval_days:     parseInt(backupIntervalDays) || 0,
-    backup_keep_days:         Math.max(1, parseInt(backupKeepDays) || 7),
+    backup_interval_days:          parseInt(backupIntervalDays) || 0,
+    backup_keep_days:              Math.max(1, parseInt(backupKeepDays) || 7),
+    internet_outage_check_seconds: Math.max(5, parseInt(internetOutageCheckSecs) || 10),
   })
 
   const ispPayload = () => ({
@@ -543,6 +546,25 @@ export default function Settings({ onOpenWizard }) {
                   </button>
                 </div>
               ))}
+            </div>
+            <div className="mt-3 max-w-lg">
+              <label className="block text-xs font-medium text-slate-400 mb-1">
+                Outage fast-poll interval (seconds)
+                {configStatus?.outdated && (
+                  <span className="ml-2 text-[10px] font-semibold text-amber-400 uppercase tracking-wide">New in v0.0.8</span>
+                )}
+              </label>
+              <input
+                type="number" min="5" max="300" step="1"
+                value={internetOutageCheckSecs}
+                onChange={e => setInternetOutageCheckSecs(Math.max(5, parseInt(e.target.value) || 10))}
+                className={`w-32 bg-[#080812] rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors ${
+                  configStatus?.outdated
+                    ? 'border border-amber-500/50 focus:border-amber-400'
+                    : 'border border-[#1a1a30] focus:border-indigo-500/50'
+                }`}
+              />
+              <p className="text-[11px] text-slate-600 mt-1">How often to ping while internet is down — switches back to normal interval once restored (min 5s)</p>
             </div>
             <div className="mt-3 max-w-lg">
               <label className="block text-xs font-medium text-slate-400 mb-1">Nightly deep scan time</label>

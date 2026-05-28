@@ -25,13 +25,28 @@ A self-hosted home network monitoring dashboard. Runs in Docker on a Raspberry P
 
 ## Requirements
 
+### Running locally
+
+| Tool | Notes |
+|---|---|
+| **Docker Desktop** (Windows / macOS) or **Docker Engine** (Linux) | Required to build and run the app. |
+| nmap | Installed *inside* the Docker image — not needed on your workstation. |
+
+### Deploying to a Raspberry Pi
+
 | Requirement | Notes |
 |---|---|
-| Docker | Desktop (Windows/macOS) or Engine (Linux). Needed to build and run the app. |
-| Docker Buildx | Included in Docker Desktop. Required for cross-compiling ARM64 images. |
-| nmap | Installed **inside** the Docker image automatically — not needed on the host. |
-| SSH access to your Pi | For the `deploy-pi` scripts. Key-based auth recommended. |
-| Node.js 20+ | Only needed for local development (not for Docker deployment). |
+| **Raspberry Pi OS or Ubuntu** | 64-bit (arm64). Pi 4 (2 GB+) recommended; Pi 3B+ works. |
+| **Docker on the Pi** | Must be installed on the Pi before the first deploy — see [Pi setup](#pi-setup) below. |
+| **OpenSSH client** | Built into Windows 10+, macOS, and all Linux distros. Used for SSH and SCP transfers. |
+| **Key-based SSH auth** | Required — the deploy scripts use `BatchMode=yes` and will not prompt for a password. |
+| **Docker Buildx** *(Linux / macOS → Pi only)* | Included with Docker Desktop; on standalone Docker Engine: `docker buildx version`. Used for ARM64 cross-compilation. *Not required from Windows* — the Windows script builds natively on the Pi. |
+
+### Local development
+
+| Tool | Notes |
+|---|---|
+| Node.js 20+ | Only needed for working on the source code. `node --version` to check. |
 
 The app runs well on a Raspberry Pi 4 (2 GB+) or any x86-64 Linux host.
 
@@ -62,46 +77,130 @@ On first launch the setup wizard runs — create an admin account and confirm yo
 
 The recommended setup is to run Claudette on a Pi that stays on 24/7.
 
+### Pi setup
+
+Before running any deploy script for the first time, your Pi needs Docker installed and SSH key access configured.
+
+**1. Install Docker on the Pi**
+
+SSH into the Pi and run one of the following:
+
+```bash
+# Option A — official Docker install script (recommended)
+curl -fsSL https://get.docker.com | sudo sh
+
+# Option B — via apt
+sudo apt update && sudo apt install -y docker.io
+```
+
+Add your user to the `docker` group so the deploy scripts can run `docker` without a full sudo password:
+
+```bash
+sudo usermod -aG docker $USER
+# Log out and back in for the group change to take effect
+docker run --rm hello-world   # verify it works
+```
+
+**2. Set up SSH key access**
+
+The deploy scripts use `BatchMode=yes` — they will not stop to prompt for a password. Key-based authentication is required.
+
+```bash
+# Generate a key on your workstation if you don't have one
+ssh-keygen -t ed25519 -C "claudette-deploy"
+
+# Copy the public key to the Pi
+ssh-copy-id ubuntu@<pi-ip>                          # Linux / macOS / WSL
+
+# Windows PowerShell alternative (no ssh-copy-id):
+# Get-Content ~/.ssh/id_ed25519.pub | ssh ubuntu@<pi-ip> "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+```
+
+Test it — this should print `ok` with no password prompt:
+
+```bash
+ssh ubuntu@<pi-ip> echo ok
+```
+
+**3. Configure `config.yaml`**
+
+The deploy scripts read the Pi address and SSH user automatically from `config.yaml`:
+
+```yaml
+pi:
+  host: 192.168.1.10          # Your Pi's IP address
+  ssh_user: ubuntu            # SSH username (default on Pi OS / Ubuntu)
+  # ssh_key: ~/.ssh/id_ed25519  # Optional — omit to use ssh-agent
+```
+
+---
+
 ### Windows → Pi
 
 ```powershell
-# Full build + deploy
+# Full deploy — packages source, uploads to Pi, builds image natively on Pi, restarts container
 .\deploy-pi.ps1
 
-# Skip the Docker build (reuse last image)
+# Server-only update — skip Docker rebuild, sync only server/ files into running container (~5 s)
+.\deploy-pi.ps1 -Quick
+
+# Skip the Docker build — just restart the container using the image already on the Pi
 .\deploy-pi.ps1 -SkipBuild
 
-# Override the Pi IP
+# Override the Pi address for a one-off deploy
 .\deploy-pi.ps1 -PiHost 192.168.1.50
 ```
+
+**What the full deploy does:**
+
+1. Packages the project source (frontend + backend + Dockerfile) into a tarball on your workstation
+2. Uploads the tarball to the Pi via SCP
+3. SSHs into the Pi and runs `docker build` natively — the Pi builds its own ARM64 image directly, no cross-compilation
+4. Stops the old container and starts a fresh one with `--network host`, `--restart unless-stopped`, and the correct Linux capabilities
+
+> **Requirements on your workstation:** OpenSSH client and `scp` — both built into Windows 10 and later. Docker Desktop is *not* required for a full Pi deploy.
+
+---
 
 ### Linux / macOS → Pi
 
 ```bash
 chmod +x scripts/linux/deploy-pi.sh   # one-time
 
+# Full build + deploy
 ./scripts/linux/deploy-pi.sh
+
+# Skip the Docker build (reuse last image tarball)
 ./scripts/linux/deploy-pi.sh --skip-build
+
+# Override the Pi address
 ./scripts/linux/deploy-pi.sh --host 192.168.1.50
 ```
 
-The script:
-1. Cross-compiles a `linux/arm64` Docker image via `docker buildx`
-2. Copies the image tarball to the Pi over SCP
-3. Loads and starts the container on the Pi
+**What it does:**
 
-The container requires `--network host` so nmap can reach the full LAN. Persistent data (SQLite, backups) is stored in a Docker volume at `/app/data`.
+1. Cross-compiles a `linux/arm64` Docker image on your machine via `docker buildx`
+2. Saves the image as a tarball and copies it to the Pi over SCP
+3. Loads the image on the Pi and restarts the container
+
+> **Requirements on your workstation:** Docker with Buildx (included in Docker Desktop; on standalone Engine: `docker buildx version`), OpenSSH client, `scp`.
+
+---
+
+The container always runs with `--network host` so nmap can reach every device on your LAN. Persistent data (SQLite database and backups) lives in the Docker volume `claudette-data`, mounted at `/app/data` inside the container — it survives container restarts and image updates.
 
 ### SSH config tip
 
-Add this to `~/.ssh/config` to avoid typing the Pi address repeatedly:
+Add this to `~/.ssh/config` on your workstation to avoid repeating the Pi address:
 
 ```
 Host pi
   HostName 192.168.1.10
   User ubuntu
-  IdentityFile ~/.ssh/id_rsa
+  IdentityFile ~/.ssh/id_ed25519
 ```
+
+Then use `-PiHost pi` (Windows) or `--host pi` (Linux/macOS) when calling the deploy scripts.
 
 ---
 
@@ -216,7 +315,7 @@ npm run build
 | Backend | Node.js 20, Express 4, ESM modules |
 | Database | SQLite via `node-sqlite3-wasm` (no native bindings — works on any arch) |
 | Auth | bcryptjs passwords, JWT session cookies, rate-limited login |
-| Container | Docker, multi-stage build, `linux/amd64` + `linux/arm64` via buildx |
+| Container | Docker, multi-stage build (`linux/amd64` locally; `linux/arm64` on Pi natively or via buildx) |
 
 ### Project structure
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Eye, EyeOff, Lock } from 'lucide-react'
 import { api } from '../lib/api.js'
-import claudetteLogo from '/favicon.svg'
+const claudetteLogo = '/favicon.svg'
 
 export default function AuthModal({ onAuthenticated }) {
   const [username, setUsername] = useState('')

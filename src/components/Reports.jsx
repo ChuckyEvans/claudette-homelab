@@ -747,6 +747,82 @@ export default function Reports() {
               </div>
             )}
 
+            {/* SLA pass/fail panel + percentile pills */}
+            {chartData?.internetStats && (() => {
+              const uptime  = Number(chartData.internetStats.uptime)
+              const target  = ispConfig?.expected_uptime ?? null
+              const TIERS   = [100, 99.9, 99.5, 99, 95, 90]
+              const pDown   = ispConfig?.plan_download_mbps ?? 0
+              const pUp     = ispConfig?.plan_upload_mbps   ?? 0
+              const avgDown = chartData?.speedStats?.avgDown ?? null
+              const avgUp   = chartData?.speedStats?.avgUp   ?? null
+              const slaDown = pDown > 0 ? pDown * 0.8 : null
+              const slaUp   = pUp   > 0 ? pUp   * 0.8 : null
+              const uptimePass = target !== null ? uptime >= target : null
+              return (
+                <div className="space-y-2">
+                  {/* Percentile tier pills */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] text-slate-500 uppercase tracking-wide mr-1">Uptime tiers</span>
+                    {TIERS.map(tier => {
+                      const pass = uptime >= tier
+                      return (
+                        <span key={tier} title={pass ? `✓ Meets ${tier}% SLA` : `✗ Below ${tier}% SLA`}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-default ${
+                            pass
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                              : 'bg-red-500/10 border-red-500/30 text-red-400'
+                          }`}>
+                          {pass ? '✓' : '✗'} {tier}%
+                        </span>
+                      )
+                    })}
+                    {target !== null && (
+                      <span className="text-[10px] text-slate-600 ml-1">· SLA target: {target}%</span>
+                    )}
+                  </div>
+                  {/* SLA summary row (only if ISP config is set) */}
+                  {(target !== null || slaDown !== null || slaUp !== null) && (
+                    <div className="flex flex-wrap gap-2">
+                      {target !== null && (
+                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${
+                          uptimePass
+                            ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300'
+                            : 'bg-red-500/8 border-red-500/25 text-red-300'
+                        }`}>
+                          <span>{uptimePass ? '✓' : '✗'}</span>
+                          <span className="font-medium">Uptime SLA</span>
+                          <span className="opacity-70">{uptime.toFixed(uptime === 100 ? 1 : 3)}% / {target}% target</span>
+                        </div>
+                      )}
+                      {slaDown !== null && avgDown !== null && (
+                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${
+                          avgDown >= slaDown
+                            ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300'
+                            : 'bg-red-500/8 border-red-500/25 text-red-300'
+                        }`}>
+                          <span>{avgDown >= slaDown ? '✓' : '✗'}</span>
+                          <span className="font-medium">Download SLA</span>
+                          <span className="opacity-70">{avgDown} / {slaDown} Mbps min</span>
+                        </div>
+                      )}
+                      {slaUp !== null && avgUp !== null && (
+                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${
+                          avgUp >= slaUp
+                            ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300'
+                            : 'bg-red-500/8 border-red-500/25 text-red-300'
+                        }`}>
+                          <span>{avgUp >= slaUp ? '✓' : '✗'}</span>
+                          <span className="font-medium">Upload SLA</span>
+                          <span className="opacity-70">{avgUp} / {slaUp} Mbps min</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
             {/* Outage alert banner */}
             {(outageData?.totalOutages ?? 0) > 0 && (
               <div className="bg-red-950/50 border border-red-500/40 rounded-xl px-4 py-3.5 flex items-start gap-3">
@@ -884,6 +960,7 @@ export default function Reports() {
                       <tr className="border-b border-[#1a1a30]">
                         <th className="px-2 py-1.5 text-left text-slate-400">Time</th>
                         <th className="px-2 py-1.5 text-left text-slate-400">Status</th>
+                        <th className="px-2 py-1.5 text-left text-slate-400">Mode</th>
                         <th className="px-2 py-1.5 text-right text-slate-400">Latency</th>
                         <th className="px-2 py-1.5 text-right text-slate-400">Hosts</th>
                       </tr>
@@ -899,6 +976,15 @@ export default function Reports() {
                               {check.ok ? 'Online' : 'Offline'}
                             </span>
                           </td>
+                          <td className="px-2 py-1.5">
+                            {check.outage_mode
+                              ? <span title={`Fast-polling every ${check.interval_seconds}s (attempt ${check.attempt_count})`}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-400 cursor-default">
+                                  <Zap className="w-2.5 h-2.5" />{check.interval_seconds}s
+                                </span>
+                              : <span className="text-slate-700 text-[10px]">—</span>
+                            }
+                          </td>
                           <td className="px-2 py-1.5 text-right text-slate-400">{check.avgMs ?? '—'} ms</td>
                           <td className="px-2 py-1.5 text-right text-slate-400">
                             <span className="text-emerald-400">{check.okCount}</span> / {check.hostCount}
@@ -906,7 +992,7 @@ export default function Reports() {
                         </tr>
                       ))}
                       {filtered.length === 0 && (
-                        <tr><td colSpan={4} className="px-2 py-6 text-center text-slate-600 text-xs">No checks match the filter</td></tr>
+                        <tr><td colSpan={5} className="px-2 py-6 text-center text-slate-600 text-xs">No checks match the filter</td></tr>
                       )}
                     </tbody>
                   </table>

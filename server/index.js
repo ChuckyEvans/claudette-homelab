@@ -7,7 +7,7 @@ import cron from 'node-cron'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { loadConfig } from './config.js'
-import servicesRouter, { runChecks, checkConnectivity, getInternetStatus } from './routes/services.js'
+import servicesRouter, { runChecks, checkConnectivity, getInternetStatus, setOutageCheckSeconds } from './routes/services.js'
 import { runSpeedTest } from './utils/speedtest.js'
 import threatsRouter, { refreshThreats } from './routes/threats.js'
 import networkRouter, { setBroadcast, runPingSweep, runScheduledDeepScan, startBackgroundArpSniffer, startMdnsSniffer } from './routes/network.js'
@@ -167,9 +167,11 @@ function scheduleJobs() {
   _tasks.forEach(t => t.stop())
   _tasks = []
 
-  const cfg         = loadConfig()
-  const checkMin    = cfg?.schedule?.check_interval_minutes   ?? 5
-  const internetMin = cfg?.schedule?.internet_check_minutes   ?? 5
+  const cfg          = loadConfig()
+  const checkMin     = cfg?.schedule?.check_interval_minutes   ?? 5
+  const internetMin  = cfg?.schedule?.internet_check_minutes   ?? 5
+  const outageSecs   = cfg?.schedule?.internet_outage_check_seconds ?? 10
+  setOutageCheckSeconds(outageSecs)
   const pingMin     = cfg?.schedule?.ping_interval_minutes    ?? 5
   const speedtestHr = cfg?.schedule?.speedtest_interval_hours ?? 1
   const threatHr    = cfg?.schedule?.threat_interval_hours    ?? 6

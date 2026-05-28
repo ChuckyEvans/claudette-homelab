@@ -106,6 +106,9 @@ describe('ipInCIDR', () => {
   it('returns false for malformed CIDR', () => {
     expect(ipInCIDR('192.168.8.1', 'bad')).toBe(false)
   })
+  it('returns false for prefix > 32', () => {
+    expect(ipInCIDR('192.168.8.1', '192.168.8.0/33')).toBe(false)
+  })
 })
 
 // ── getCIDRHosts ──────────────────────────────────────────────────────────────
@@ -141,5 +144,8 @@ describe('getCIDRHosts', () => {
   it('returns null for malformed CIDR', () => {
     expect(getCIDRHosts('notacidr')).toBeNull()
     expect(getCIDRHosts('192.168.1.0')).toBeNull()
+  })
+  it('returns null for prefix > 32', () => {
+    expect(getCIDRHosts('192.168.1.0/33')).toBeNull()
   })
 })
