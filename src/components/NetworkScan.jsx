@@ -144,6 +144,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
         <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-indigo-400' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} />
         <div className="flex-1 min-w-0">
           <p className={`text-xs font-medium font-mono truncate flex items-center gap-1 ${isSelected ? 'text-slate-100' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-300'}`}>
+            {d.favorited && <Star className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" />}
             {d.label ? <span className="font-sans text-indigo-300">{d.label}</span> : d.ip}
             {portScanProgress[d.ip] != null && <Loader className="w-2.5 h-2.5 flex-shrink-0 text-indigo-400 animate-spin" />}
           </p>
@@ -159,7 +160,6 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
         </div>
         <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
           {isMe && <span className="text-[9px] font-medium text-cyan-400 leading-none">you</span>}
-          {d.favorited && <Star className="w-2.5 h-2.5 text-amber-400 flex-shrink-0" fill="currentColor" />}
           {isFiltered
             ? <span className="text-[10px] text-orange-500/70" title="Ping blocked but ports still respond">filtered</span>
             : isOffline
@@ -361,8 +361,11 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
       {confirm && <ConfirmDialog message={confirm.message} onConfirm={confirm.onConfirm} onCancel={() => setConfirm(null)} />}
       {/* Header */}
       <div className="px-6 py-5 border-b border-[#1a1a30] flex items-center gap-4">
-        <div className="w-12 h-12 bg-[#1a1a35] rounded-xl flex items-center justify-center flex-shrink-0">
+        <div className="relative w-12 h-12 bg-[#1a1a35] rounded-xl flex items-center justify-center flex-shrink-0">
           <Icon className="w-6 h-6 text-indigo-400" />
+          {device.favorited && (
+            <Star className="absolute -top-1.5 -right-1.5 w-4 h-4 text-amber-400 drop-shadow" fill="currentColor" />
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -396,14 +399,13 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
           }}
           disabled={!device.mac}
           title={device.favorited ? 'Remove from favorites' : 'Add to favorites'}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded-lg text-xs transition-colors flex-shrink-0 ${
+          className={`p-2 border rounded-lg transition-colors flex-shrink-0 ${
             device.favorited
               ? 'bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25'
               : 'bg-[#0f0f1e] border-[#1a1a30] hover:border-amber-500/30 text-slate-500 hover:text-amber-400'
           }`}
         >
-          <Star className="w-3.5 h-3.5" fill={device.favorited ? 'currentColor' : 'none'} />
-          {device.favorited ? 'Favorited' : 'Favorite'}
+          <Star className="w-4 h-4" fill={device.favorited ? 'currentColor' : 'none'} />
         </button>
         <button
           onClick={() => {
