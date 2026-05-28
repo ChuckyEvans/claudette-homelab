@@ -4,7 +4,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && npm install --no-audit --no-fund
 
 COPY . .
 RUN npm run build
@@ -13,13 +13,13 @@ RUN npm run build
 FROM node:20-alpine
 
 # nmap is required for network scanning; tcpdump for passive ARP gateway detection
-RUN apk add --no-cache nmap nmap-scripts tcpdump
+RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && apk add --no-cache nmap nmap-scripts tcpdump
 
 WORKDIR /app
 
 # Install only production deps
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && npm ci --omit=dev
 
 # Copy server source and built frontend
 COPY server/ ./server/
