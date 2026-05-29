@@ -135,7 +135,7 @@ function DeviceRow({ device }) {
     <div className="bg-[#0f0f20] border border-[#1a1a30] rounded-xl overflow-hidden">
       <button onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors text-left">
-        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${c.dot}`} />
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${c.dot}`} title={`Highest risk: ${worst}`} />
         <Icon className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
         <span className="flex-1 min-w-0 flex flex-col">
           <span className="font-semibold text-sm text-slate-200 font-mono truncate">

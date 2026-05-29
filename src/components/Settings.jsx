@@ -197,8 +197,8 @@ function ServiceRow({ svc, idx, onSave, onDelete }) {
         <td className="px-3 py-2 w-20"><input className={inputCls + ' text-center'} type="number" value={form.expect_status} onChange={set('expect_status')} /></td>
         <td className="px-3 py-2 w-16">
           <div className="flex items-center gap-1.5">
-            <button onClick={save} className="p-1 text-emerald-400 hover:text-emerald-300"><Check className="w-3.5 h-3.5" /></button>
-            <button onClick={cancel} className="p-1 text-slate-600 hover:text-slate-300"><X className="w-3.5 h-3.5" /></button>
+            <button onClick={save}   title="Save changes"  className="p-1 text-emerald-400 hover:text-emerald-300"><Check className="w-3.5 h-3.5" /></button>
+            <button onClick={cancel} title="Cancel"        className="p-1 text-slate-600 hover:text-slate-300"><X className="w-3.5 h-3.5" /></button>
           </div>
         </td>
       </tr>
@@ -212,8 +212,8 @@ function ServiceRow({ svc, idx, onSave, onDelete }) {
       <td className="px-3 py-2.5 text-xs text-slate-500 text-center">{svc.expect_status ?? 200}</td>
       <td className="px-3 py-2.5 w-16">
         <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={() => setEditing(true)} className="p-1 text-slate-600 hover:text-indigo-400"><Edit2 className="w-3 h-3" /></button>
-          <button onClick={() => onDelete(idx)} className="p-1 text-slate-600 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
+          <button onClick={() => setEditing(true)} title="Edit service"   className="p-1 text-slate-600 hover:text-indigo-400"><Edit2 className="w-3 h-3" /></button>
+          <button onClick={() => onDelete(idx)}      title="Delete service" className="p-1 text-slate-600 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
         </div>
       </td>
     </tr>

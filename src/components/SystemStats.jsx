@@ -82,7 +82,7 @@ export default function SystemStats({ systemStats }) {
             <div className="mt-4 grid grid-cols-4 gap-2">
               {cpu.perCore.map((load, i) => (
                 <div key={i} className="text-center">
-                  <div className="h-10 bg-[#1a1a35] rounded flex flex-col-reverse overflow-hidden">
+                  <div className="h-10 bg-[#1a1a35] rounded flex flex-col-reverse overflow-hidden" title={`Core ${i}: ${load}%`}>
                     <div
                       className="bg-indigo-500/60 transition-all duration-700"
                       style={{ height: `${load}%` }}

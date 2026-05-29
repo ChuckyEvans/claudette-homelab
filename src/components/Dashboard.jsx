@@ -34,7 +34,7 @@ function ServiceRow({ result, history = [] }) {
 
   return (
     <div className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors">
-      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${result.ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
+      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${result.ok ? 'bg-emerald-400' : 'bg-red-400'}`} title={result.ok ? 'Service OK' : 'Service failing'} />
       <span className="flex-1 text-sm text-slate-300 font-medium truncate">{result.name}</span>
       <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${
         result.ok ? 'bg-emerald-950/80 text-emerald-400' : 'bg-red-950/80 text-red-400'

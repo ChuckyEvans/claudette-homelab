@@ -174,7 +174,8 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
             isSelected ? 'bg-indigo-600/15 border-r-2 border-indigo-500' : isMe ? 'bg-cyan-500/5 hover:bg-cyan-500/10' : 'hover:bg-white/[0.03]'
           }`}
         >
-          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${d.status === 'online' ? 'bg-emerald-400' : d.status === 'filtered' ? 'bg-orange-400' : badge === 'skull' ? 'bg-red-900/60' : badge === 'moon' ? 'bg-slate-700' : 'bg-slate-600'}`} />
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${d.status === 'online' ? 'bg-emerald-400' : d.status === 'filtered' ? 'bg-orange-400' : badge === 'skull' ? 'bg-red-900/60' : badge === 'moon' ? 'bg-slate-700' : 'bg-slate-600'}`}
+            title={d.status === 'online' ? 'Online' : d.status === 'filtered' ? 'Filtered — ping blocked but ports respond' : badge === 'skull' ? 'Unreachable for an extended period' : badge === 'moon' ? 'Dormant' : 'Offline'} />
           <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-indigo-400' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} />
           <div className="flex-1 min-w-0">
             <p className={`text-xs font-medium font-mono truncate flex items-center gap-1 ${isSelected ? 'text-slate-100' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-300'}`}>
@@ -182,7 +183,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
               {badge === 'skull' && <Skull className="w-3 h-3 text-red-500/60 flex-shrink-0" title="Unreachable for an extended period" />}
               {badge === 'moon'  && <Moon  className="w-3 h-3 text-blue-400/70 flex-shrink-0" fill="currentColor" title="Dormant" />}
               {d.label ? <span className="font-sans text-indigo-300">{d.label}</span> : d.ip}
-              {portScanProgress[d.ip] != null && <Loader className="w-2.5 h-2.5 flex-shrink-0 text-indigo-400 animate-spin" />}
+              {portScanProgress[d.ip] != null && <Loader className="w-2.5 h-2.5 flex-shrink-0 text-indigo-400 animate-spin" title="Port scan in progress" />}
             </p>
             {(d.label ? d.ip : d.hostname) && (
               <p
@@ -629,10 +630,10 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
                 placeholder="e.g. Raspberry Pi NAS"
                 className="flex-1 bg-[#12122a] border border-indigo-500/40 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-400"
               />
-              <button onClick={saveLabel} className="p-1.5 bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/30 rounded-lg text-indigo-400">
+              <button onClick={saveLabel} title="Save label" className="p-1.5 bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/30 rounded-lg text-indigo-400">
                 <Check className="w-4 h-4" />
               </button>
-              <button onClick={() => setLabelEdit(false)} className="p-1.5 bg-slate-700/20 hover:bg-slate-700/40 border border-slate-600/30 rounded-lg text-slate-400">
+              <button onClick={() => setLabelEdit(false)} title="Cancel" className="p-1.5 bg-slate-700/20 hover:bg-slate-700/40 border border-slate-600/30 rounded-lg text-slate-400">
                 <X className="w-4 h-4" />
               </button>
             </div>
