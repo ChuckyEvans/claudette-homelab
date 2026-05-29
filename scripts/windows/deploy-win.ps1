@@ -1,11 +1,11 @@
-# scripts/windows/restart.ps1
+# scripts/windows/deploy-win.ps1
 # Build and run Claudette locally using Docker on Windows.
 #
 # Requirements: Docker Desktop
 #
 # Usage (from repo root):
-#   .\deploy-win.ps1               # full build + restart
-#   .\deploy-win.ps1 -SkipBuild    # restart without rebuilding the image
+#   .\scripts\windows\deploy-win.ps1               # full build + restart
+#   .\scripts\windows\deploy-win.ps1 -SkipBuild    # restart without rebuilding the image
 #
 param(
     [switch]$SkipBuild

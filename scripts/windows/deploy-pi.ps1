@@ -5,10 +5,10 @@
 # Requirements: OpenSSH client + scp (built into Windows 10+), Docker installed on the Pi.
 #
 # Usage (from repo root):
-#   .\deploy-pi.ps1                          # full deploy: upload source, build on Pi, restart container
-#   .\deploy-pi.ps1 -Quick                   # fast path: sync server/ files only, restart container (~5s)
-#   .\deploy-pi.ps1 -SkipBuild               # skip Docker build, restart using existing image on Pi
-#   .\deploy-pi.ps1 -PiHost 192.168.1.50     # override Pi host
+#   .\scripts\windows\deploy-pi.ps1                          # full deploy: upload source, build on Pi, restart container
+#   .\scripts\windows\deploy-pi.ps1 -Quick                   # fast path: sync server/ files only, restart container (~5s)
+#   .\scripts\windows\deploy-pi.ps1 -SkipBuild               # skip Docker build, restart using existing image on Pi
+#   .\scripts\windows\deploy-pi.ps1 -PiHost 192.168.1.50     # override Pi host
 #
 param(
     [string]$PiHost    = '',   # override Pi IP / hostname

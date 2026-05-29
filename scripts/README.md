@@ -5,19 +5,25 @@ Scripts are split by host platform — pick the folder matching the machine you'
 ```
 scripts/
 ├── windows/
-│   ├── deploy-pi.ps1   — deploy to Raspberry Pi from Windows (PowerShell + Docker buildx)
+│   ├── deploy-pi.ps1   — deploy to Raspberry Pi from Windows
+│   ├── deploy-win.ps1  — build & run locally on Windows (Docker Desktop)
+│   ├── run-local.ps1   — run locally on Windows without Docker (native Node.js + nmap)
+│   ├── kodi-setup.ps1  — install / configure the Kodi addon on a LibreELEC Pi
 │   └── kodi-check.ps1  — verify Kodi addon status via JSON-RPC
 └── linux/
-    ├── deploy-pi.sh    — deploy to Raspberry Pi from Linux or macOS (bash + Docker buildx)
-    └── restart.sh      — build & run locally on Linux or macOS (bash + Docker)
+    ├── deploy-pi.sh    — deploy to Raspberry Pi from Linux or macOS
+    └── restart.sh      — build & run locally on Linux or macOS (Docker)
 ```
 
 ## Quick reference
 
 | Task | Windows | Linux / macOS |
 |---|---|---|
-| Run locally | `.\deploy-win.ps1` | `./scripts/linux/restart.sh` |
-| Deploy to Pi | `.\deploy-pi.ps1` | `./scripts/linux/deploy-pi.sh` |
+| Run locally (Docker) | `.\scripts\windows\deploy-win.ps1` | `./scripts/linux/restart.sh` |
+| Run locally (no Docker) | `.\scripts\windows\run-local.ps1` | — |
+| Deploy to Pi | `.\scripts\windows\deploy-pi.ps1` | `./scripts/linux/deploy-pi.sh` |
+| Kodi addon setup | `.\scripts\windows\kodi-setup.ps1` | — |
+| Kodi addon check | `.\scripts\windows\kodi-check.ps1` | — |
 | Deploy to Pi (skip build) | `.\deploy-pi.ps1 -SkipBuild` | `./scripts/linux/deploy-pi.sh --skip-build` |
 | Override Pi host | `.\deploy-pi.ps1 -PiHost 192.168.1.50` | `./scripts/linux/deploy-pi.sh --host 192.168.1.50` |
 

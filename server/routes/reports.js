@@ -162,7 +162,7 @@ router.get('/chart', (req, res) => {
     const changes = internet.reduce((acc, cur, i) => acc + (i > 0 && internet[i-1].ok !== cur.ok ? 1 : 0), 0)
 
     // Speed test stats summary (for SLA comparison)
-    const stRows = db.all(`SELECT download_mbps, upload_mbps FROM speed_tests WHERE ts >= ? AND ts <= ?`, [from, to])
+    const stRows = db.all(`SELECT download_mbps, upload_mbps FROM speedtest_results WHERE ts >= ? AND ts <= ?`, [from, to])
     const speedStats = stRows.length > 0 ? {
       avgDown: parseFloat((stRows.reduce((s, r) => s + (r.download_mbps ?? 0), 0) / stRows.length).toFixed(1)),
       avgUp:   parseFloat((stRows.reduce((s, r) => s + (r.upload_mbps   ?? 0), 0) / stRows.length).toFixed(1)),

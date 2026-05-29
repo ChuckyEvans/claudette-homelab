@@ -14,7 +14,7 @@
     "docker:logs": "docker logs -f claudette",
     "docker:restart": "npm run docker:stop; npm run docker:run",
     "docker:rebuild": "npm run docker:build && npm run docker:restart",
-    "docker:deploy-pi": "pwsh -File deploy-pi.ps1",
+    "docker:deploy-pi": "pwsh -File scripts/windows/deploy-pi.ps1",
     "docker:deploy-pi:linux": "bash scripts/linux/deploy-pi.sh"
   },
   "dependencies": {

@@ -60,7 +60,7 @@ cp config.example.yaml config.yaml
 # Edit config.yaml with your subnet, services, ISP details, etc.
 
 # 2. Build and run locally (Windows)
-.\deploy-win.ps1
+.\scripts\windows\deploy-win.ps1
 
 # 2. Build and run locally (Linux / macOS)
 ./scripts/linux/restart.sh
@@ -139,16 +139,16 @@ pi:
 
 ```powershell
 # Full deploy — packages source, uploads to Pi, builds image natively on Pi, restarts container
-.\deploy-pi.ps1
+.\scripts\windows\deploy-pi.ps1
 
 # Server-only update — skip Docker rebuild, sync only server/ files into running container (~5 s)
-.\deploy-pi.ps1 -Quick
+.\scripts\windows\deploy-pi.ps1 -Quick
 
 # Skip the Docker build — just restart the container using the image already on the Pi
-.\deploy-pi.ps1 -SkipBuild
+.\scripts\windows\deploy-pi.ps1 -SkipBuild
 
 # Override the Pi address for a one-off deploy
-.\deploy-pi.ps1 -PiHost 192.168.1.50
+.\scripts\windows\deploy-pi.ps1 -PiHost 192.168.1.50
 ```
 
 **What the full deploy does:**
@@ -353,7 +353,7 @@ npm run build
 │   └── linux/            Bash deploy scripts
 ├── Dockerfile            Multi-stage Docker build
 ├── config.example.yaml   Config template (commit this, not config.yaml)
-└── deploy-pi.ps1         Windows shortcut → scripts/windows/deploy-pi.ps1
+└── scripts/windows/      PowerShell deploy scripts (see scripts/README.md)
 ```
 
 ### Tests

@@ -38,6 +38,38 @@ function ToastStack({ toasts }) {
 
 const CHART_PALETTE = { new: '#10b981', online: '#38bdf8', offline: '#64748b', ports: '#818cf8' }
 
+// Known port → service name. Ports > 1024 get a "?" suffix (unofficial/common).
+const PORT_NAMES = {
+  // Well-known (≤1024)
+  20: 'ftp-data', 21: 'ftp', 22: 'ssh', 23: 'telnet', 25: 'smtp',
+  53: 'dns', 67: 'dhcp', 68: 'dhcp', 69: 'tftp', 80: 'http',
+  110: 'pop3', 111: 'rpcbind', 119: 'nntp', 123: 'ntp',
+  135: 'msrpc', 137: 'netbios', 138: 'netbios', 139: 'netbios',
+  143: 'imap', 161: 'snmp', 162: 'snmp', 179: 'bgp', 194: 'irc',
+  389: 'ldap', 443: 'https', 445: 'smb', 465: 'smtps',
+  500: 'ipsec', 514: 'syslog', 515: 'printer', 554: 'rtsp', 587: 'smtp',
+  631: 'ipp', 636: 'ldaps', 993: 'imaps', 995: 'pop3s',
+  // Registered / common high ports
+  1080: 'socks', 1194: 'openvpn', 1433: 'mssql', 1521: 'oracle',
+  1900: 'ssdp',
+  1883: 'mqtt', 2049: 'nfs', 2375: 'docker', 2376: 'docker-tls',
+  3000: 'dev-http', 3306: 'mysql', 3389: 'rdp', 3478: 'stun',
+  4000: 'alt-http', 4443: 'https-alt', 5000: 'upnp', 5001: 'alt-http',
+  5432: 'postgres', 5900: 'vnc', 6379: 'redis', 6443: 'k8s-api',
+  7654: 'claudette', 8080: 'http-alt', 8081: 'http-alt',
+  8123: 'home-asst', 8191: 'flaresolverr', 8443: 'https-alt',
+  8888: 'jupyter', 9000: 'php-fpm', 9090: 'prometheus', 9091: 'transmission',
+  9092: 'kafka', 9117: 'jackett', 9200: 'elasticsearch',
+  27017: 'mongodb', 32400: 'plex', 51820: 'wireguard',
+}
+
+function portLabel(port) {
+  const n = parseInt(port, 10)
+  const name = PORT_NAMES[n]
+  if (!name) return String(port)
+  return n > 1024 ? `${port} · ${name}?` : `${port} · ${name}`
+}
+
 function rangeMs(key) {
   if (key === 'today') { const s = new Date(); s.setHours(0, 0, 0, 0); return Date.now() - s.getTime() }
   return { '7d': 7, '30d': 30, '90d': 90 }[key] * 86_400_000
@@ -678,7 +710,7 @@ export default function Reports() {
                     <BarChart data={chartData.topPorts} layout="vertical" margin={{ top: 0, right: 16, left: 16, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" horizontal={false} />
                       <XAxis type="number" tick={{ fill: '#64748b', fontSize: 10 }} allowDecimals={false} />
-                      <YAxis type="category" dataKey="port" width={44} tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }} />
+                      <YAxis type="category" dataKey="port" width={130} tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }} tickFormatter={portLabel} />
                       <Tooltip content={<ChartTip />} />
                       <Bar dataKey="count" name="Finds" fill="#818cf8" radius={[0,2,2,0]} maxBarSize={14} />
                     </BarChart>
