@@ -79,7 +79,8 @@ export function getDb() {
         host_scripts TEXT NOT NULL DEFAULT '[]',
         traceroute   TEXT NOT NULL DEFAULT '[]',
         favorited    INTEGER NOT NULL DEFAULT 0,
-        flagged      INTEGER NOT NULL DEFAULT 0
+        flagged      INTEGER NOT NULL DEFAULT 0,
+        dormant      INTEGER NOT NULL DEFAULT 0
       );
       CREATE UNIQUE INDEX idx_devices_ip     ON devices (ip);
       CREATE        INDEX idx_devices_status ON devices (status);
@@ -146,6 +147,10 @@ export function getDb() {
     if (!cols.includes('flagged')) {
       _db.exec('ALTER TABLE devices ADD COLUMN flagged INTEGER NOT NULL DEFAULT 0')
       console.log('[db] Added flagged column to devices.')
+    }
+    if (!cols.includes('dormant')) {
+      _db.exec('ALTER TABLE devices ADD COLUMN dormant INTEGER NOT NULL DEFAULT 0')
+      console.log('[db] Added dormant column to devices.')
     }
   }
 
@@ -264,6 +269,7 @@ export function upsertDevice(device) {
       updated_at     = excluded.updated_at,
       latency        = excluded.latency,
       os             = COALESCE(excluded.os,       devices.os),
+      dormant        = CASE WHEN excluded.status IN ('online','filtered') THEN 0 ELSE devices.dormant END,
       ports        = CASE WHEN json_array_length(excluded.ports)        > 0 THEN excluded.ports        ELSE devices.ports        END,
       host_scripts = CASE WHEN json_array_length(excluded.host_scripts) > 0 THEN excluded.host_scripts ELSE devices.host_scripts END,
       traceroute   = CASE WHEN json_array_length(excluded.traceroute)   > 0 THEN excluded.traceroute   ELSE devices.traceroute   END
@@ -353,9 +359,11 @@ export function getAllDevices() {
     vendor: r.vendor, hostname: r.hostname, hostnameStale: r.hostname_stale === 1,
     label: r.label ?? null,
     status: r.status, firstSeen: r.first_seen, lastSeen: r.last_seen,
+    lastOnline: r.last_online ?? null,
     updatedAt: r.updated_at ?? null,
     favorited: r.favorited === 1,
     flagged:   r.flagged   === 1,
+    dormant:   r.dormant   === 1,
     latency: r.latency, os: r.os,
     ports: JSON.parse(r.ports || '[]'),
     hostScripts: JSON.parse(r.host_scripts || '[]'),
@@ -411,4 +419,29 @@ export function toggleFlagged(mac) {
     [mac]
   )
   return getDb().get('SELECT flagged FROM devices WHERE mac = ?', [mac])?.flagged === 1
+}
+
+export function toggleDormant(mac) {
+  getDb().run(
+    'UPDATE devices SET dormant = CASE WHEN dormant = 1 THEN 0 ELSE 1 END WHERE mac = ?',
+    [mac]
+  )
+  return getDb().get('SELECT dormant FROM devices WHERE mac = ?', [mac])?.dormant === 1
+}
+
+/**
+ * Auto-dormant devices that have been offline for >= `days` days.
+ * Only transitions dormant=0 → 1; never clears manually-set dormant.
+ * Returns the number of devices newly marked dormant.
+ */
+export function autoDormantStale(days = 3) {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+  const result = getDb().run(
+    `UPDATE devices SET dormant = 1
+     WHERE dormant = 0
+       AND status = 'offline'
+       AND (last_online IS NOT NULL AND last_online < ? OR last_online IS NULL AND first_seen < ?)`,
+    [cutoff, cutoff]
+  )
+  return result.changes ?? 0
 }

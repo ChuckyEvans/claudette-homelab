@@ -80,6 +80,8 @@ router.post('/', (req, res) => {
     delete config.network.subnet
   }
   config.network.connectivity_hosts = rawConnectivityHosts ?? existingNetwork.connectivity_hosts ?? ['1.1.1.1']
+  config.network.dormant_after_days = Math.max(1, Math.min(365, (n => Number.isFinite(n) ? n : 3)(parseInt(body.network?.dormant_after_days))))
+  config.network.skull_after_days   = Math.max(1, Math.min(365, (n => Number.isFinite(n) ? n : 7)(parseInt(body.network?.skull_after_days))))
   const rawFallbackDns = Array.isArray(body.network?.fallback_dns)
     ? body.network.fallback_dns
         .map(h => sanitize(String(h), /[^0-9a-fA-F.:]/g, 39))

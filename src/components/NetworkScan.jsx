@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, ChevronDown, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader, Star, MoreHorizontal, Bug } from 'lucide-react'
+import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, ChevronDown, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader, Star, MoreHorizontal, Bug, Moon, Skull } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { deviceThreatLevel } from '../lib/threatMatch.js'
 
@@ -67,23 +67,37 @@ function sortDevices(arr) {
     const favA = a.favorited ? 0 : 1
     const favB = b.favorited ? 0 : 1
     if (favA !== favB) return favA - favB
-    // 2. Online first
+    // 2. Dormant last (within non-favorites)
+    const dorA = a.dormant ? 1 : 0
+    const dorB = b.dormant ? 1 : 0
+    if (dorA !== dorB) return dorA - dorB
+    // 3. Online first
     const onA = a.status === 'online' ? 0 : 1
     const onB = b.status === 'online' ? 0 : 1
     if (onA !== onB) return onA - onB
-    // 3. IP numerically
+    // 4. IP numerically
     const ipA = a.ip.split('.').map(Number)
     const ipB = b.ip.split('.').map(Number)
     for (let i = 0; i < 4; i++) if (ipA[i] !== ipB[i]) return ipA[i] - ipB[i]
-    // 4. Hostname alphabetically
+    // 5. Hostname alphabetically
     const ha = a.hostname?.toLowerCase() || ''
     const hb = b.hostname?.toLowerCase() || ''
     return ha.localeCompare(hb)
   })
 }
 
+function offlineBadge(d, dormantAfterDays, skullAfterDays) {
+  if (d.status !== 'offline') return null
+  const ref = d.lastOnline ?? d.firstSeen
+  if (!ref) return d.dormant ? 'moon' : null
+  const daysSince = (Date.now() - ref) / 86_400_000
+  if (daysSince >= skullAfterDays)                return 'skull'
+  if (daysSince >= dormantAfterDays || d.dormant) return 'moon'
+  return null
+}
+
 // ── Device Tree (left sidebar) ────────────────────────────────────────────────
-function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = {}, subnets = [], threatMap = {}, myIp = null, forcedFilter = null, onDeviceUpdated }) {
+function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = {}, subnets = [], threatMap = {}, myIp = null, forcedFilter = null, onDeviceUpdated, dormantAfterDays = 3, skullAfterDays = 7 }) {
   const [filter, setFilter] = useState('')
   const [collapsed, setCollapsed] = useState({})
   const [activeSubnet, setActiveSubnet] = useState(null)
@@ -114,6 +128,8 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
     ? visible.filter(d => d.favorited)
     : activeSubnet === 'flagged'
       ? visible.filter(d => d.flagged)
+      : activeSubnet === 'dormant'
+        ? visible.filter(d => d.dormant)
       : activeSubnet
         ? visible.filter(d => ipInSubnet(d.ip, activeSubnet))
         : visible
@@ -135,6 +151,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
     const isSelected = selected?.ip === d.ip
     const isOffline   = d.status === 'offline'
     const isFiltered  = d.status === 'filtered'
+    const badge = offlineBadge(d, dormantAfterDays, skullAfterDays)
     const myDevice = localStorage.getItem('claudette:my-device')
     const isMe = myDevice
       ? (d.mac && d.mac === myDevice) || d.ip === myDevice
@@ -157,11 +174,13 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
             isSelected ? 'bg-indigo-600/15 border-r-2 border-indigo-500' : isMe ? 'bg-cyan-500/5 hover:bg-cyan-500/10' : 'hover:bg-white/[0.03]'
           }`}
         >
-          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${d.status === 'online' ? 'bg-emerald-400' : d.status === 'filtered' ? 'bg-orange-400' : 'bg-slate-600'}`} />
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${d.status === 'online' ? 'bg-emerald-400' : d.status === 'filtered' ? 'bg-orange-400' : badge === 'skull' ? 'bg-red-900/60' : badge === 'moon' ? 'bg-slate-700' : 'bg-slate-600'}`} />
           <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-indigo-400' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} />
           <div className="flex-1 min-w-0">
             <p className={`text-xs font-medium font-mono truncate flex items-center gap-1 ${isSelected ? 'text-slate-100' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-300'}`}>
-              {d.favorited && <Star className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" />}
+              {d.favorited && <Star  className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" />}
+              {badge === 'skull' && <Skull className="w-3 h-3 text-red-500/60 flex-shrink-0" title="Unreachable for an extended period" />}
+              {badge === 'moon'  && <Moon  className="w-3 h-3 text-blue-400/70 flex-shrink-0" fill="currentColor" title="Dormant" />}
               {d.label ? <span className="font-sans text-indigo-300">{d.label}</span> : d.ip}
               {portScanProgress[d.ip] != null && <Loader className="w-2.5 h-2.5 flex-shrink-0 text-indigo-400 animate-spin" />}
             </p>
@@ -180,7 +199,11 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
             {isFiltered
               ? <span className="text-[10px] text-orange-500/70" title="Ping blocked but ports still respond">filtered</span>
               : isOffline
-                ? <span className="text-[10px] text-slate-500">offline</span>
+                ? badge === 'skull'
+                  ? <span className="text-[10px] text-red-500/50" title="Long-term unreachable">unreachable</span>
+                  : badge === 'moon'
+                    ? <span className="text-[10px] text-blue-400/50" title="Marked dormant — will wake automatically on next ping">dormant</span>
+                    : <span className="text-[10px] text-slate-500">offline</span>
                 : d.latency != null && <span className="text-[10px] font-mono text-slate-400">{d.latency}ms</span>
             }
             {openPorts.length > 0 && (
@@ -233,6 +256,24 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
               >
                 <Bug className="w-3 h-3" />
                 {d.flagged ? 'Unflag' : 'Flag pest'}
+              </button>
+            )}
+            {d.mac && (
+              <button
+                onClick={() => {
+                  api.network.toggleDormant(d.mac)
+                    .then(({ dormant }) => onDeviceUpdated?.({ ...d, dormant }))
+                    .catch(console.error)
+                  setMenuIp(null)
+                }}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                  d.dormant
+                    ? 'border-blue-500/40 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20'
+                    : 'border-blue-500/20 text-blue-400/70 hover:bg-blue-500/10'
+                }`}
+              >
+                <Moon className="w-3 h-3" fill={d.dormant ? 'currentColor' : 'none'} />
+                {d.dormant ? 'Wake device' : 'Mark dormant'}
               </button>
             )}
             <button
@@ -291,7 +332,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
       </div>
 
       {/* Subnet / Favorites filter dropdown */}
-      {(useGroups || visible.some(d => d.favorited) || visible.some(d => d.flagged)) && (
+      {(useGroups || visible.some(d => d.favorited) || visible.some(d => d.flagged) || visible.some(d => d.dormant)) && (
         <div className="px-3 pb-2.5 border-b border-[#1a1a30]">
           <select
             value={activeSubnet ?? ''}
@@ -300,7 +341,8 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
           >
             <option value="">All ({visible.length})</option>
             <option value="favorites">★ Favorites ({visible.filter(d => d.favorited).length})</option>
-            {visible.some(d => d.flagged) && <option value="flagged">🐞 Pests ({visible.filter(d => d.flagged).length})</option>}
+            {visible.some(d => d.flagged)  && <option value="flagged">🐞 Pests ({visible.filter(d => d.flagged).length})</option>}
+            {visible.some(d => d.dormant)  && <option value="dormant">🌙 Dormant ({visible.filter(d => d.dormant).length})</option>}
             {subnets.map(s => {
               const count = visible.filter(d => ipInSubnet(d.ip, s)).length
               return <option key={s} value={s}>{s}  ({count} devices)</option>
@@ -1055,6 +1097,8 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
   const [mapView, setMapView] = useState(false)
   const [confirm, setConfirm] = useState(null) // { message, onConfirm }
   const [configSubnets, setConfigSubnets] = useState([])
+  const [dormantAfterDays, setDormantAfterDays] = useState(3)
+  const [skullAfterDays,   setSkullAfterDays]   = useState(7)
   const [myIp, setMyIp] = useState(null)
   const [scanDropdownOpen, setScanDropdownOpen] = useState(false)
   const [scanScopeHint, setScanScopeHint] = useState(null)
@@ -1131,11 +1175,13 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
     }).catch(() => {})
   }, [])
 
-  // Load configured subnets so filter tabs appear before first scan
+  // Load configured subnets + lifecycle thresholds so filter tabs appear before first scan
   useEffect(() => {
     api.config.get().then(cfg => {
       const s = cfg?.network?.subnets ?? (cfg?.network?.subnet ? [cfg.network.subnet] : [])
       setConfigSubnets(s)
+      setDormantAfterDays(cfg?.network?.dormant_after_days ?? 3)
+      setSkullAfterDays(cfg?.network?.skull_after_days   ?? 7)
     }).catch(() => {})
   }, [])
 
@@ -1382,6 +1428,8 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
               myIp={myIp}
               forcedFilter={scanScopeHint}
               onDeviceUpdated={onDeviceUpdated}
+              dormantAfterDays={dormantAfterDays}
+              skullAfterDays={skullAfterDays}
             />
           )}
         </div>

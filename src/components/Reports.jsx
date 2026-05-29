@@ -169,7 +169,7 @@ const TABS = [
 
 export default function Reports() {
   const [tab,          setTab]          = useState('overview')
-  const [range,        setRange]        = useState('7d')
+  const [range,        setRange]        = useState('30d')
   const [eventFilter,  setEventFilter]  = useState('')
   const [macFilter,    setMacFilter]    = useState('')
   const [subnetFilter, setSubnetFilter] = useState('')

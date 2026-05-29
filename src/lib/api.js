@@ -65,6 +65,7 @@ export const api = {
     }),
     toggleFavorite: (mac) => request(`/network/device/${encodeURIComponent(mac)}/favorite`, { method: 'POST' }),
     toggleFlagged:  (mac) => request(`/network/device/${encodeURIComponent(mac)}/flagged`,  { method: 'POST' }),
+    toggleDormant:  (mac) => request(`/network/device/${encodeURIComponent(mac)}/dormant`,  { method: 'POST' }),
   },
   system: {
     stats:      () => request('/system/stats'),

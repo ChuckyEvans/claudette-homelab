@@ -277,6 +277,8 @@ export default function Settings({ onOpenWizard, configStatus }) {
   const [retentionDays,         setRetentionDays]         = useState(90)
   const [connectivityHosts,     setConnectivityHosts]     = useState(['1.1.1.1'])
   const [fallbackDns,           setFallbackDns]           = useState([])
+  const [dormantAfterDays,      setDormantAfterDays]      = useState(3)
+  const [skullAfterDays,        setSkullAfterDays]        = useState(7)
   const [ispName,               setIspName]               = useState('')
   const [ispConnectionType,     setIspConnectionType]     = useState('fibre')
   const [ispExpectedUptime,     setIspExpectedUptime]     = useState(100)
@@ -309,6 +311,8 @@ export default function Settings({ onOpenWizard, configStatus }) {
         setRetentionDays(cfg.retention?.days ?? 90)
         setConnectivityHosts(cfg.network?.connectivity_hosts ?? ['1.1.1.1'])
         setFallbackDns(cfg.network?.fallback_dns ?? [])
+        setDormantAfterDays(cfg.network?.dormant_after_days ?? 3)
+        setSkullAfterDays(cfg.network?.skull_after_days ?? 7)
         setIspName(cfg.isp?.name ?? '')
         setIspConnectionType(cfg.isp?.connection_type ?? 'fibre')
         setIspExpectedUptime(cfg.isp?.expected_uptime ?? 100)
@@ -359,7 +363,7 @@ export default function Settings({ onOpenWizard, configStatus }) {
     try {
       await api.config.save({
         pi: { host: piHost, ssh_user: piUser, ssh_key: sshKey },
-        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()), fallback_dns: fallbackDns.filter(h => h.trim()) },
+        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()), fallback_dns: fallbackDns.filter(h => h.trim()), dormant_after_days: parseInt(dormantAfterDays) || 3, skull_after_days: parseInt(skullAfterDays) || 7 },
         schedule: schedulePayload(),
         retention: { days: parseInt(retentionDays) },
         services: services.filter(s => s.name && s.url),
@@ -375,7 +379,7 @@ export default function Settings({ onOpenWizard, configStatus }) {
     try {
       await api.config.save({
         pi: { host: piHost, ssh_user: piUser, ssh_key: sshKey },
-        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()), fallback_dns: fallbackDns.filter(h => h.trim()) },
+        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()), fallback_dns: fallbackDns.filter(h => h.trim()), dormant_after_days: parseInt(dormantAfterDays) || 3, skull_after_days: parseInt(skullAfterDays) || 7 },
         schedule: schedulePayload(),
         retention: { days: parseInt(retentionDays) },
         services: services.filter(s => s.name && s.url),
@@ -641,6 +645,32 @@ export default function Settings({ onOpenWizard, configStatus }) {
                   </button>
                 </div>
               ))}
+            </div>
+          </section>
+
+          {/* Device Lifecycle */}
+          <section>
+            <SectionHeading>Device Lifecycle</SectionHeading>
+            <p className="text-[11px] text-slate-600 mb-4">Thresholds for auto-managing devices that stop responding.</p>
+            <div className="grid grid-cols-2 gap-4 max-w-xs">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Auto-dormant after (days)</label>
+                <input type="number" min="1" max="365" step="1"
+                  value={dormantAfterDays}
+                  onChange={e => setDormantAfterDays(Math.max(1, parseInt(e.target.value) || 3))}
+                  className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors"
+                />
+                <p className="text-[11px] text-slate-600 mt-1">🌙 Moon icon — device silenced</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Skull warning after (days)</label>
+                <input type="number" min="1" max="365" step="1"
+                  value={skullAfterDays}
+                  onChange={e => setSkullAfterDays(Math.max(1, parseInt(e.target.value) || 7))}
+                  className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors"
+                />
+                <p className="text-[11px] text-slate-600 mt-1">💀 Skull icon — long-term unreachable</p>
+              </div>
             </div>
           </section>
 

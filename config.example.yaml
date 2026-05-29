@@ -15,6 +15,8 @@ network:
   # fallback_dns:
   #   - 8.8.8.8   # Google DNS
   #   - 8.8.4.4   # Google DNS secondary
+  dormant_after_days: 3     # Days offline before a device is auto-marked dormant (shows moon icon, sorted last)
+  skull_after_days: 7       # Days offline before a device shows a skull warning icon
   # Optional: assign devices to gateways so the map groups them under the correct router.
   # gateway_assignments:
   #   "192.168.1.1":

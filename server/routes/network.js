@@ -5,7 +5,7 @@ import { createSocket } from 'dgram'
 import { promises as dnsPromises } from 'dns'
 import { loadConfig } from '../config.js'
 import { isPrivateIP, isPrivateCIDR, ipInCIDR, getCIDRHosts } from '../utils/ip.js'
-import { audit, auditDevice, upsertDevice, markOffline, getAllDevices, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleFavorite, toggleFlagged } from '../db.js'
+import { audit, auditDevice, upsertDevice, markOffline, getAllDevices, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleFavorite, toggleFlagged, toggleDormant, autoDormantStale } from '../db.js'
 
 const router = Router()
 
@@ -600,6 +600,10 @@ export async function performScan(broadcast) {
       auditDevice('device.offline', d.mac, d.ip, d.hostname, {})
     }
 
+    // Auto-dormant devices offline for configured number of days (default 3)
+    const newlyDormant = autoDormantStale(loadConfig()?.network?.dormant_after_days ?? 3)
+    if (newlyDormant > 0) console.log(`[scan] Auto-dormanted ${newlyDormant} stale device(s).`)
+
     // Prune phantom devices — IPs that were bulk-inserted as offline by old
     // scan behaviour and have never actually responded to any probe.
     // Keeps devices that hide from ping but have discovered ports (real devices).
@@ -624,6 +628,10 @@ export async function performScan(broadcast) {
         vendor:      d.vendor ?? db.vendor,
         hostname:    d.hostname ?? db.hostname,
         label:       db.label ?? null,
+        favorited:   db.favorited ?? 0,
+        flagged:     db.flagged   ?? 0,
+        dormant:     db.dormant   ?? 0,
+        lastOnline:  db.lastOnline ?? null,
       }
     })
 
@@ -1004,6 +1012,19 @@ router.post('/device/:mac/flagged', (req, res) => {
   const idx = _scanResults.findIndex(d => d.mac === mac)
   if (idx !== -1) _scanResults[idx] = { ..._scanResults[idx], flagged }
   res.json({ ok: true, mac, flagged })
+})
+
+// ── Device dormant toggle ──────────────────────────────────────────────────────
+
+router.post('/device/:mac/dormant', (req, res) => {
+  const { mac } = req.params
+  if (!/^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(mac)) {
+    return res.status(400).json({ error: 'Invalid MAC address' })
+  }
+  const dormant = toggleDormant(mac)
+  const idx = _scanResults.findIndex(d => d.mac === mac)
+  if (idx !== -1) _scanResults[idx] = { ..._scanResults[idx], dormant }
+  res.json({ ok: true, mac, dormant })
 })
 
 export function setBroadcast(fn) {
