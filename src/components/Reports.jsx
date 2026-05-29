@@ -783,7 +783,7 @@ export default function Reports() {
             {chartData?.internetStats && (() => {
               const uptime  = Number(chartData.internetStats.uptime)
               const target  = ispConfig?.expected_uptime ?? null
-              const TIERS   = [100, 99.9, 99.5, 99, 95, 90]
+              const TIERS   = [100, 99.999, 99.99, 99.9, 99.5, 99, 95, 90]
               // Nearest standard tier at or below the configured target (for ring highlight)
               const targetTier = target !== null
                 ? (TIERS.includes(target) ? target : (TIERS.find(t => t <= target) ?? null))
@@ -792,8 +792,8 @@ export default function Reports() {
               const pUp     = ispConfig?.plan_upload_mbps   ?? 0
               const avgDown = chartData?.speedStats?.avgDown ?? null
               const avgUp   = chartData?.speedStats?.avgUp   ?? null
-              const slaDown = pDown > 0 ? pDown * 0.8 : null
-              const slaUp   = pUp   > 0 ? pUp   * 0.8 : null
+              const slaDown = pDown > 0 ? pDown : null
+              const slaUp   = pUp   > 0 ? pUp   : null
               const uptimePass = target !== null ? uptime >= target : null
               return (
                 <div className="space-y-2">
@@ -841,7 +841,7 @@ export default function Reports() {
                         }`}>
                           <span>{avgDown >= slaDown ? '✓' : '✗'}</span>
                           <span className="font-medium">Download SLA</span>
-                          <span className="opacity-70">{avgDown} / {slaDown} Mbps min</span>
+                          <span className="opacity-70">{avgDown} / {slaDown} Mbps plan</span>
                         </div>
                       )}
                       {slaUp !== null && avgUp !== null && (
@@ -852,7 +852,7 @@ export default function Reports() {
                         }`}>
                           <span>{avgUp >= slaUp ? '✓' : '✗'}</span>
                           <span className="font-medium">Upload SLA</span>
-                          <span className="opacity-70">{avgUp} / {slaUp} Mbps min</span>
+                          <span className="opacity-70">{avgUp} / {slaUp} Mbps plan</span>
                         </div>
                       )}
                     </div>
