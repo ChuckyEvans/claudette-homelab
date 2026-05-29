@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Save, Plus, Trash2, Edit2, Check, X, RefreshCw, Wand2, Play, Loader2, Network, Download, Upload, Database } from 'lucide-react'
+import { Save, Plus, Trash2, Edit2, Check, X, RefreshCw, Wand2, Play, Loader2, Network, Download, Upload } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { THEMES, applyTheme } from '../lib/themes.js'
 
@@ -232,6 +232,7 @@ export default function Settings({ onOpenWizard, configStatus }) {
   const [bgJobs,    setBgJobs]    = useState([])
   const [toasts,    setToasts]    = useState([])
   const bgJobsRef = useRef([])
+  // eslint-disable-next-line react-hooks/refs
   bgJobsRef.current = bgJobs
 
   function showToast(message, type = 'success') {
@@ -275,6 +276,7 @@ export default function Settings({ onOpenWizard, configStatus }) {
   const [deepScanHour,          setDeepScanHour]          = useState(4)
   const [retentionDays,         setRetentionDays]         = useState(90)
   const [connectivityHosts,     setConnectivityHosts]     = useState(['1.1.1.1'])
+  const [fallbackDns,           setFallbackDns]           = useState([])
   const [ispName,               setIspName]               = useState('')
   const [ispConnectionType,     setIspConnectionType]     = useState('fibre')
   const [ispExpectedUptime,     setIspExpectedUptime]     = useState(100)
@@ -306,6 +308,7 @@ export default function Settings({ onOpenWizard, configStatus }) {
         setDeepScanHour(cfg.schedule?.deep_scan_hour ?? 4)
         setRetentionDays(cfg.retention?.days ?? 90)
         setConnectivityHosts(cfg.network?.connectivity_hosts ?? ['1.1.1.1'])
+        setFallbackDns(cfg.network?.fallback_dns ?? [])
         setIspName(cfg.isp?.name ?? '')
         setIspConnectionType(cfg.isp?.connection_type ?? 'fibre')
         setIspExpectedUptime(cfg.isp?.expected_uptime ?? 100)
@@ -356,7 +359,7 @@ export default function Settings({ onOpenWizard, configStatus }) {
     try {
       await api.config.save({
         pi: { host: piHost, ssh_user: piUser, ssh_key: sshKey },
-        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()) },
+        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()), fallback_dns: fallbackDns.filter(h => h.trim()) },
         schedule: schedulePayload(),
         retention: { days: parseInt(retentionDays) },
         services: services.filter(s => s.name && s.url),
@@ -372,7 +375,7 @@ export default function Settings({ onOpenWizard, configStatus }) {
     try {
       await api.config.save({
         pi: { host: piHost, ssh_user: piUser, ssh_key: sshKey },
-        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()) },
+        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()), fallback_dns: fallbackDns.filter(h => h.trim()) },
         schedule: schedulePayload(),
         retention: { days: parseInt(retentionDays) },
         services: services.filter(s => s.name && s.url),
@@ -605,6 +608,35 @@ export default function Settings({ onOpenWizard, configStatus }) {
                     placeholder="1.1.1.1"
                     className="flex-1 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 outline-none transition-colors font-mono" />
                   <button onClick={() => setConnectivityHosts(p => p.filter((_, j) => j !== i))} className="p-1.5 text-slate-600 hover:text-red-400 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Fallback DNS */}
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <SectionHeading>Fallback DNS</SectionHeading>
+              <button onClick={() => setFallbackDns(p => [...p, ''])}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 rounded-lg transition-colors">
+                <Plus className="w-3.5 h-3.5" />Add Server
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-600 mb-3">
+              Fallback DNS servers passed to the Docker container via <span className="font-mono">--dns</span>. Used when your primary DNS resolver is unreachable. Applied on next deploy. Up to 3 entries.
+            </p>
+            <div className="space-y-2 max-w-xs">
+              {fallbackDns.length === 0 && (
+                <p className="text-[11px] text-slate-700 italic">None configured — Docker will use the Pi&apos;s resolv.conf only.</p>
+              )}
+              {fallbackDns.map((h, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={h} onChange={e => setFallbackDns(p => p.map((x, j) => j === i ? e.target.value : x))}
+                    placeholder="8.8.8.8"
+                    className="flex-1 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 outline-none transition-colors font-mono" />
+                  <button onClick={() => setFallbackDns(p => p.filter((_, j) => j !== i))} className="p-1.5 text-slate-600 hover:text-red-400 transition-colors">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>

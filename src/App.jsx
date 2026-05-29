@@ -1,19 +1,21 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import Layout from './components/Layout.jsx'
-import Dashboard from './components/Dashboard.jsx'
-import ServicesPanel from './components/ServicesPanel.jsx'
-import ThreatsPanel from './components/ThreatsPanel.jsx'
-import NetworkScan from './components/NetworkScan.jsx'
-import SystemStats from './components/SystemStats.jsx'
-import WizardModal from './components/WizardModal.jsx'
 import AuthModal from './components/AuthModal.jsx'
-import AuditLog from './components/AuditLog.jsx'
-import Settings from './components/Settings.jsx'
-import AboutPage from './components/AboutPage.jsx'
-import Reports from './components/Reports.jsx'
 import TopProgressBar from './components/TopProgressBar.jsx'
 import { createEventSource, api } from './lib/api.js'
 import { applyTheme } from './lib/themes.js'
+
+// Page-level components loaded on-demand to keep the initial bundle small
+const Dashboard    = lazy(() => import('./components/Dashboard.jsx'))
+const ServicesPanel = lazy(() => import('./components/ServicesPanel.jsx'))
+const ThreatsPanel  = lazy(() => import('./components/ThreatsPanel.jsx'))
+const NetworkScan   = lazy(() => import('./components/NetworkScan.jsx'))
+const SystemStats   = lazy(() => import('./components/SystemStats.jsx'))
+const WizardModal   = lazy(() => import('./components/WizardModal.jsx'))
+const AuditLog      = lazy(() => import('./components/AuditLog.jsx'))
+const Settings      = lazy(() => import('./components/Settings.jsx'))
+const AboutPage     = lazy(() => import('./components/AboutPage.jsx'))
+const Reports       = lazy(() => import('./components/Reports.jsx'))
 
 // Apply stored theme immediately — before any React render — to avoid flash
 ;(function () {
@@ -335,7 +337,7 @@ export default function App() {
   const handleRefreshServices = useCallback(() =>
     api.services.get().then(setServices), [])
 
-  const handleSelectDevice = useCallback((ip) => {
+  const _handleSelectDevice = useCallback((ip) => {
     setSelectedDeviceIp(ip)
     setPage('network')
   }, [])
@@ -390,15 +392,17 @@ export default function App() {
       )}
 
       {!auth.checking && !auth.authenticated && !auth.registered && (
-        <WizardModal
-          needsAccount
-          configExists={false}
-          configValid={false}
-          configOutdated={false}
-          onRegistered={handleAuthenticated}
-          onComplete={() => { setShowWizard(false); setConfigStatus({ exists: true, valid: true, outdated: false }) }}
-          onSkip={() => {}}
-        />
+        <Suspense fallback={null}>
+          <WizardModal
+            needsAccount
+            configExists={false}
+            configValid={false}
+            configOutdated={false}
+            onRegistered={handleAuthenticated}
+            onComplete={() => { setShowWizard(false); setConfigStatus({ exists: true, valid: true, outdated: false }) }}
+            onSkip={() => {}}
+          />
+        </Suspense>
       )}
 
       {/* ── Main app — only rendered when authenticated ── */}
@@ -406,13 +410,15 @@ export default function App() {
         <>
       <TopProgressBar active={networkScan.scanning} progress={networkScan.progress} />
       {showWizard && (
-        <WizardModal
-          configExists={configStatus.exists}
-          configValid={configStatus.valid}
-          configOutdated={configStatus.outdated}
-          onComplete={() => { setShowWizard(false); setConfigStatus({ exists: true, valid: true, outdated: false }) }}
-          onSkip={() => setShowWizard(false)}
-        />
+        <Suspense fallback={null}>
+          <WizardModal
+            configExists={configStatus.exists}
+            configValid={configStatus.valid}
+            configOutdated={configStatus.outdated}
+            onComplete={() => { setShowWizard(false); setConfigStatus({ exists: true, valid: true, outdated: false }) }}
+            onSkip={() => setShowWizard(false)}
+          />
+        </Suspense>
       )}
       <Layout
         page={page}
@@ -433,30 +439,36 @@ export default function App() {
             <span className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
           </div>
         )}
-        <Page
-          services={services}
-          threats={threats}
-          networkScan={networkScan}
-          systemStats={systemStats}
-          onScan={handleScan}
-          onCancel={handleCancel}
-          onRefreshThreats={handleRefreshThreats}
-          onRefreshServices={handleRefreshServices}
-          onOpenWizard={() => setShowWizard(true)}
-          onShowWizard={() => setShowWizard(true)}
-          onDeviceUpdated={handleDeviceUpdated}
-          onClearAll={handleClearAll}
-          portScanProgress={portScanProgress}
-          deepScan={deepScan}
-          lastScanDurationMs={lastScanDurationMs}
-          lastDeepScanDurationMs={lastDeepScanDurationMs}
-          setPage={navigateTo}
-          preSelectedIp={page === 'network' ? selectedDeviceIp : null}
-          updateInfo={updateInfo}
-          onCheckUpdates={checkForUpdates}
-          checkingUpdate={checkingUpdate}
-          configStatus={configStatus}
-        />
+        <Suspense fallback={
+          <div className="absolute inset-0 z-20 flex items-center justify-center">
+            <span className="w-7 h-7 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        }>
+          <Page
+            services={services}
+            threats={threats}
+            networkScan={networkScan}
+            systemStats={systemStats}
+            onScan={handleScan}
+            onCancel={handleCancel}
+            onRefreshThreats={handleRefreshThreats}
+            onRefreshServices={handleRefreshServices}
+            onOpenWizard={() => setShowWizard(true)}
+            onShowWizard={() => setShowWizard(true)}
+            onDeviceUpdated={handleDeviceUpdated}
+            onClearAll={handleClearAll}
+            portScanProgress={portScanProgress}
+            deepScan={deepScan}
+            lastScanDurationMs={lastScanDurationMs}
+            lastDeepScanDurationMs={lastDeepScanDurationMs}
+            setPage={navigateTo}
+            preSelectedIp={page === 'network' ? selectedDeviceIp : null}
+            updateInfo={updateInfo}
+            onCheckUpdates={checkForUpdates}
+            checkingUpdate={checkingUpdate}
+            configStatus={configStatus}
+          />
+        </Suspense>
       </Layout>
       {dbErrors.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">

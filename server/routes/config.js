@@ -80,6 +80,13 @@ router.post('/', (req, res) => {
     delete config.network.subnet
   }
   config.network.connectivity_hosts = rawConnectivityHosts ?? existingNetwork.connectivity_hosts ?? ['1.1.1.1']
+  const rawFallbackDns = Array.isArray(body.network?.fallback_dns)
+    ? body.network.fallback_dns
+        .map(h => sanitize(String(h), /[^0-9a-fA-F.:]/g, 39))
+        .filter(h => h)
+        .slice(0, 3)
+    : null
+  config.network.fallback_dns = rawFallbackDns ?? existingNetwork.fallback_dns ?? []
 
   const VALID_THEMES = ['starfield','dark','nebula','aurora','synthwave','ocean','forest','volcanic','arctic','matrix','crimson','cobalt','amber','crystal','circuit','storm']
   const existingUi = loadConfig()?.ui ?? {}

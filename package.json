@@ -1,10 +1,14 @@
 {
   "name": "claudette-ui",
-  "version": "0.0.8",
+  "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "concurrently \"node server/index.js\" \"vite\"",
-    "build": "vite build",
+    "lint": "eslint .",
+    "build": "eslint . && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "cross-env NODE_ENV=production node server/index.js",
@@ -36,11 +40,16 @@
     "systeminformation": "^5.22.11"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@vitejs/plugin-react": "^4.4.1",
     "@vitest/coverage-v8": "^4.1.7",
     "autoprefixer": "^10.4.19",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.6.0",
     "html2canvas": "^1.4.1",
     "jsdom": "^27.0.1",
     "jspdf": "^4.2.1",

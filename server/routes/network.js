@@ -4,8 +4,8 @@ import { existsSync, readFileSync } from 'fs'
 import { createSocket } from 'dgram'
 import { promises as dnsPromises } from 'dns'
 import { loadConfig } from '../config.js'
-import { ipToInt, intToIp, isPrivateIP, isPrivateCIDR, ipInCIDR, getCIDRHosts } from '../utils/ip.js'
-import { audit, auditDevice, upsertDevice, markOffline, touchDeviceStatus, getAllDevices, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleFavorite, toggleFlagged } from '../db.js'
+import { isPrivateIP, isPrivateCIDR, ipInCIDR, getCIDRHosts } from '../utils/ip.js'
+import { audit, auditDevice, upsertDevice, markOffline, getAllDevices, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleFavorite, toggleFlagged } from '../db.js'
 
 const router = Router()
 
@@ -387,7 +387,7 @@ function parseNmapOutput(output) {
 
 // ── DHCP leases file ─────────────────────────────────────────────────────────
 // On Pi deployments the leases file is mounted at /data/dhcp.leases.
-// Format (dnsmasq / Pi-hole): <timestamp> <mac> <ip> <hostname> <client-id>
+// Format (dnsmasq): <timestamp> <mac> <ip> <hostname> <client-id>
 function readDhcpLeases() {
   const LEASES_PATH = '/data/dhcp.leases'
   if (!existsSync(LEASES_PATH)) return {}
@@ -538,7 +538,7 @@ export async function performScan(broadcast) {
       if (!d.hostname && _mdnsMap[d.ip]) d.hostname = _mdnsMap[d.ip]
     }
 
-    // DHCP leases file — most reliable on Pi (dnsmasq / Pi-hole)
+    // DHCP leases file — most reliable on Pi (dnsmasq)
     const leases = readDhcpLeases()
     for (const d of _scanResults) {
       if (!d.hostname && leases[d.ip]) d.hostname = leases[d.ip]

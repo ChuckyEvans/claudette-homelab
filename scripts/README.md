@@ -53,4 +53,4 @@ chmod +x scripts/linux/deploy-pi.sh scripts/linux/restart.sh
    - `--network host` (required for nmap and ARP scanning)
    - `--cap-add NET_ADMIN --cap-add NET_RAW` (required for raw socket access)
    - `-v claudette-data:/app/data` (persistent SQLite database)
-   - DHCP leases mount (auto-detected from `/etc/pihole/dhcp.leases` or `/var/lib/misc/dnsmasq.leases`)
+   - DHCP leases mount (auto-detected from `/var/lib/misc/dnsmasq.leases` or `/etc/pihole/dhcp.leases`)

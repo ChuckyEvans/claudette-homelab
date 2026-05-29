@@ -72,11 +72,11 @@ export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates, ch
             </a>
           ) : versionInfo.error ? (
             <span className="flex items-center gap-1.5 text-slate-500 text-sm">
-              <XCircle className="w-4 h-4" /> Couldn't reach GitHub
+              <XCircle className="w-4 h-4" /> Couldn&apos;t reach GitHub
             </span>
           ) : versionInfo.latest ? (
             <span className="flex items-center gap-1.5 text-emerald-400 text-sm">
-              <CheckCircle className="w-4 h-4" /> You're up to date
+              <CheckCircle className="w-4 h-4" /> You&apos;re up to date
             </span>
           ) : null
         )}

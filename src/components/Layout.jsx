@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { Shield, ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink } from 'lucide-react'
+import { ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink } from 'lucide-react'
 const claudetteLogo = '/favicon.svg'
 
 const NAV = [
@@ -28,7 +28,7 @@ const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 400
 const SIDEBAR_DEFAULT = 208
 
-export default function Layout({ page, setPage, services, threats, username, onLogout, updateInfo, notifications = [], unreadCount = 0, onDismissNotification, onClearNotifications, onMarkAllRead, children }) {
+export default function Layout({ page, setPage, services, _threats, username, onLogout, _updateInfo, notifications = [], unreadCount = 0, onDismissNotification, onClearNotifications, onMarkAllRead, children }) {
   const failCount = services?.results?.filter(r => !r.ok).length ?? 0
   const allOk     = failCount === 0
 

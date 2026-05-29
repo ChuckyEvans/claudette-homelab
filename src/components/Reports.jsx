@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useId } from 'react'
-import { BarChart2, RefreshCw, X, ChevronLeft, ChevronRight, Monitor, Activity, Server, Wifi, Download, Clock, Zap, Search, AlertTriangle, Copy, Check, TrendingDown, ClipboardCheck } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { BarChart2, RefreshCw, X, Monitor, Activity, Server, Wifi, Download, Clock, Zap, Search, AlertTriangle, Copy, Check, TrendingDown, ClipboardCheck } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line, ReferenceLine,
@@ -312,7 +312,7 @@ export default function Reports() {
       ])
       const rows = [
         // Internet outage incidents (most important for ISP accountability)
-        ...(outData.outages ?? []).map((o, i) => ({
+        ...(outData.outages ?? []).map((o, _i) => ({
           section: 'internet_outage',
           timestamp: fmtLocalTs(o.start),
           event: o.ongoing ? 'internet.outage.ongoing' : 'internet.outage',
@@ -784,6 +784,10 @@ export default function Reports() {
               const uptime  = Number(chartData.internetStats.uptime)
               const target  = ispConfig?.expected_uptime ?? null
               const TIERS   = [100, 99.9, 99.5, 99, 95, 90]
+              // Nearest standard tier at or below the configured target (for ring highlight)
+              const targetTier = target !== null
+                ? (TIERS.includes(target) ? target : (TIERS.find(t => t <= target) ?? null))
+                : null
               const pDown   = ispConfig?.plan_download_mbps ?? 0
               const pUp     = ispConfig?.plan_upload_mbps   ?? 0
               const avgDown = chartData?.speedStats?.avgDown ?? null
@@ -797,15 +801,17 @@ export default function Reports() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[10px] text-slate-500 uppercase tracking-wide mr-1">Uptime tiers</span>
                     {TIERS.map(tier => {
-                      const pass = uptime >= tier
+                      const pass    = uptime >= tier
+                      const isTarget = tier === targetTier
                       return (
-                        <span key={tier} title={pass ? `✓ Meets ${tier}% SLA` : `✗ Below ${tier}% SLA`}
+                        <span key={tier}
+                          title={(isTarget ? '⊙ Your SLA target — ' : '') + (pass ? `✓ Meets ${tier}% SLA` : `✗ Below ${tier}% SLA`)}
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-default ${
                             pass
                               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                               : 'bg-red-500/10 border-red-500/30 text-red-400'
-                          }`}>
-                          {pass ? '✓' : '✗'} {tier}%
+                          } ${isTarget ? (pass ? 'ring-1 ring-emerald-400/60' : 'ring-1 ring-red-400/60') : ''}`}>
+                          {isTarget ? '⊙' : (pass ? '✓' : '✗')} {tier}%
                         </span>
                       )
                     })}
@@ -866,7 +872,7 @@ export default function Reports() {
                   <p className="text-xs text-red-400/80 mt-0.5">
                     Total downtime: <span className="font-bold text-red-300">{fmtMs(outageData.totalDowntimeMs)}</span>
                     &nbsp;· Longest: <span className="font-bold text-red-300">{fmtMs(outageData.longestMs)}</span>
-                    {ispConfig?.name ? <>&nbsp;· ISP: {ispConfig.name} — expected {ispConfig.expected_uptime ?? 100}% uptime</> : <>&nbsp;· Expected uptime: 100%</>}
+                    {ispConfig?.name ? <>&nbsp;· ISP: {ispConfig.name} — expected {ispConfig.expected_uptime ?? 100}% uptime</> : <>&nbsp;· Expected uptime: {ispConfig?.expected_uptime ?? 100}%</>}
                   </p>
                 </div>
                 <button
@@ -911,6 +917,7 @@ export default function Reports() {
                         <th className="px-4 py-2 text-left text-slate-500 font-medium w-8">#</th>
                         <th className="px-4 py-2 text-left text-slate-500 font-medium">Started</th>
                         <th className="px-4 py-2 text-left text-slate-500 font-medium">Restored</th>
+                        <th className="px-4 py-2 text-left text-slate-500 font-medium">Type</th>
                         <th className="px-4 py-2 text-right text-slate-500 font-medium">Down For</th>
                         <th className="px-4 py-2 text-right text-slate-500 font-medium">Was Up For</th>
                       </tr>
@@ -924,6 +931,13 @@ export default function Reports() {
                             {o.ongoing
                               ? <span className="text-red-400 font-semibold">&#9888; Still offline</span>
                               : <span className="text-emerald-400">{new Date(o.end).toLocaleString('en-GB')}</span>}
+                          </td>
+                          <td className="px-4 py-2">
+                            {o.outage_type === 'isp'
+                              ? <span className="px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/30 text-orange-400">ISP</span>
+                              : o.outage_type === 'infra'
+                              ? <span className="px-1.5 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-yellow-400" title="Local gateway unreachable — likely an infrastructure issue, not the ISP">Infra</span>
+                              : <span className="text-slate-600">—</span>}
                           </td>
                           <td className="px-4 py-2 text-right font-bold tabular-nums text-red-300">
                             {fmtMs(o.durationMs)}{o.ongoing ? '+' : ''}

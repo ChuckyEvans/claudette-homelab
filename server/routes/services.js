@@ -48,7 +48,7 @@ async function checkHttp(service) {
 }
 
 async function checkDocker(service) {
-  const cfg = loadConfig()
+  loadConfig()
   const { name, container } = service
   const start = Date.now()
 
@@ -175,6 +175,21 @@ function pingHost(host) {
   })
 }
 
+// Detect the default gateway IP (Linux/Docker only, cached per process lifetime)
+let _cachedGateway = undefined
+function detectGateway() {
+  if (_cachedGateway !== undefined) return _cachedGateway
+  if (process.platform === 'win32') { _cachedGateway = null; return null }
+  try {
+    const out = execSync(
+      "ip route show default 2>/dev/null | awk '/default/ { print $3 }' | head -1",
+      { timeout: 2000 }
+    ).toString().trim()
+    _cachedGateway = /^(\d{1,3}\.){3}\d{1,3}$/.test(out) ? out : null
+  } catch { _cachedGateway = null }
+  return _cachedGateway
+}
+
 async function checkHttpHead(url) {
   const start = Date.now()
   try {
@@ -198,6 +213,16 @@ export async function checkConnectivity(broadcast) {
 
   const ok = _internetResults.some(r => r.ok)
 
+  // Gateway check for infra vs ISP failure classification
+  const gateway    = detectGateway()
+  const gwResult   = (gateway && !ok) ? await pingHost(gateway) : null
+  const gatewayOk  = gwResult ? gwResult.ok : null
+  // isp = external down but local gateway reachable; infra = gateway also unreachable
+  const outageType = ok ? null
+    : (gatewayOk === true  ? 'isp'
+    :  gatewayOk === false ? 'infra'
+    :  'unknown')
+
   // Track attempt count while in outage mode
   if (_outageMode) _outageAttemptCount++
 
@@ -206,13 +231,17 @@ export async function checkConnectivity(broadcast) {
 
   if (_prevInternetOk !== null && _prevInternetOk !== ok) {
     audit(ok ? 'internet.up' : 'internet.down', {
-      results: _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))
+      results:     _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
+      outage_type: ok ? null : outageType,
+      gateway_ok:  ok ? null : gatewayOk,
     })
   }
 
   audit('internet.check', {
     ok,
     results:          _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
+    outage_type:      ok ? null : outageType,
+    gateway_ok:       ok ? null : gatewayOk,
     outage_mode:      _outageMode,
     interval_seconds: _outageMode ? _outageCheckSecs : null,
     attempt_count:    _outageMode ? _outageAttemptCount : null,

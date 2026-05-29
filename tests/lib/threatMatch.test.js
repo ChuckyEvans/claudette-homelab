@@ -237,7 +237,7 @@ describe('matchDevices() — device missing hostname property (line 60 ?? branch
     // Device has no hostname property — d.hostname is undefined → ?? '' prevents crash
     const dev     = { ip: '192.168.1.20', label: 'mybox', status: 'online' }
     const services = [service('mybox service', 'http://mybox:8080')]
-    const result   = matchDevices(threat('mybox', 'Mybox vulnerability'), [dev], services)
+    matchDevices(threat('mybox', 'Mybox vulnerability'), [dev], services)
     // mybox hostname resolved via label match fallback path
     expect(() => matchDevices(threat('mybox', 'Mybox vulnerability'), [dev], services)).not.toThrow()
   })

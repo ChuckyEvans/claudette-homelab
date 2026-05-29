@@ -119,7 +119,6 @@ export async function refreshThreats(broadcast) {
   for (const feed of FEEDS) {
     try {
       const parsed = await parser.parseURL(feed.url)
-      let added = 0
       for (const item of parsed.items ?? []) {
         const id = item.guid || item.link || item.title
         if (!id || seen.has(id)) continue

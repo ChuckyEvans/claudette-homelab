@@ -10,6 +10,11 @@ network:
   connectivity_hosts:
     - 1.1.1.1   # Cloudflare DNS
     - 9.9.9.9   # Quad9 DNS
+  # Optional: fallback DNS servers passed to the Docker container via --dns.
+  # Used if your primary DNS resolver is unreachable. Up to 3 entries.
+  # fallback_dns:
+  #   - 8.8.8.8   # Google DNS
+  #   - 8.8.4.4   # Google DNS secondary
   # Optional: assign devices to gateways so the map groups them under the correct router.
   # gateway_assignments:
   #   "192.168.1.1":
@@ -40,7 +45,7 @@ isp:
     - yt-dlp
     - transmission
     - jackett
-    - pihole
+    - nginx
     - sickgear
     - raspberry pi
   severity_threshold: medium   # low / medium / high / critical

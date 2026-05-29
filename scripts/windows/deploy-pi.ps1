@@ -36,6 +36,22 @@ function Read-YamlValue([string]$key, [string]$default) {
     return $default
 }
 
+# Reads a YAML block-list value: lines matching "  - item" immediately following "  key:"
+function Read-YamlList([string]$key) {
+    $configPath = Join-Path $ProjectRoot 'config.yaml'
+    if (-not (Test-Path $configPath)) { return @() }
+    $lines = Get-Content $configPath
+    $capturing = $false; $result = @()
+    foreach ($line in $lines) {
+        if ($line -match "^\s+${key}:\s*$") { $capturing = $true; continue }
+        if ($capturing) {
+            if ($line -match '^\s+-\s+(.+)') { $result += $Matches[1].Trim().Trim('"').Trim("'") }
+            elseif ($line.Trim() -and $line -notmatch '^\s+-') { break }
+        }
+    }
+    return $result
+}
+
 if (-not $PiHost) { $PiHost = Read-YamlValue 'host'     '192.168.1.10' }
 if (-not $PiUser) { $PiUser = Read-YamlValue 'ssh_user' 'ubuntu'       }
 if (-not $SshKey) {
@@ -97,7 +113,8 @@ if (-not $SkipBuild) {
     Write-Host "`n[1/2] Uploading source + building on Pi (native ARM64)..." -ForegroundColor Cyan
     $SrcTar  = Join-Path $env:TEMP 'claudette-src.tar'
     $include = @('server','src','package.json','package-lock.json','Dockerfile',
-                 'vite.config.js','postcss.config.js','tailwind.config.js','index.html','.dockerignore')
+                 'vite.config.js','postcss.config.js','tailwind.config.js','index.html',
+                 'eslint.config.js','.dockerignore')
     $existing = $include | Where-Object { Test-Path (Join-Path $ProjectRoot $_) }
     tar -cf $SrcTar -C $ProjectRoot @existing
     if ($LASTEXITCODE -ne 0) { Write-Error "tar failed."; exit 1 }
@@ -119,7 +136,7 @@ Write-Host "`n[2/2] Restarting container on Pi..." -ForegroundColor Cyan
 Invoke-Ssh "sudo docker stop ${ContainerName} 2>/dev/null || true"
 Invoke-Ssh "sudo docker rm   ${ContainerName} 2>/dev/null || true"
 
-# Probe for a DHCP leases file and mount it if present (Pi-hole or dnsmasq)
+# Probe for a DHCP leases file and mount it if present (dnsmasq)
 $leasesMount = ''
 $leasesPath  = Invoke-SshSilent "ls /etc/pihole/dhcp.leases /var/lib/misc/dnsmasq.leases 2>/dev/null | head -1"
 if ($leasesPath -and $leasesPath.Trim()) {
@@ -136,6 +153,14 @@ $hostDns = Invoke-SshSilent "grep '^nameserver' /etc/resolv.conf | sed 's/namese
 foreach ($ns in ($hostDns -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
     $dnsFlags += "--dns $ns"
     Write-Host "      DNS: using $ns from host resolv.conf" -ForegroundColor DarkGray
+}
+# Append fallback DNS from config.yaml (used if the primary DNS resolver is down)
+$fallbackDns = Read-YamlList 'fallback_dns'
+foreach ($dns in $fallbackDns) {
+    if ($dns -match '^[0-9a-fA-F.:]+$') {
+        $dnsFlags += "--dns $dns"
+        Write-Host "      DNS fallback: $dns (from config.yaml)" -ForegroundColor DarkGray
+    }
 }
 
 Invoke-Ssh (@(

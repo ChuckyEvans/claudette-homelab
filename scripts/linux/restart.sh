@@ -56,7 +56,7 @@ fi
 echo ""
 echo -e "\033[36m[3/3] Starting container '$CONTAINER_NAME'...\033[0m"
 
-# Mount DHCP leases if found (Pi-hole or dnsmasq) for hostname enrichment
+# Mount DHCP leases if found (dnsmasq) for hostname enrichment
 EXTRA_MOUNTS=()
 for f in /etc/pihole/dhcp.leases /var/lib/misc/dnsmasq.leases; do
     if [[ -f "$f" ]]; then

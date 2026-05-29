@@ -260,20 +260,23 @@ router.get('/outages', (req, res) => {
 
     // Pull ALL down/up transitions (not windowed) so we can pair them correctly
     const events = db.all(
-      `SELECT ts, event FROM audit_log WHERE event IN ('internet.down','internet.up') ORDER BY ts ASC`
+      `SELECT ts, event, payload FROM audit_log WHERE event IN ('internet.down','internet.up') ORDER BY ts ASC`
     )
 
     const outages = []
-    let downTs  = null
-    let lastUpTs = null   // timestamp of last internet.up (or null = never seen one)
+    let downTs       = null
+    let downType     = null  // outage_type from the internet.down event
+    let lastUpTs     = null  // timestamp of last internet.up (or null = never seen one)
     for (const e of events) {
       if (e.event === 'internet.down' && downTs === null) {
-        downTs = e.ts
+        downTs   = e.ts
+        try { const p = JSON.parse(e.payload); downType = p.outage_type ?? null } catch { downType = null }
       } else if (e.event === 'internet.up' && downTs !== null) {
         const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-        outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, uptimeBeforeMs, ongoing: false })
+        outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
         lastUpTs = e.ts
         downTs   = null
+        downType = null
       } else if (e.event === 'internet.up') {
         lastUpTs = e.ts
       }
@@ -281,7 +284,7 @@ router.get('/outages', (req, res) => {
     // Still offline?
     if (downTs !== null) {
       const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-      outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, uptimeBeforeMs, ongoing: true })
+      outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, uptimeBeforeMs, outage_type: downType, ongoing: true })
     }
 
     // Filter to outages that overlap the requested window — newest first

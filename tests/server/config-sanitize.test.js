@@ -269,9 +269,9 @@ describe('resolveRetention()', () => {
 
 describe('sanitizeServices()', () => {
   it('normalises a valid HTTP service', () => {
-    const svcs = sanitizeServices([{ name: 'Pi-hole', type: 'http', url: 'http://192.168.8.10/admin', expect_status: 200 }])
+    const svcs = sanitizeServices([{ name: 'Home Router', type: 'http', url: 'http://192.168.8.10/admin', expect_status: 200 }])
     expect(svcs).toHaveLength(1)
-    expect(svcs[0].name).toBe('Pi-hole')
+    expect(svcs[0].name).toBe('Home Router')
     expect(svcs[0].type).toBe('http')
     expect(svcs[0].expect_status).toBe(200)
   })

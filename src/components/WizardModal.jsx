@@ -4,7 +4,7 @@ import { api } from '../lib/api.js'
 import { THEMES, applyTheme } from '../lib/themes.js'
 const claudetteLogo = '/favicon.svg'
 
-const STEPS = [
+const _STEPS = [
   { label: 'Network' },
   { label: 'Services' },
   { label: 'Schedule' },
@@ -170,7 +170,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
   }
   const removeService = (i) => setForm(p => ({ ...p, services: p.services.filter((_, j) => j !== i) }))
 
-  const handleTest = async () => {
+  const _handleTest = async () => {
     setTesting(true)
     setTestResult(null)
     try {
@@ -791,7 +791,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
                   <label className={`block text-xs font-medium ${configOutdated && form.ispExpectedUptime === 100 ? 'text-amber-400' : 'text-slate-300'}`}>Expected Uptime %
                     {configOutdated && form.ispExpectedUptime === 100 && <span className="ml-1.5 text-[10px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full">New</span>}
                   </label>
-                  <p className="text-[11px] text-slate-500">Your ISP's guaranteed uptime (SLA target)</p>
+                  <p className="text-[11px] text-slate-500">Your ISP&apos;s guaranteed uptime (SLA target)</p>
                   <input type="number" min="90" max="100" step="0.001"
                     value={form.ispExpectedUptime}
                     onChange={e => setForm(p => ({ ...p, ispExpectedUptime: e.target.value }))}

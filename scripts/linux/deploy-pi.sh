@@ -117,7 +117,7 @@ echo -e "\033[36m[4/4] Restarting container on Pi...\033[0m"
 run_ssh "sudo docker stop ${CONTAINER_NAME} 2>/dev/null || true"
 run_ssh "sudo docker rm   ${CONTAINER_NAME} 2>/dev/null || true"
 
-# Probe for a DHCP leases file (Pi-hole or dnsmasq) and mount if present
+# Probe for a DHCP leases file (dnsmasq) and mount if present
 LEASES_MOUNT=""
 LEASES_PATH=$(run_ssh_silent "ls /etc/pihole/dhcp.leases /var/lib/misc/dnsmasq.leases 2>/dev/null | head -1")
 if [[ -n "${LEASES_PATH// /}" ]]; then

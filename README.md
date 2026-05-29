@@ -11,7 +11,7 @@ A self-hosted home network monitoring dashboard. Runs in Docker on a Raspberry P
 | **Network scan** | nmap ping-sweep discovers every device on your LAN. Shows IP, hostname, MAC, vendor, OS, open ports, latency, traceroute. |
 | **Deep scan** | Sequential port scan of all devices — runs nightly at 4 am or on demand. |
 | **Services** | HTTP/Docker health checks on a configurable schedule. Tracks uptime history. |
-| **Threats** | CVE feed filtered to your keywords (e.g. `pihole`, `docker`, `python flask`). |
+| **Threats** | CVE feed filtered to your keywords (e.g. `nginx`, `docker`, `python flask`). |
 | **Internet / outage** | Pings configurable hosts every N minutes. Pairs outages, calculates downtime, generates ISP SLA reports. |
 | **Speed test** | Scheduled download/upload/ping tests. Exportable to PDF or CSV. |
 | **System stats** | CPU, memory, disk, network usage of the host running Claudette. |
@@ -244,7 +244,7 @@ threats:
   keywords:                     # CVEs matching these keywords will be shown
     - docker
     - python
-    - pihole
+    - nginx
   severity_threshold: medium    # low / medium / high / critical
 ```
 

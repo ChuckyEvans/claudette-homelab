@@ -1,5 +1,5 @@
 # ── Stage 1: build the Vite frontend ────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ COPY . .
 RUN npm run build
 
 # ── Stage 2: production image ────────────────────────────────────────────────
-FROM node:20-alpine
+FROM node:22-alpine
 
 # nmap is required for network scanning; tcpdump for passive ARP gateway detection
 RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && apk add --no-cache nmap nmap-scripts tcpdump
