@@ -1,8 +1,17 @@
 param(
     $KodiIp   = "192.168.8.250",
-    $KodiPass = "***REMOVED***",
+    $KodiPass = "",       # Kodi web interface password (Settings > Services > Web server)
     $ZipPath  = "$PSScriptRoot\plugin.program.claudette-1.0.0.zip"
 )
+
+# NOTE: Prefer the SSH-hop approach which is more reliable:
+#   .\build-addon.ps1 -KodiHost 192.168.8.250
+# That script SCPs via the fubar Pi (192.168.8.10) using LibreELEC's default SSH creds.
+
+if (-not $KodiPass) {
+    Write-Error "KodiPass required. Run: .\deploy-addon.ps1 -KodiPass <password>`nOr use the SSH approach: .\build-addon.ps1 -KodiHost 192.168.8.250"
+    exit 1
+}
 
 $cred = [Net.NetworkCredential]::new("kodi", $KodiPass)
 

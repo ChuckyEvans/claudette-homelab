@@ -1,48 +1,13 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<settings version="2">
-  <section id="general">
-    <category id="server" label="Server">
-      <group id="1">
-        <setting id="server_url" type="string" label="Claudette Server URL">
-          <control type="edit" format="string"/>
-          <default>http://192.168.8.10:7654</default>
-          <constraints allowempty="false"/>
-        </setting>
-        <setting id="username" type="string" label="Username">
-          <control type="edit" format="string"/>
-        </setting>
-        <setting id="password" type="string" label="Password">
-          <control type="edit" format="string"/>
-        </setting>
-        <setting id="timeout" type="integer" label="Request Timeout (seconds)">
-          <control type="slider" format="integer"/>
-          <default>10</default>
-          <constraints minimum="3" maximum="30" step="1"/>
-        </setting>
-      </group>
-    </category>
-    <category id="display" label="Display">
-      <group id="2">
-        <setting id="show_offline_devices" type="boolean" label="Show offline devices">
-          <control type="toggle"/>
-          <default>true</default>
-        </setting>
-        <setting id="threat_min_severity" type="integer" label="Minimum threat severity">
-          <control type="spinner" format="string"/>
-          <default>1</default>
-          <options>
-            <option label="Low">0</option>
-            <option label="Medium">1</option>
-            <option label="High">2</option>
-            <option label="Critical">3</option>
-          </options>
-        </setting>
-        <setting id="audit_limit" type="integer" label="Audit events to show">
-          <control type="slider" format="integer"/>
-          <default>50</default>
-          <constraints minimum="10" maximum="200" step="10"/>
-        </setting>
-      </group>
-    </category>
-  </section>
+<settings>
+  <setting label="Server" type="lsep" />
+  <setting id="server_url" type="text"   label="Claudette Server URL"        default="http://192.168.8.10:7654" />
+  <setting id="username"   type="text"   label="Username"                    default="" />
+  <setting id="password"   type="text"   label="Password"                    default="" />
+  <setting id="timeout"    type="slider" label="Request Timeout (seconds)"   default="10" range="3,1,30" option="int" />
+
+  <setting label="Display" type="lsep" />
+  <setting id="show_offline_devices"  type="bool"   label="Show offline devices"     default="true" />
+  <setting id="threat_min_severity"   type="enum"   label="Minimum threat severity"  default="1"    values="Low|Medium|High|Critical" />
+  <setting id="audit_limit"           type="slider" label="Audit events to show"     default="50"   range="10,10,200" option="int" />
 </settings>

@@ -88,6 +88,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
     deepScanHour: 4,
     retentionDays: 90,
     connectivityHosts: ['1.1.1.1'],
+    vpnInterface: '',
     services: [],
     theme:    'dark',
     ispName: '',
@@ -145,6 +146,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
           deepScanHour:   cfg.schedule?.deep_scan_hour         ?? 4,
           retentionDays:  cfg.retention?.days                  ?? 90,
           connectivityHosts: cfg.network?.connectivity_hosts   ?? ['1.1.1.1'],
+          vpnInterface:      cfg.network?.vpn_interface         ?? '',
           services:       cfg.services ?? [],
           theme:          cfg.ui?.theme  ?? 'dark',
           ispName:            cfg.isp?.name             ?? '',
@@ -189,11 +191,10 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
     try {
       await api.config.save({
         pi:       { host: form.piHost, ssh_user: form.piUser, ssh_key: form.sshKey },
-        network:  { subnets: form.subnets.filter(s => s.trim()), connectivity_hosts: form.connectivityHosts.filter(h => h.trim()) },
+        network:  { subnets: form.subnets.filter(s => s.trim()), connectivity_hosts: form.connectivityHosts.filter(h => h.trim()), vpn_interface: (form.vpnInterface ?? '').trim() || undefined },
         schedule: { check_interval_minutes: parseInt(form.checkInterval) || 5, internet_check_minutes: parseInt(form.internetCheckInterval) || 5, internet_outage_check_seconds: Math.max(5, parseInt(form.internetOutageCheckSecs) || 10), speedtest_interval_hours: parseInt(form.speedtestInterval) || 1, threat_interval_hours: parseInt(form.threatInterval) || 6, deep_scan_hour: parseInt(form.deepScanHour) ?? 4 },
         retention: { days: parseInt(form.retentionDays) || 90 },
         services: form.services.filter(s => s.name && s.url),
-        ui:       { theme: form.theme },
         isp: {
           name:               (form.ispName || '').trim(),
           connection_type:    form.ispConnectionType || 'fibre',
@@ -737,6 +738,17 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
                 </div>
               </div>
 
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-slate-300">VPN interface <span className="text-slate-600 font-normal">(optional)</span></label>
+                <p className="text-[11px] text-slate-500">Interface for VPN connectivity checks and speed tests. Leave blank to skip VPN monitoring.</p>
+                <input value={form.vpnInterface ?? ''} onChange={e => setForm(p => ({ ...p, vpnInterface: e.target.value }))}
+                  placeholder="e.g. tun0 or wg0"
+                  className="w-full bg-[#0a0a18] border border-[#1a1a35] rounded-lg px-3 py-2 text-sm font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60 transition-colors" />
+                {form.vpnInterface?.trim() && (
+                  <p className="text-[10px] text-violet-400/80">VPN monitoring enabled via <span className="font-mono">{form.vpnInterface.trim()}</span></p>
+                )}
+              </div>
+
               {error && (
                 <p className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{error}</p>
               )}
@@ -853,7 +865,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => { setForm(p => ({ ...p, theme: t.id })); applyTheme(t.id) }}
+                    onClick={() => { setForm(p => ({ ...p, theme: t.id })); applyTheme(t.id); localStorage.setItem('claudette:theme', t.id) }}
                     className={`flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all ${
                       form.theme === t.id
                         ? 'border-indigo-500 bg-indigo-600/10'

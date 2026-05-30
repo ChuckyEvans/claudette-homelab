@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink } from 'lucide-react'
+import { getUIPref, setUIPref } from '../lib/uiPrefs.js'
 const claudetteLogo = '/favicon.svg'
 
 const NAV = [
@@ -32,14 +33,14 @@ export default function Layout({ page, setPage, services, _threats, username, on
   const failCount = services?.results?.filter(r => !r.ok).length ?? 0
   const allOk     = failCount === 0
 
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === 'true')
+  const [collapsed, setCollapsed] = useState(() => getUIPref('sidebar_collapsed') === 'true')
   const toggle = () => setCollapsed(c => {
-    localStorage.setItem('sidebar-collapsed', String(!c))
+    setUIPref('sidebar_collapsed', String(!c))
     return !c
   })
 
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = parseInt(localStorage.getItem('sidebar-width'))
+    const saved = parseInt(getUIPref('sidebar_width'))
     return !isNaN(saved) ? Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, saved)) : SIDEBAR_DEFAULT
   })
   const [isDragging, setIsDragging] = useState(false)
@@ -55,7 +56,7 @@ export default function Layout({ page, setPage, services, _threats, username, on
     }
     const onMouseUp = (ev) => {
       const final = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + ev.clientX - startX))
-      localStorage.setItem('sidebar-width', String(final))
+      setUIPref('sidebar_width', String(final))
       setSidebarWidth(final)
       setIsDragging(false)
       document.removeEventListener('mousemove', onMouseMove)

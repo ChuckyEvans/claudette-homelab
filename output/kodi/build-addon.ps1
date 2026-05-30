@@ -37,10 +37,15 @@ $faviconPath = Join-Path $PSScriptRoot '..\..\public\favicon.svg'
 if (Test-Path $faviconPath) {
     Write-Host "  Regenerating icon.png from favicon.svg..." -ForegroundColor Gray
     try {
-        npx --yes svgexport $faviconPath $iconPath '256:256' 2>&1 | Out-Null
-        if (Test-Path $iconPath) {
+        $job = Start-Job { npx --yes svgexport $using:faviconPath $using:iconPath '256:256' }
+        $done = Wait-Job $job -Timeout 20
+        if ($done -and (Test-Path $iconPath)) {
             Write-Host "  icon.png updated." -ForegroundColor Gray
+        } else {
+            Stop-Job $job -ErrorAction SilentlyContinue
+            Write-Host "  svgexport skipped (timed out or failed) — using existing icon.png" -ForegroundColor Yellow
         }
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
     } catch {
         Write-Host "  svgexport failed — using existing icon.png if present" -ForegroundColor Yellow
     }

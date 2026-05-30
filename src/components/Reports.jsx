@@ -192,6 +192,7 @@ export default function Reports() {
   const [internetSearch,       setInternetSearch]       = useState('')
   const [speedtestSearch,      setSpeedtestSearch]      = useState('')
   const [speedtestBelowSla,    setSpeedtestBelowSla]    = useState(false)
+  const [speedtestViaFilter,   setSpeedtestViaFilter]   = useState('')
   const { toasts, add: addToast } = useToast()
   const tableRef = useRef(null)
 
@@ -297,6 +298,9 @@ export default function Reports() {
   const dateStamp = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
   const fmtLocalTs = ts => { const d = new Date(ts); const p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` }
   const rangeLabel = drillDay ? drillDay.label : RANGE_LABELS[range]
+
+  // Latest VPN exit metadata from speedtest rows — used in Internet + SpeedTest tabs
+  const vpnExitIsp = speedtestData?.results?.find(r => r.via === 'vpn') ?? null
 
   async function handleExportCsv() {
     try {
@@ -615,15 +619,27 @@ export default function Reports() {
           )}
 
           {/* Speed test filters */}
-          {tab === 'speedtest' && (ispConfig?.plan_download_mbps > 0 || ispConfig?.plan_upload_mbps > 0) && (
-            <button onClick={() => setSpeedtestBelowSla(v => !v)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                speedtestBelowSla
-                  ? 'bg-red-600/25 border-red-500/50 text-red-300'
-                  : 'border-[#1a1a30] text-slate-400 hover:text-slate-200'
-              }`}>
-              Below SLA only
-            </button>
+          {tab === 'speedtest' && (
+            <>
+              {(ispConfig?.plan_download_mbps > 0 || ispConfig?.plan_upload_mbps > 0) && (
+                <button onClick={() => setSpeedtestBelowSla(v => !v)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    speedtestBelowSla
+                      ? 'bg-red-600/25 border-red-500/50 text-red-300'
+                      : 'border-[#1a1a30] text-slate-400 hover:text-slate-200'
+                  }`}>
+                  Below SLA only
+                </button>
+              )}
+              <button onClick={() => setSpeedtestViaFilter(v => v === 'vpn' ? '' : 'vpn')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                  speedtestViaFilter === 'vpn'
+                    ? 'bg-violet-600/25 border-violet-500/50 text-violet-300'
+                    : 'border-[#1a1a30] text-slate-400 hover:text-slate-200'
+                }`}>
+                VPN only
+              </button>
+            </>
           )}
 
           {/* Search — rightmost on every filterable tab */}
@@ -748,36 +764,115 @@ export default function Reports() {
         {/* ── INTERNET ── */}
         {tab === 'internet' && (
           <>
-            {/* Internet stats cards */}
-            {chartData?.internetStats ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  { label: 'Internet Uptime',  value: `${Number(chartData.internetStats.uptime).toFixed(chartData.internetStats.uptime === 100 ? 1 : 3)}%`, color: chartData.internetStats.uptime < 99.9 ? 'text-red-400' : chartData.internetStats.uptime < 100 ? 'text-amber-400' : 'text-emerald-400', Icon: Wifi },
-                  { label: 'Avg Latency',      value: `${chartData.internetStats.avgLatency}ms`,  color: 'text-sky-400',    Icon: Zap      },
-                  { label: 'Checks Total',     value: chartData.internetStats.totalChecks,        color: 'text-indigo-400', Icon: Clock    },
-                  { label: 'Status Changes',   value: chartData.internetStats.changes,            color: 'text-violet-400', Icon: Activity },
-                ].map(({ label, value, color, Icon }) => (
-                  <div key={label} className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${
-                    label === 'Internet Uptime' && chartData.internetStats.uptime < 100 ? 'border-red-500/40' : 'border-[#1a1a30]'
-                  }`}>
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <Icon className={`w-3 h-3 ${color}`} />
-                      <span className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</span>
-                    </div>
-                    <p className={`text-xl font-bold tabular-nums ${color}`}>{value}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {['Internet Uptime', 'Avg Latency', 'Checks Total', 'Status Changes'].map(l => (
-                  <div key={l} className="rounded-xl px-4 py-3 border border-[#1a1a30] bg-[#0a0a18] animate-pulse">
-                    <div className="h-3 w-20 bg-[#1a1a30] rounded mb-2" />
-                    <div className="h-6 w-12 bg-[#1a1a30] rounded" />
-                  </div>
-                ))}
+            {/* Connection path info banner */}
+            {(ispConfig?.name || vpnExitIsp) && (
+              <div className="flex flex-wrap gap-2">
+                {ispConfig?.name && (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0a0a18] border border-[#1a1a30] text-[11px] text-slate-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400 inline-block" />
+                    Direct · <span className="text-slate-300 font-medium">{ispConfig.name}</span>
+                    {ispConfig.connection_type && <span className="text-slate-600 ml-1">({ispConfig.connection_type})</span>}
+                  </span>
+                )}
+                {vpnExitIsp?.client_isp && (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0a0a18] border border-violet-500/20 text-[11px] text-violet-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400 inline-block" />
+                    VPN exit · <span className="text-violet-300 font-medium">{vpnExitIsp.client_isp}</span>
+                    {vpnExitIsp.client_city && <span className="text-violet-600 ml-1">· {vpnExitIsp.client_city}{vpnExitIsp.client_country ? `, ${vpnExitIsp.client_country}` : ''}</span>}
+                  </span>
+                )}
               </div>
             )}
+
+            {/* ── Direct Connection stats ── */}
+            <div>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-sky-400 inline-block" /> Direct Connection
+                {ispConfig?.name && <span className="normal-case tracking-normal font-normal text-slate-600">· {ispConfig.name}{ispConfig.connection_type ? ` (${ispConfig.connection_type})` : ''}</span>}
+              </p>
+              {chartData?.internetStats ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Uptime',         value: `${Number(chartData.internetStats.uptime).toFixed(chartData.internetStats.uptime === 100 ? 1 : 3)}%`, color: chartData.internetStats.uptime < 99.9 ? 'text-red-400' : chartData.internetStats.uptime < 100 ? 'text-amber-400' : 'text-emerald-400', Icon: Wifi },
+                    { label: 'Avg Latency',    value: `${chartData.internetStats.avgLatency}ms`,  color: 'text-sky-400',    Icon: Zap      },
+                    { label: 'Checks Total',   value: chartData.internetStats.totalChecks,        color: 'text-indigo-400', Icon: Clock    },
+                    { label: 'Status Changes', value: chartData.internetStats.changes,            color: 'text-slate-300',  Icon: Activity },
+                  ].map(({ label, value, color, Icon }) => (
+                    <div key={label} className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${
+                      label === 'Uptime' && chartData.internetStats.uptime < 100 ? 'border-red-500/40' : 'border-sky-500/15'
+                    }`}>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Icon className={`w-3 h-3 ${color}`} />
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</span>
+                      </div>
+                      <p className={`text-xl font-bold tabular-nums ${color}`}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {['Uptime', 'Avg Latency', 'Checks Total', 'Status Changes'].map(l => (
+                    <div key={l} className="rounded-xl px-4 py-3 border border-[#1a1a30] bg-[#0a0a18] animate-pulse">
+                      <div className="h-3 w-20 bg-[#1a1a30] rounded mb-2" />
+                      <div className="h-6 w-12 bg-[#1a1a30] rounded" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── VPN Tunnel stats — fully independent of direct stats ── */}
+            {(() => {
+              const checks = internetData?.checks ?? []
+              const vpnChecks = checks.filter(c => c.vpn_up != null)
+              if (vpnChecks.length === 0) return null
+              const vpnOkChecks = vpnChecks.filter(c => c.vpn_ok !== false)
+              const vpnUptime   = vpnChecks.length > 0 ? parseFloat(((vpnOkChecks.length / vpnChecks.length) * 100).toFixed(1)) : null
+              const vpnLatMs    = vpnChecks.filter(c => c.vpnAvgMs != null)
+              const vpnAvgLat   = vpnLatMs.length > 0 ? Math.round(vpnLatMs.reduce((s, c) => s + c.vpnAvgMs, 0) / vpnLatMs.length) : null
+              const vpnDownChecks = vpnChecks.filter(c => c.vpn_ok === false).length
+              return (
+                <div>
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-violet-500 inline-block" /> VPN Tunnel
+                    {vpnExitIsp?.client_isp && <span className="normal-case tracking-normal font-normal text-violet-500/70">· exit via {vpnExitIsp.client_isp}{vpnExitIsp.client_city ? `, ${vpnExitIsp.client_city}` : ''}</span>}
+                    <span className="normal-case tracking-normal font-normal text-slate-600 text-[10px]">(independent of direct path)</span>
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${vpnUptime != null && vpnUptime < 99 ? 'border-red-500/30' : 'border-violet-500/20'}`}>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Wifi className="w-3 h-3 text-violet-400" />
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">VPN Uptime</span>
+                      </div>
+                      <p className={`text-xl font-bold tabular-nums ${vpnUptime != null && vpnUptime < 99 ? 'text-red-400' : 'text-violet-400'}`}>
+                        {vpnUptime != null ? `${vpnUptime}%` : '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-xl px-4 py-3 border border-violet-500/20 bg-[#0a0a18]">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Zap className="w-3 h-3 text-violet-400" />
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">Avg Latency</span>
+                      </div>
+                      <p className="text-xl font-bold tabular-nums text-violet-400">{vpnAvgLat != null ? `${vpnAvgLat} ms` : '—'}</p>
+                    </div>
+                    <div className="rounded-xl px-4 py-3 border border-violet-500/20 bg-[#0a0a18]">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Clock className="w-3 h-3 text-violet-400" />
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">Checks w/ VPN</span>
+                      </div>
+                      <p className="text-xl font-bold tabular-nums text-violet-400">{vpnChecks.length}</p>
+                    </div>
+                    <div className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${vpnDownChecks > 0 ? 'border-red-500/30' : 'border-violet-500/20'}`}>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Activity className="w-3 h-3 text-violet-400" />
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">VPN Drops</span>
+                      </div>
+                      <p className={`text-xl font-bold tabular-nums ${vpnDownChecks > 0 ? 'text-red-400' : 'text-violet-400'}`}>{vpnDownChecks}</p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* SLA pass/fail panel + percentile pills */}
             {chartData?.internetStats && (() => {
@@ -957,7 +1052,19 @@ export default function Reports() {
             {(chartData?.internet?.length ?? 0) > 0 ? (
               <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-medium text-slate-400">Latency Over Time</p>
+                  <div className="flex items-center gap-3">
+                    <p className="text-xs font-medium text-slate-400">Latency Over Time</p>
+                    <span className="flex items-center gap-1 text-[10px] text-slate-500">
+                      <span className="inline-block w-4 border-t-2 border-sky-400 rounded" />
+                      Direct
+                    </span>
+                    {chartData.internet.some(d => d.vpn_ms != null) && (
+                      <span className="flex items-center gap-1 text-[10px] text-slate-500">
+                        <span className="inline-block w-4 border-t-2 border-violet-400 rounded" />
+                        VPN
+                      </span>
+                    )}
+                  </div>
                   {(() => {
                     const last = chartData.internet.at?.(-1)
                     if (!last) return null
@@ -975,7 +1082,8 @@ export default function Reports() {
                       tickFormatter={v => new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} />
                     <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit="ms" />
                     <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
-                    <Line type="monotone" dataKey="ms" name="Latency" stroke="#38bdf8" dot={false} strokeWidth={1.5} unit="ms" connectNulls={false} />
+                    <Line type="monotone" dataKey="ms" name="Direct Latency" stroke="#38bdf8" dot={false} strokeWidth={1.5} unit="ms" connectNulls={false} />
+                    <Line type="monotone" dataKey="vpn_ms" name="VPN Latency" stroke="#a78bfa" dot={false} strokeWidth={1.5} unit="ms" connectNulls={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -1005,9 +1113,14 @@ export default function Reports() {
                     <thead className="sticky top-0 bg-[#0a0a18]">
                       <tr className="border-b border-[#1a1a30]">
                         <th className="px-2 py-1.5 text-left text-slate-400">Time</th>
-                        <th className="px-2 py-1.5 text-left text-slate-400">Status</th>
+                        <th className="px-2 py-1.5 text-left text-sky-400/70">Direct Status</th>
                         <th className="px-2 py-1.5 text-left text-slate-400">Mode</th>
-                        <th className="px-2 py-1.5 text-right text-slate-400">Latency</th>
+                        <th className="px-2 py-1.5 text-right text-slate-400">
+                          Direct{ispConfig?.name ? <span className="text-slate-600 font-normal ml-1">({ispConfig.name})</span> : ''}
+                        </th>
+                        <th className="px-2 py-1.5 text-right text-violet-500/70">
+                          VPN{vpnExitIsp?.client_isp ? <span className="text-violet-700 font-normal ml-1">({vpnExitIsp.client_isp})</span> : ''}
+                        </th>
                         <th className="px-2 py-1.5 text-right text-slate-400">Hosts</th>
                       </tr>
                     </thead>
@@ -1016,8 +1129,10 @@ export default function Reports() {
                         <tr key={i} className="border-b border-[#1a1a30] hover:bg-[#15151f]">
                           <td className="px-2 py-1.5 text-slate-400">{new Date(check.ts).toLocaleString('en-GB')}</td>
                           <td className="px-2 py-1.5">
-                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                              check.ok ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${
+                              check.ok
+                                ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                                : 'bg-red-500/15 text-red-400 border-red-500/20'
                             }`}>
                               {check.ok ? 'Online' : 'Offline'}
                             </span>
@@ -1032,13 +1147,23 @@ export default function Reports() {
                             }
                           </td>
                           <td className="px-2 py-1.5 text-right text-slate-400">{check.avgMs ?? '—'} ms</td>
+                          <td className="px-2 py-1.5 text-right">
+                            {check.vpn_up == null
+                              ? <span className="text-slate-700 text-[10px]">—</span>
+                              : check.vpn_ok === false
+                                ? <span className="text-red-400 text-[10px] font-bold">down</span>
+                                : check.vpnAvgMs != null
+                                  ? <span className="text-violet-400">{check.vpnAvgMs} ms</span>
+                                  : <span className="text-slate-600 text-[10px]">no data</span>
+                            }
+                          </td>
                           <td className="px-2 py-1.5 text-right text-slate-400">
                             <span className="text-emerald-400">{check.okCount}</span> / {check.hostCount}
                           </td>
                         </tr>
                       ))}
                       {filtered.length === 0 && (
-                        <tr><td colSpan={5} className="px-2 py-6 text-center text-slate-600 text-xs">No checks match the filter</td></tr>
+                        <tr><td colSpan={6} className="px-2 py-6 text-center text-slate-600 text-xs">No checks match the filter</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1069,51 +1194,95 @@ export default function Reports() {
             {running && (
               <div className="flex items-center gap-2 text-xs text-indigo-400 bg-indigo-500/5 border border-indigo-500/20 rounded-lg px-3 py-2">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                Speed test in progress — measuring download &amp; upload (~30s)…
+              Speed test in progress — measuring direct &amp; VPN via Cloudflare (~60–90s)…
               </div>
             )}
 
             {speedtestData?.results?.length > 0 ? (() => {
-              const rows      = speedtestData.results
-              const avgDown   = (rows.reduce((s, r) => s + (r.download_mbps ?? 0), 0) / rows.length).toFixed(1)
-              const avgUp     = (rows.reduce((s, r) => s + (r.upload_mbps   ?? 0), 0) / rows.length).toFixed(1)
-              const latest    = rows[0]
-              const planDown  = ispConfig?.plan_download_mbps ?? 0
-              const planUp    = ispConfig?.plan_upload_mbps   ?? 0
-              const sla       = 0.80
-              const belowDown = planDown > 0 ? rows.filter(r => (r.download_mbps ?? 0) < planDown * sla).length : 0
-              const belowUp   = planUp   > 0 ? rows.filter(r => (r.upload_mbps   ?? 0) < planUp   * sla).length : 0
-              const avgDownPct = planDown > 0 ? Math.round((parseFloat(avgDown) / planDown) * 100) : null
-              const avgUpPct   = planUp   > 0 ? Math.round((parseFloat(avgUp)   / planUp)   * 100) : null
+              const rows       = speedtestData.results
+              const directRows = rows.filter(r => (r.via ?? 'direct') === 'direct')
+              const vpnRows    = rows.filter(r => r.via === 'vpn')
+              const planDown   = ispConfig?.plan_download_mbps ?? 0
+              const planUp     = ispConfig?.plan_upload_mbps   ?? 0
+              const sla        = 0.80
               const downColor  = (v) => !planDown ? 'text-emerald-400' : v < planDown * 0.8 ? 'text-red-400' : v < planDown * 0.95 ? 'text-amber-400' : 'text-emerald-400'
               const upColor    = (v) => !planUp   ? 'text-sky-400'     : v < planUp   * 0.8 ? 'text-red-400' : v < planUp   * 0.95 ? 'text-amber-400' : 'text-sky-400'
+              const latestDirect = directRows[0]
+              const latestVpn    = vpnRows[0]
+              const avgDown  = directRows.length ? (directRows.reduce((s, r) => s + (r.download_mbps ?? 0), 0) / directRows.length).toFixed(1) : null
+              const avgUp    = directRows.length ? (directRows.reduce((s, r) => s + (r.upload_mbps   ?? 0), 0) / directRows.length).toFixed(1) : null
+              const avgDownV = vpnRows.length    ? (vpnRows.reduce((s, r) => s + (r.download_mbps ?? 0), 0) / vpnRows.length).toFixed(1)    : null
+              const avgUpV   = vpnRows.length    ? (vpnRows.reduce((s, r) => s + (r.upload_mbps   ?? 0), 0) / vpnRows.length).toFixed(1)    : null
+              const belowDown = planDown > 0 ? directRows.filter(r => (r.download_mbps ?? 0) < planDown * sla).length : 0
+              const belowUp   = planUp   > 0 ? directRows.filter(r => (r.upload_mbps   ?? 0) < planUp   * sla).length : 0
+              const avgDownPct = planDown > 0 && avgDown  ? Math.round((parseFloat(avgDown)  / planDown) * 100) : null
+              const avgUpPct   = planUp   > 0 && avgUp    ? Math.round((parseFloat(avgUp)    / planUp)   * 100) : null
+
+              // Build merged chart data: align direct and vpn rows by nearest-timestamp bucket
+              const chartRows = (() => {
+                const allTs = [...new Set([...directRows.map(r => r.ts), ...vpnRows.map(r => r.ts)])].sort((a, b) => a - b)
+                const dMap = new Map(directRows.map(r => [r.ts, r]))
+                const vMap = new Map(vpnRows.map(r => [r.ts, r]))
+                return allTs.map(ts => ({
+                  ts,
+                  direct_down: dMap.get(ts)?.download_mbps ?? null,
+                  direct_up:   dMap.get(ts)?.upload_mbps   ?? null,
+                  vpn_down:    vMap.get(ts)?.download_mbps ?? null,
+                  vpn_up:      vMap.get(ts)?.upload_mbps   ?? null,
+                }))
+              })()
+
+              const StatCard = ({ label, value, color, border }) => (
+                <div className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${border}`}>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">{label}</p>
+                  <p className={`text-xl font-bold tabular-nums ${color}`}>{value}</p>
+                </div>
+              )
+
               return (
                 <>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {[
-                      {
-                        label: 'Latest Download',
-                        value: planDown > 0 ? `${latest.download_mbps} Mbps (${Math.round((latest.download_mbps / planDown) * 100)}%)` : `${latest.download_mbps} Mbps`,
-                        color: downColor(latest.download_mbps ?? 0),
-                        border: planDown > 0 && (latest.download_mbps ?? 0) < planDown * 0.8 ? 'border-red-500/30' : 'border-[#1a1a30]',
-                      },
-                      {
-                        label: 'Latest Upload',
-                        value: planUp > 0 ? `${latest.upload_mbps} Mbps (${Math.round((latest.upload_mbps / planUp) * 100)}%)` : `${latest.upload_mbps} Mbps`,
-                        color: upColor(latest.upload_mbps ?? 0),
-                        border: planUp > 0 && (latest.upload_mbps ?? 0) < planUp * 0.8 ? 'border-red-500/30' : 'border-[#1a1a30]',
-                      },
-                      { label: 'Latest Ping',                  value: `${latest.ping_ms} ms`,   color: 'text-violet-400', border: 'border-[#1a1a30]' },
-                      { label: `Avg over ${rows.length} tests`, value: `↓${avgDown} ↑${avgUp}`, color: 'text-indigo-400', border: 'border-[#1a1a30]' },
-                    ].map(({ label, value, color, border }) => (
-                      <div key={label} className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${border}`}>
-                        <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">{label}</p>
-                        <p className={`text-xl font-bold tabular-nums ${color}`}>{value}</p>
+                  {/* Direct stat cards */}
+                  {latestDirect && (
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Direct ({directRows.length} test{directRows.length !== 1 ? 's' : ''})
+                        {ispConfig?.name && <span className="text-slate-600 normal-case tracking-normal font-normal">via {ispConfig.name}{ispConfig.connection_type ? ` · ${ispConfig.connection_type}` : ''}</span>}
+                        {latestDirect.client_isp && latestDirect.client_isp !== ispConfig?.name && (
+                          <span className="text-slate-600 normal-case tracking-normal font-normal">· detected: {latestDirect.client_isp}</span>
+                        )}
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <StatCard label="Latest Download" color={downColor(latestDirect.download_mbps ?? 0)}
+                          border={planDown > 0 && (latestDirect.download_mbps ?? 0) < planDown * 0.8 ? 'border-red-500/30' : 'border-[#1a1a30]'}
+                          value={planDown > 0 ? `${latestDirect.download_mbps} Mbps (${Math.round((latestDirect.download_mbps / planDown) * 100)}%)` : `${latestDirect.download_mbps} Mbps`} />
+                        <StatCard label="Latest Upload" color={upColor(latestDirect.upload_mbps ?? 0)}
+                          border={planUp > 0 && (latestDirect.upload_mbps ?? 0) < planUp * 0.8 ? 'border-red-500/30' : 'border-[#1a1a30]'}
+                          value={planUp > 0 ? `${latestDirect.upload_mbps} Mbps (${Math.round((latestDirect.upload_mbps / planUp) * 100)}%)` : `${latestDirect.upload_mbps} Mbps`} />
+                        <StatCard label="Latest Ping" value={`${latestDirect.ping_ms} ms`} color="text-violet-400" border="border-[#1a1a30]" />
+                        <StatCard label={`Avg (${directRows.length})`} value={`↓${avgDown} ↑${avgUp}`} color="text-indigo-400" border="border-[#1a1a30]" />
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  )}
 
-                  {/* SLA compliance banner */}
+                  {/* VPN stat cards */}
+                  {latestVpn && (
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-violet-500 inline-block" /> VPN ({vpnRows.length} test{vpnRows.length !== 1 ? 's' : ''})
+                        {latestVpn.client_isp && <span className="text-slate-600 normal-case tracking-normal font-normal">via {latestVpn.client_isp}{latestVpn.client_city ? `, ${latestVpn.client_city}` : ''}{latestVpn.client_country ? ` (${latestVpn.client_country})` : ''}</span>}
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <StatCard label="Latest Download (VPN)" color="text-emerald-400" border="border-violet-500/20"
+                          value={`${latestVpn.download_mbps} Mbps`} />
+                        <StatCard label="Latest Upload (VPN)" color="text-sky-400" border="border-violet-500/20"
+                          value={`${latestVpn.upload_mbps} Mbps`} />
+                        <StatCard label="Latest Ping (VPN)" value={`${latestVpn.ping_ms} ms`} color="text-violet-400" border="border-violet-500/20" />
+                        <StatCard label={`Avg VPN (${vpnRows.length})`} value={`↓${avgDownV} ↑${avgUpV}`} color="text-violet-300" border="border-violet-500/20" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SLA compliance banner — direct only */}
                   {(planDown > 0 || planUp > 0) && (() => {
                     const failing = belowDown > 0 || belowUp > 0
                     return (
@@ -1124,55 +1293,67 @@ export default function Reports() {
                             Plan: {planDown > 0 && planUp > 0 ? `${planDown}/${planUp} Mbps` : planDown > 0 ? `${planDown} Mbps download` : `${planUp} Mbps upload`}
                             {ispConfig?.connection_type ? ` · ${ispConfig.connection_type}` : ''}
                             {ispConfig?.name ? ` · ${ispConfig.name}` : ''}
+                            <span className="text-xs font-normal text-slate-500 ml-2">(direct only)</span>
                           </p>
                           <p className="text-xs text-slate-400 mt-0.5 flex flex-wrap gap-x-4 gap-y-0.5">
-                            {planDown > 0 && <span>↓ avg: <span className={`font-semibold ${downColor(parseFloat(avgDown))}`}>{avgDown} Mbps ({avgDownPct}%)</span></span>}
-                            {planUp   > 0 && <span>↑ avg: <span className={`font-semibold ${upColor(parseFloat(avgUp))}`}>{avgUp} Mbps ({avgUpPct}%)</span></span>}
-                            {planDown > 0 && <span className={belowDown > 0 ? 'text-red-400' : 'text-slate-600'}>{belowDown}/{rows.length} tests below 80% download SLA</span>}
-                            {planUp   > 0 && <span className={belowUp   > 0 ? 'text-red-400' : 'text-slate-600'}>{belowUp}/{rows.length} tests below 80% upload SLA</span>}
+                            {planDown > 0 && <span>↓ avg: <span className={`font-semibold ${downColor(parseFloat(avgDown))}`}>{avgDown} Mbps{avgDownPct != null ? ` (${avgDownPct}%)` : ''}</span></span>}
+                            {planUp   > 0 && <span>↑ avg: <span className={`font-semibold ${upColor(parseFloat(avgUp))}`}>{avgUp} Mbps{avgUpPct != null ? ` (${avgUpPct}%)` : ''}</span></span>}
+                            {planDown > 0 && <span className={belowDown > 0 ? 'text-red-400' : 'text-slate-600'}>{belowDown}/{directRows.length} tests below 80% download SLA</span>}
+                            {planUp   > 0 && <span className={belowUp   > 0 ? 'text-red-400' : 'text-slate-600'}>{belowUp}/{directRows.length} tests below 80% upload SLA</span>}
                           </p>
                         </div>
                       </div>
                     )
                   })()}
 
+                  {/* Trend chart */}
                   <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-4">
                     <div className="flex items-start justify-between mb-3">
                       <p className="text-xs font-medium text-slate-400">Download &amp; Upload Trend</p>
                       <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
                         <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                          <span className="inline-block w-5 border-t-2 border-emerald-500 rounded" />
-                          Download
+                          <span className="inline-block w-5 border-t-2 border-emerald-500 rounded" /> Direct ↓
                         </span>
                         <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                          <span className="inline-block w-5 border-t-2 border-sky-400 rounded" />
-                          Upload
+                          <span className="inline-block w-5 border-t-2 border-sky-400 rounded" /> Direct ↑
                         </span>
+                        {vpnRows.length > 0 && <>
+                          <span className="flex items-center gap-1.5 text-[10px] text-violet-400/80">
+                            <span className="inline-block w-5 border-t-2 border-dashed border-violet-400/80" /> VPN ↓
+                          </span>
+                          <span className="flex items-center gap-1.5 text-[10px] text-violet-300/70">
+                            <span className="inline-block w-5 border-t-2 border-dashed border-violet-300/70" /> VPN ↑
+                          </span>
+                        </>}
                         {planDown > 0 && (
-                          <span className="flex items-center gap-1.5 text-[10px] text-emerald-400/70">
-                            <span className="inline-block w-5 border-t-2 border-dashed border-emerald-500/70" />
+                          <span className="flex items-center gap-1.5 text-[10px] text-emerald-400/60">
+                            <span className="inline-block w-5 border-t-2 border-dashed border-emerald-500/60" />
                             Plan ↓ {planDown} Mbps
                           </span>
                         )}
                         {planUp > 0 && (
-                          <span className="flex items-center gap-1.5 text-[10px] text-sky-400/70">
-                            <span className="inline-block w-5 border-t-2 border-dashed border-sky-400/70" />
+                          <span className="flex items-center gap-1.5 text-[10px] text-sky-400/60">
+                            <span className="inline-block w-5 border-t-2 border-dashed border-sky-400/60" />
                             Plan ↑ {planUp} Mbps
                           </span>
                         )}
                       </div>
                     </div>
-                    <ResponsiveContainer width="100%" height={180}>
-                      <LineChart data={[...rows].reverse()} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={chartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
                         <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
                           tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
                         <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
                         <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
-                        <Line type="monotone" dataKey="download_mbps" name="Download" stroke="#10b981" dot={{ r: 3 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                        <Line type="monotone" dataKey="upload_mbps"   name="Upload"   stroke="#38bdf8" dot={{ r: 3 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                        {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.6} label={{ value: `${planDown} Mbps`, fill: '#10b981', fontSize: 9, opacity: 0.8 }} />}
-                        {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.6} label={{ value: `${planUp} Mbps`,   fill: '#38bdf8', fontSize: 9, opacity: 0.8 }} />}
+                        <Line type="monotone" dataKey="direct_down" name="Direct ↓" stroke="#10b981" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                        <Line type="monotone" dataKey="direct_up"   name="Direct ↑" stroke="#38bdf8" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                        {vpnRows.length > 0 && <>
+                          <Line type="monotone" dataKey="vpn_down" name="VPN ↓" stroke="#a78bfa" strokeDasharray="5 3" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                          <Line type="monotone" dataKey="vpn_up"   name="VPN ↑" stroke="#c4b5fd" strokeDasharray="5 3" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                        </>}
+                        {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown} Mbps`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
+                        {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planUp} Mbps`,   fill: '#38bdf8', fontSize: 9, opacity: 0.7 }} />}
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -1182,6 +1363,7 @@ export default function Reports() {
                       <table className="w-full min-w-[640px]">
                         <thead className="sticky top-0 bg-[#0a0a18]">
                           <tr className="border-b border-[#1a1a30]">
+                            <th className="px-3 py-2 text-left text-slate-400">Via</th>
                             <th className="px-3 py-2 text-left text-slate-400">Time</th>
                             <th className="px-3 py-2 text-right text-slate-400">↓ Down</th>
                             <th className="px-3 py-2 text-right text-slate-400">↑ Up</th>
@@ -1198,6 +1380,7 @@ export default function Reports() {
                               const uFail = planUp   > 0 && (r.upload_mbps   ?? 0) < planUp   * sla
                               if (!dFail && !uFail) return false
                             }
+                            if (speedtestViaFilter && (r.via ?? 'direct') !== speedtestViaFilter) return false
                             if (speedtestSearch) {
                               const s = speedtestSearch.toLowerCase()
                               return (r.server_name ?? r.server_host ?? '').toLowerCase().includes(s) ||
@@ -1210,14 +1393,21 @@ export default function Reports() {
                             const uFail = planUp   > 0 && (r.upload_mbps   ?? 0) < planUp   * sla
                             return (
                             <tr key={i} className={`border-b border-[#1a1a30] hover:bg-[#15151f] ${dFail || uFail ? 'bg-red-950/20' : ''}`}>
+                              <td className="px-3 py-1.5">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  (r.via ?? 'direct') === 'vpn'
+                                    ? 'bg-violet-500/15 text-violet-400'
+                                    : 'bg-slate-500/15 text-slate-400'
+                                }`}>{r.via ?? 'direct'}</span>
+                              </td>
                               <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{fmtDate(r.ts)}</td>
                               <td className={`px-3 py-1.5 text-right font-medium ${downColor(r.download_mbps ?? 0)}`}>
                                 {r.download_mbps ?? '—'} Mbps
-                                {planDown > 0 && r.download_mbps != null && <span className="text-[9px] text-slate-600 ml-1">({Math.round((r.download_mbps / planDown) * 100)}%)</span>}
+                                {planDown > 0 && r.download_mbps != null && (r.via ?? 'direct') !== 'vpn' && <span className="text-[9px] text-slate-600 ml-1">({Math.round((r.download_mbps / planDown) * 100)}%)</span>}
                               </td>
                               <td className={`px-3 py-1.5 text-right font-medium ${upColor(r.upload_mbps ?? 0)}`}>
                                 {r.upload_mbps ?? '—'} Mbps
-                                {planUp > 0 && r.upload_mbps != null && <span className="text-[9px] text-slate-600 ml-1">({Math.round((r.upload_mbps / planUp) * 100)}%)</span>}
+                                {planUp > 0 && r.upload_mbps != null && (r.via ?? 'direct') !== 'vpn' && <span className="text-[9px] text-slate-600 ml-1">({Math.round((r.upload_mbps / planUp) * 100)}%)</span>}
                               </td>
                               <td className="px-3 py-1.5 text-right text-violet-400">{r.ping_ms ?? '—'} ms</td>
                               <td className="px-3 py-1.5 text-slate-400 max-w-[140px] truncate">{r.client_isp ?? '—'}</td>

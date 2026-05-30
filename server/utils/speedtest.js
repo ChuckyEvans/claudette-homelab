@@ -9,6 +9,10 @@
  */
 
 import { getDb, audit } from '../db.js'
+import { loadConfig } from '../config.js'
+import { execSync, exec as _execCallback } from 'child_process'
+import { promisify } from 'util'
+const exec = promisify(_execCallback)
 
 const CF_BASE = 'https://speed.cloudflare.com'
 const DOWNLOAD_BYTES = 25_000_000   // 25 MB
@@ -88,50 +92,111 @@ async function getClientMeta() {
   }
 }
 
+/** Returns true if a network interface is UP (Linux only) */
+function isInterfaceUp(iface) {
+  if (process.platform === 'win32') return false
+  try {
+    const out = execSync(`ip link show ${iface} 2>/dev/null`, { timeout: 1000 }).toString()
+    return out.length > 0 && /<[^>]*\bUP\b[^>]*>/.test(out)
+  } catch { return false }
+}
+
 /**
- * Run a full speed test and persist the result.
- * Returns the saved row object.
+ * Detect the physical (non-VPN, non-loopback) interface that carries the real ISP traffic.
+ * Used to bind the direct speedtest when a VPN is active and has hijacked the default route.
+ * Returns null on Windows or if detection fails (falls back to unbound fetch).
  */
-export async function runSpeedTest(broadcast) {
-  const ts = Date.now()
-  console.log('[speedtest] Starting speed test…')
-  let row = { ts, error: null }
-
+function detectPhysicalInterface(vpnIface) {
+  if (process.platform === 'win32') return null
   try {
-    // 1. Client / server meta
-    const meta = await getClientMeta()
-    Object.assign(row, meta)
+    // Get all interfaces from `ip link show`
+    const out = execSync('ip link show', { timeout: 2000 }).toString()
+    // Parse lines like: "2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> ..."
+    const candidates = []
+    for (const match of out.matchAll(/^\d+:\s+(\S+?)(@\S+)?:\s+<([^>]+)>/gm)) {
+      const name  = match[1]
+      const flags = match[3]
+      if (name === 'lo') continue               // skip loopback
+      if (name === vpnIface) continue           // skip the VPN iface itself
+      // Skip common VPN/tunnel prefixes
+      if (/^(tun|tap|wg|ppp|veth|docker|br-|virbr|dummy)/.test(name)) continue
+      if (!flags.includes('UP')) continue       // must be UP
+      candidates.push(name)
+    }
+    // Prefer the one that carries the default route
+    try {
+      const routeOut = execSync('ip route show default', { timeout: 2000 }).toString()
+      for (const c of candidates) {
+        if (routeOut.includes(`dev ${c}`)) return c
+      }
+    } catch { /* ignore */ }
+    return candidates[0] ?? null
+  } catch { return null }
+}
 
-    // 2. Ping — reuse existing ping infrastructure is best, but we can also just
-    //    time a small request to 1.1.1.1 via the Cloudflare CDN latency endpoint
-    const pingStart = Date.now()
-    const pingRes   = await fetchWithTimeout(`${CF_BASE}/__down?bytes=0&measId=0`)
-    await pingRes.text()
-    row.ping_ms = Date.now() - pingStart
-
-    // 3. Download
-    console.log('[speedtest] Measuring download…')
-    row.download_mbps = await measureDownload()
-
-    // 4. Upload
-    console.log('[speedtest] Measuring upload…')
-    row.upload_mbps = await measureUpload()
-
-    console.log(`[speedtest] Done — ↓${row.download_mbps} Mbps ↑${row.upload_mbps} Mbps ping=${row.ping_ms}ms`)
-  } catch (err) {
-    console.error('[speedtest] Failed:', err.message)
-    row.error = err.message
+/** Fetch Cloudflare /meta via a specific interface using curl */
+async function getClientMetaVia(iface) {
+  try {
+    const { stdout } = await exec(
+      `curl --interface ${iface} -s --max-time 8 -H "Accept: application/json" "${CF_BASE}/meta"`,
+      { timeout: 10000 }
+    )
+    const json = JSON.parse(stdout)
+    return {
+      client_ip:      json.clientIp          ?? null,
+      client_isp:     json.asOrganization    ?? json.isp ?? null,
+      client_city:    json.city              ?? null,
+      client_country: json.country           ?? null,
+      client_lat:     typeof json.latitude  === 'number' ? json.latitude  : null,
+      client_lon:     typeof json.longitude === 'number' ? json.longitude : null,
+      server_host:    'speed.cloudflare.com',
+      server_name:    `Cloudflare ${typeof json.colo === 'string' ? json.colo : (json.colo?.code ?? json.colo?.iata ?? '')}`.trim(),
+      server_location: [json.city, json.regionCode].filter(Boolean).join(', ') || null,
+      server_country: json.country ?? null,
+    }
+  } catch {
+    return {}
   }
+}
 
-  // Persist
+/**
+ * Run a speed test bound to a specific network interface using curl.
+ * Returns { ping_ms, download_mbps, upload_mbps } or throws on failure.
+ */
+async function runSpeedTestVia(iface) {
+  // Ping: time-to-first-byte of a zero-byte download
+  const { stdout: pingOut } = await exec(
+    `curl --interface ${iface} -s -o /dev/null -w "%{time_starttransfer}" --max-time 5 "${CF_BASE}/__down?bytes=0"`,
+    { timeout: 8000 }
+  )
+  const ping_ms = Math.round(parseFloat(pingOut) * 1000)
+
+  // Download: curl reports bytes/sec via speed_download
+  const { stdout: downOut } = await exec(
+    `curl --interface ${iface} -s -o /dev/null -w "%{speed_download}" --max-time 35 "${CF_BASE}/__down?bytes=${DOWNLOAD_BYTES}"`,
+    { timeout: 38000 }
+  )
+  const download_mbps = parseFloat(((parseFloat(downOut) * 8) / 1_000_000).toFixed(2))
+
+  // Upload: pipe random data into curl
+  const { stdout: upOut } = await exec(
+    `dd if=/dev/urandom bs=1048576 count=10 2>/dev/null | curl --interface ${iface} -X POST -s -o /dev/null -w "%{speed_upload}" -H "Content-Type: application/octet-stream" --data-binary @- --max-time 35 "${CF_BASE}/__up"`,
+    { timeout: 40000 }
+  )
+  const upload_mbps = parseFloat(((parseFloat(upOut) * 8) / 1_000_000).toFixed(2))
+
+  return { ping_ms, download_mbps, upload_mbps }
+}
+
+/** Persist a speed test row and write an audit entry */
+function persistSpeedTestRow(row) {
   try {
-    const db = getDb()
-    db.run(`
+    getDb().run(`
       INSERT INTO speedtest_results
         (ts, client_ip, client_isp, client_city, client_country, client_lat, client_lon,
          server_host, server_name, server_location, server_country,
-         ping_ms, download_mbps, upload_mbps, error)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         ping_ms, download_mbps, upload_mbps, error, via)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `, [
       row.ts,
       row.client_ip ?? null, row.client_isp ?? null, row.client_city ?? null,
@@ -139,32 +204,115 @@ export async function runSpeedTest(broadcast) {
       row.server_host ?? null, row.server_name ?? null, row.server_location ?? null,
       row.server_country ?? null,
       row.ping_ms ?? null, row.download_mbps ?? null, row.upload_mbps ?? null,
-      row.error ?? null,
+      row.error ?? null, row.via ?? 'direct',
     ])
-
-    // Audit log entry
     audit('speedtest.run', {
+      via:           row.via ?? 'direct',
+      ping_ms:       row.ping_ms,
+      download_mbps: row.download_mbps,
+      upload_mbps:   row.upload_mbps,
+      isp:           row.client_isp,
+      error:         row.error ?? undefined,
+    })
+  } catch (dbErr) {
+    console.error('[speedtest] DB write failed:', dbErr.message)
+  }
+}
+
+/**
+ * Run a full speed test and persist the result.
+ * Also runs a VPN test via tun0 if the interface is up.
+ * Returns the direct test row object.
+ */
+export async function runSpeedTest(broadcast) {
+  const ts = Date.now()
+  console.log('[speedtest] Starting direct speed test…')
+  let row = { ts, via: 'direct', error: null }
+
+  // Detect VPN early — if it's up we must bind the direct test to the physical interface
+  // to prevent the VPN's default route from hijacking the "direct" measurement.
+  const VPN_IFACE = loadConfig()?.network?.vpn_interface ?? null
+  const vpnActive = VPN_IFACE ? isInterfaceUp(VPN_IFACE) : false
+  const physIface = vpnActive ? detectPhysicalInterface(VPN_IFACE) : null
+
+  if (vpnActive && physIface) {
+    console.log(`[speedtest] VPN (${VPN_IFACE}) is active — binding direct test to physical interface: ${physIface}`)
+  } else if (vpnActive) {
+    console.warn(`[speedtest] VPN (${VPN_IFACE}) is active but could not detect physical interface — direct test may measure VPN throughput`)
+  }
+
+  try {
+    if (physIface) {
+      // VPN is up: bind direct test to physical interface via curl so we measure real ISP speed
+      const meta = await getClientMetaVia(physIface)
+      Object.assign(row, meta)
+      const result = await runSpeedTestVia(physIface)
+      Object.assign(row, result)
+    } else {
+      // No VPN (or VPN detection failed): use Node.js fetch as before
+      // 1. Client / server meta
+      const meta = await getClientMeta()
+      Object.assign(row, meta)
+
+      // 2. Ping — time a zero-byte request to Cloudflare CDN
+      const pingStart = Date.now()
+      const pingRes   = await fetchWithTimeout(`${CF_BASE}/__down?bytes=0&measId=0`)
+      await pingRes.text()
+      row.ping_ms = Date.now() - pingStart
+
+      // 3. Download
+      console.log('[speedtest] Measuring download (direct)…')
+      row.download_mbps = await measureDownload()
+
+      // 4. Upload
+      console.log('[speedtest] Measuring upload (direct)…')
+      row.upload_mbps = await measureUpload()
+    }
+
+    console.log(`[speedtest] Direct — ↓${row.download_mbps} Mbps ↑${row.upload_mbps} Mbps ping=${row.ping_ms}ms`)
+  } catch (err) {
+    console.error('[speedtest] Direct failed:', err.message)
+    row.error = err.message
+  }
+
+  persistSpeedTestRow(row)
+
+  // VPN test — run via configured vpn_interface if the interface is up
+  let vpnRow = null
+  if (VPN_IFACE && vpnActive) {
+    console.log(`[speedtest] VPN interface ${VPN_IFACE} is up — running VPN test…`)
+    // Fetch VPN meta first — this gets the actual exit node IP/ISP (different from direct)
+    const vpnMeta = await getClientMetaVia(VPN_IFACE)
+    vpnRow = { ts: Date.now(), via: 'vpn', error: null, ...vpnMeta }
+    try {
+      const result = await runSpeedTestVia(VPN_IFACE)
+      Object.assign(vpnRow, result)
+      console.log(`[speedtest] VPN — ↓${vpnRow.download_mbps} Mbps ↑${vpnRow.upload_mbps} Mbps ping=${vpnRow.ping_ms}ms`)
+    } catch (err) {
+      console.error('[speedtest] VPN test failed:', err.message)
+      vpnRow.error = err.message
+    }
+    persistSpeedTestRow(vpnRow)
+  }
+
+  // Broadcast SSE event
+  if (broadcast) {
+    broadcast('speedtest', {
+      ts: row.ts,
+      via: 'direct',
       ping_ms: row.ping_ms,
       download_mbps: row.download_mbps,
       upload_mbps: row.upload_mbps,
       isp: row.client_isp,
-      error: row.error ?? undefined,
+      error: row.error,
+      vpn: vpnRow ? {
+        ping_ms: vpnRow.ping_ms,
+        download_mbps: vpnRow.download_mbps,
+        upload_mbps: vpnRow.upload_mbps,
+        error: vpnRow.error,
+      } : null,
     })
-
-    // Broadcast SSE event if socket available
-    if (broadcast) {
-      broadcast('speedtest', {
-        ts: row.ts,
-        ping_ms: row.ping_ms,
-        download_mbps: row.download_mbps,
-        upload_mbps: row.upload_mbps,
-        isp: row.client_isp,
-        error: row.error,
-      })
-      broadcast('job_done', { job: 'speedtest', ts: Date.now() })
-    }
-  } catch (dbErr) {
-    console.error('[speedtest] DB write failed:', dbErr.message)
+    broadcast('job_done', { job: 'speedtest', ts: Date.now() })
   }
 
   return row

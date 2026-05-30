@@ -146,7 +146,9 @@ router.get('/chart', (req, res) => {
         const p = JSON.parse(r.payload)
         const ok = (p.results ?? []).filter(x => x.ok && x.ms != null)
         const ms = ok.length ? Math.round(ok.reduce((s, x) => s + x.ms, 0) / ok.length) : null
-        return [{ ts: r.ts, ok: p.ok ?? false, ms }]
+        const vpnOk = (p.vpn_results ?? []).filter(x => x.ok && x.ms != null)
+        const vpn_ms = p.vpn_up && vpnOk.length ? Math.round(vpnOk.reduce((s, x) => s + x.ms, 0) / vpnOk.length) : null
+        return [{ ts: r.ts, ok: p.ok ?? false, ms, vpn_ms }]
       } catch { return [] }
     })
 
@@ -161,14 +163,20 @@ router.get('/chart', (req, res) => {
       : 0
     const changes = internet.reduce((acc, cur, i) => acc + (i > 0 && internet[i-1].ok !== cur.ok ? 1 : 0), 0)
 
-    // Speed test stats summary (for SLA comparison)
-    const stRows = db.all(`SELECT download_mbps, upload_mbps FROM speedtest_results WHERE ts >= ? AND ts <= ?`, [from, to])
-    const speedStats = stRows.length > 0 ? {
-      avgDown: parseFloat((stRows.reduce((s, r) => s + (r.download_mbps ?? 0), 0) / stRows.length).toFixed(1)),
-      avgUp:   parseFloat((stRows.reduce((s, r) => s + (r.upload_mbps   ?? 0), 0) / stRows.length).toFixed(1)),
+    // Speed test stats summary split by via (direct vs vpn)
+    const stAllRows = db.all(`SELECT download_mbps, upload_mbps, ping_ms, via FROM speedtest_results WHERE ts >= ? AND ts <= ?`, [from, to])
+    const stDirect = stAllRows.filter(r => (r.via ?? 'direct') === 'direct')
+    const stVpn    = stAllRows.filter(r => r.via === 'vpn')
+    const speedStatsFn = (rows) => rows.length > 0 ? {
+      avgDown: parseFloat((rows.reduce((s, r) => s + (r.download_mbps ?? 0), 0) / rows.length).toFixed(1)),
+      avgUp:   parseFloat((rows.reduce((s, r) => s + (r.upload_mbps   ?? 0), 0) / rows.length).toFixed(1)),
+      avgPing: parseFloat((rows.reduce((s, r) => s + (r.ping_ms       ?? 0), 0) / rows.length).toFixed(0)),
+      count:   rows.length,
     } : null
+    const speedStats    = speedStatsFn(stDirect)
+    const speedStatsVpn = speedStatsFn(stVpn)
 
-    res.json({ daily, topPorts, serviceDowns, internet, internetStats: { uptime, avgLatency, totalChecks, changes }, speedStats })
+    res.json({ daily, topPorts, serviceDowns, internet, internetStats: { uptime, avgLatency, totalChecks, changes }, speedStats, speedStatsVpn })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -217,6 +225,9 @@ router.get('/internet', (req, res) => {
         const hosts = p.results ?? []
         const ok = hosts.filter(x => x.ok && x.ms != null)
         const avgMs = ok.length ? Math.round(ok.reduce((s, x) => s + x.ms, 0) / ok.length) : null
+        const vpnHosts  = p.vpn_results ?? []
+        const vpnOkArr  = vpnHosts.filter(x => x.ok && x.ms != null)
+        const vpnAvgMs  = p.vpn_up && vpnOkArr.length ? Math.round(vpnOkArr.reduce((s, x) => s + x.ms, 0) / vpnOkArr.length) : null
         return {
           ts: r.ts,
           ok: p.ok ?? false,
@@ -224,6 +235,10 @@ router.get('/internet', (req, res) => {
           hostCount: hosts.length,
           okCount: ok.length,
           hosts,
+          vpn_up:       p.vpn_up      ?? false,
+          vpn_ok:       p.vpn_ok      ?? null,
+          vpnAvgMs,
+          vpnHosts,
           outage_mode:      p.outage_mode      ?? false,
           interval_seconds: p.interval_seconds ?? null,
           attempt_count:    p.attempt_count    ?? null,

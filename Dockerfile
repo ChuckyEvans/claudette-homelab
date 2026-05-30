@@ -13,7 +13,8 @@ RUN npm run build
 FROM node:22-alpine
 
 # nmap is required for network scanning; tcpdump for passive ARP gateway detection
-RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && apk add --no-cache nmap nmap-scripts tcpdump
+# curl is required for interface-bound speed tests (VPN/direct comparison)
+RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && apk add --no-cache nmap nmap-scripts tcpdump curl
 
 WORKDIR /app
 

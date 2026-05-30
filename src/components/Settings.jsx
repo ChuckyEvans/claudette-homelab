@@ -277,6 +277,7 @@ export default function Settings({ onOpenWizard, configStatus }) {
   const [retentionDays,         setRetentionDays]         = useState(90)
   const [connectivityHosts,     setConnectivityHosts]     = useState(['1.1.1.1'])
   const [fallbackDns,           setFallbackDns]           = useState([])
+  const [vpnInterface,          setVpnInterface]          = useState('')
   const [dormantAfterDays,      setDormantAfterDays]      = useState(3)
   const [skullAfterDays,        setSkullAfterDays]        = useState(7)
   const [ispName,               setIspName]               = useState('')
@@ -294,6 +295,7 @@ export default function Settings({ onOpenWizard, configStatus }) {
   const [backingUp,             setBackingUp]             = useState(false)
   const [restoring,             setRestoring]             = useState(false)
   const restoreInputRef = useRef(null)
+  const [settingsTab, setSettingsTab] = useState('host')
 
   useEffect(() => {
     api.config.get()
@@ -311,6 +313,7 @@ export default function Settings({ onOpenWizard, configStatus }) {
         setRetentionDays(cfg.retention?.days ?? 90)
         setConnectivityHosts(cfg.network?.connectivity_hosts ?? ['1.1.1.1'])
         setFallbackDns(cfg.network?.fallback_dns ?? [])
+        setVpnInterface(cfg.network?.vpn_interface ?? '')
         setDormantAfterDays(cfg.network?.dormant_after_days ?? 3)
         setSkullAfterDays(cfg.network?.skull_after_days ?? 7)
         setIspName(cfg.isp?.name ?? '')
@@ -356,21 +359,10 @@ export default function Settings({ onOpenWizard, configStatus }) {
     support_email:       ispSupportEmail.trim(),
   })
 
-  const onThemeChange = async (newTheme) => {
+  const onThemeChange = (newTheme) => {
     setTheme(newTheme)
     applyTheme(newTheme)
     localStorage.setItem('claudette:theme', newTheme)
-    try {
-      await api.config.save({
-        pi: { host: piHost, ssh_user: piUser, ssh_key: sshKey },
-        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()), fallback_dns: fallbackDns.filter(h => h.trim()), dormant_after_days: parseInt(dormantAfterDays) || 3, skull_after_days: parseInt(skullAfterDays) || 7 },
-        schedule: schedulePayload(),
-        retention: { days: parseInt(retentionDays) },
-        services: services.filter(s => s.name && s.url),
-        isp: ispPayload(),
-        ui: { theme: newTheme },
-      }, true)
-    } catch { /* fail silently */ }
   }
 
   const save = async () => {
@@ -379,12 +371,11 @@ export default function Settings({ onOpenWizard, configStatus }) {
     try {
       await api.config.save({
         pi: { host: piHost, ssh_user: piUser, ssh_key: sshKey },
-        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()), fallback_dns: fallbackDns.filter(h => h.trim()), dormant_after_days: parseInt(dormantAfterDays) || 3, skull_after_days: parseInt(skullAfterDays) || 7 },
+        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()), fallback_dns: fallbackDns.filter(h => h.trim()), dormant_after_days: parseInt(dormantAfterDays) || 3, skull_after_days: parseInt(skullAfterDays) || 7, vpn_interface: vpnInterface.trim() || undefined },
         schedule: schedulePayload(),
         retention: { days: parseInt(retentionDays) },
         services: services.filter(s => s.name && s.url),
         isp: ispPayload(),
-        ui: { theme },
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
@@ -454,9 +445,34 @@ export default function Settings({ onOpenWizard, configStatus }) {
           <div className="mx-6 mt-4 px-4 py-2.5 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400">{error}</div>
         )}
 
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-8 max-w-2xl">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          {/* ── Pill nav ── */}
+          <div className="flex gap-1.5 flex-wrap px-6 pt-4 pb-3.5 border-b border-[#1a1a30] flex-shrink-0 bg-[#070712]">
+            {[
+              { id: 'host',       label: 'Host' },
+              { id: 'network',    label: 'Network' },
+              { id: 'schedule',   label: 'Schedule' },
+              { id: 'isp',        label: 'ISP & SLA' },
+              { id: 'services',   label: 'Services' },
+              { id: 'appearance', label: 'Appearance' },
+              { id: 'data',       label: 'Data' },
+            ].map(t => (
+              <button key={t.id} onClick={() => setSettingsTab(t.id)}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  settingsTab === t.id
+                    ? 'bg-indigo-600/25 text-indigo-300 border border-indigo-500/40'
+                    : 'text-slate-500 hover:text-slate-300 border border-[#1a1a30] hover:border-[#2a2a45]'
+                }`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
 
-          {/* Pi / Server */}
+          {/* ── Tab content ── */}
+          <div className="flex-1 overflow-y-auto px-6 py-6 space-y-8 max-w-2xl">
+
+          {/* HOST */}
+          {settingsTab === 'host' && (<>
           <section>
             <SectionHeading>Pi / Server</SectionHeading>
             <div className="grid grid-cols-2 gap-4">
@@ -492,8 +508,10 @@ export default function Settings({ onOpenWizard, configStatus }) {
               </div>
             </div>
           </section>
+          </>)}
 
-          {/* Network */}
+          {/* NETWORK */}
+          {settingsTab === 'network' && (<>
           <section>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
@@ -527,7 +545,83 @@ export default function Settings({ onOpenWizard, configStatus }) {
             </div>
           </section>
 
-          {/* Schedule */}
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <SectionHeading>Connectivity Check Hosts</SectionHeading>
+              <button onClick={() => setConnectivityHosts(p => [...p, ''])}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 rounded-lg transition-colors">
+                <Plus className="w-3.5 h-3.5" />Add Host
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-600 mb-3">IPs to ping for internet connectivity checks. Default: 1.1.1.1.</p>
+            <div className="space-y-2 max-w-xs">
+              {connectivityHosts.map((h, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={h} onChange={e => setConnectivityHosts(p => p.map((x, j) => j === i ? e.target.value : x))}
+                    placeholder="1.1.1.1"
+                    className="flex-1 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 outline-none transition-colors font-mono" />
+                  <button onClick={() => setConnectivityHosts(p => p.filter((_, j) => j !== i))} className="p-1.5 text-slate-600 hover:text-red-400 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <SectionHeading>Fallback DNS</SectionHeading>
+              <button onClick={() => setFallbackDns(p => [...p, ''])}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 rounded-lg transition-colors">
+                <Plus className="w-3.5 h-3.5" />Add Server
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-600 mb-3">
+              Fallback DNS servers passed to the Docker container via <span className="font-mono">--dns</span>. Used when your primary DNS resolver is unreachable. Applied on next deploy. Up to 3 entries.
+            </p>
+            <div className="space-y-2 max-w-xs">
+              {fallbackDns.length === 0 && (
+                <p className="text-[11px] text-slate-700 italic">None configured — Docker will use the Pi&apos;s resolv.conf only.</p>
+              )}
+              {fallbackDns.map((h, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={h} onChange={e => setFallbackDns(p => p.map((x, j) => j === i ? e.target.value : x))}
+                    placeholder="8.8.8.8"
+                    className="flex-1 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 outline-none transition-colors font-mono" />
+                  <button onClick={() => setFallbackDns(p => p.filter((_, j) => j !== i))} className="p-1.5 text-slate-600 hover:text-red-400 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <SectionHeading>VPN Interface</SectionHeading>
+            <p className="text-[11px] text-slate-600 mb-4">
+              Network interface used for VPN connectivity checks and speed tests. Leave blank to disable VPN monitoring.
+              Common values: <span className="font-mono text-slate-400">tun0</span> (OpenVPN),
+              <span className="font-mono text-slate-400"> wg0</span> (WireGuard),
+              <span className="font-mono text-slate-400"> ppp0</span> (PPP).
+            </p>
+            <div className="max-w-xs">
+              <Field
+                label="Interface name"
+                value={vpnInterface}
+                onChange={e => setVpnInterface(e.target.value)}
+                placeholder="e.g. tun0 or wg0 — blank to disable"
+              />
+              {vpnInterface && (
+                <p className="text-[10px] text-violet-400/80 mt-1.5">
+                  VPN checks enabled — internet pings and speed tests will also run via <span className="font-mono">{vpnInterface}</span>.
+                </p>
+              )}
+            </div>
+          </section>
+          </>)}
+
+          {/* SCHEDULE */}
+          {settingsTab === 'schedule' && (<>
           <section>
             <SectionHeading>Schedule</SectionHeading>
             <p className="text-[11px] text-slate-500 mb-3">Jobs run at clock-aligned times and queue up so they never overlap.</p>
@@ -594,87 +688,10 @@ export default function Settings({ onOpenWizard, configStatus }) {
               <p className="text-[11px] text-slate-600">Events older than this are pruned nightly at 3 am</p>
             </div>
           </section>
+          </>)}
 
-          {/* Connectivity */}
-          <section>
-            <div className="flex items-center justify-between mb-4">
-              <SectionHeading>Connectivity Check Hosts</SectionHeading>
-              <button onClick={() => setConnectivityHosts(p => [...p, ''])}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 rounded-lg transition-colors">
-                <Plus className="w-3.5 h-3.5" />Add Host
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-600 mb-3">IPs to ping for internet connectivity checks. Default: 1.1.1.1.</p>
-            <div className="space-y-2 max-w-xs">
-              {connectivityHosts.map((h, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input value={h} onChange={e => setConnectivityHosts(p => p.map((x, j) => j === i ? e.target.value : x))}
-                    placeholder="1.1.1.1"
-                    className="flex-1 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 outline-none transition-colors font-mono" />
-                  <button onClick={() => setConnectivityHosts(p => p.filter((_, j) => j !== i))} className="p-1.5 text-slate-600 hover:text-red-400 transition-colors">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Fallback DNS */}
-          <section>
-            <div className="flex items-center justify-between mb-4">
-              <SectionHeading>Fallback DNS</SectionHeading>
-              <button onClick={() => setFallbackDns(p => [...p, ''])}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 rounded-lg transition-colors">
-                <Plus className="w-3.5 h-3.5" />Add Server
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-600 mb-3">
-              Fallback DNS servers passed to the Docker container via <span className="font-mono">--dns</span>. Used when your primary DNS resolver is unreachable. Applied on next deploy. Up to 3 entries.
-            </p>
-            <div className="space-y-2 max-w-xs">
-              {fallbackDns.length === 0 && (
-                <p className="text-[11px] text-slate-700 italic">None configured — Docker will use the Pi&apos;s resolv.conf only.</p>
-              )}
-              {fallbackDns.map((h, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input value={h} onChange={e => setFallbackDns(p => p.map((x, j) => j === i ? e.target.value : x))}
-                    placeholder="8.8.8.8"
-                    className="flex-1 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 outline-none transition-colors font-mono" />
-                  <button onClick={() => setFallbackDns(p => p.filter((_, j) => j !== i))} className="p-1.5 text-slate-600 hover:text-red-400 transition-colors">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Device Lifecycle */}
-          <section>
-            <SectionHeading>Device Lifecycle</SectionHeading>
-            <p className="text-[11px] text-slate-600 mb-4">Thresholds for auto-managing devices that stop responding.</p>
-            <div className="grid grid-cols-2 gap-4 max-w-xs">
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Auto-dormant after (days)</label>
-                <input type="number" min="1" max="365" step="1"
-                  value={dormantAfterDays}
-                  onChange={e => setDormantAfterDays(Math.max(1, parseInt(e.target.value) || 3))}
-                  className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors"
-                />
-                <p className="text-[11px] text-slate-600 mt-1">🌙 Moon icon — device silenced</p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Skull warning after (days)</label>
-                <input type="number" min="1" max="365" step="1"
-                  value={skullAfterDays}
-                  onChange={e => setSkullAfterDays(Math.max(1, parseInt(e.target.value) || 7))}
-                  className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors"
-                />
-                <p className="text-[11px] text-slate-600 mt-1">💀 Skull icon — long-term unreachable</p>
-              </div>
-            </div>
-          </section>
-
-          {/* ISP */}
+          {/* ISP & SLA */}
+          {settingsTab === 'isp' && (<>
           <section>
             <SectionHeading>ISP / Internet Provider</SectionHeading>
             <p className="text-[11px] text-slate-600 mb-4">Used in outage reports and exports sent to your provider.</p>
@@ -700,7 +717,69 @@ export default function Settings({ onOpenWizard, configStatus }) {
             </div>
           </section>
 
-          {/* Appearance */}
+          <section>
+            <SectionHeading>Device Lifecycle</SectionHeading>
+            <p className="text-[11px] text-slate-600 mb-4">Thresholds for auto-managing devices that stop responding.</p>
+            <div className="grid grid-cols-2 gap-4 max-w-xs">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Auto-dormant after (days)</label>
+                <input type="number" min="1" max="365" step="1"
+                  value={dormantAfterDays}
+                  onChange={e => setDormantAfterDays(Math.max(1, parseInt(e.target.value) || 3))}
+                  className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors"
+                />
+                <p className="text-[11px] text-slate-600 mt-1">🌙 Moon icon — device silenced</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Skull warning after (days)</label>
+                <input type="number" min="1" max="365" step="1"
+                  value={skullAfterDays}
+                  onChange={e => setSkullAfterDays(Math.max(1, parseInt(e.target.value) || 7))}
+                  className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors"
+                />
+                <p className="text-[11px] text-slate-600 mt-1">💀 Skull icon — long-term unreachable</p>
+              </div>
+            </div>
+          </section>
+          </>)}
+
+          {/* SERVICES */}
+          {settingsTab === 'services' && (<>
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <SectionHeading>Monitored Services</SectionHeading>
+              <button onClick={addService}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 rounded-lg transition-colors">
+                <Plus className="w-3.5 h-3.5" />Add Service
+              </button>
+            </div>
+            {services.length === 0 ? (
+              <p className="text-xs text-slate-700 py-4">No services configured. Add one above.</p>
+            ) : (
+              <div className="border border-[#1a1a30] rounded-lg overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[10px] text-slate-600 uppercase tracking-wider border-b border-[#1a1a30] bg-[#080812]">
+                      <th className="text-left px-3 py-2">Name</th>
+                      <th className="text-left px-3 py-2 w-16">Type</th>
+                      <th className="text-left px-3 py-2">URL</th>
+                      <th className="text-center px-3 py-2 w-20">Expect</th>
+                      <th className="px-3 py-2 w-16" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {services.map((svc, idx) => (
+                      <ServiceRow key={idx} svc={svc} idx={idx} onSave={updateService} onDelete={deleteService} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+          </>)}
+
+          {/* APPEARANCE */}
+          {settingsTab === 'appearance' && (<>
           <section>
             <SectionHeading>Appearance</SectionHeading>
             <div className="grid grid-cols-5 gap-2.5 max-w-2xl">
@@ -719,8 +798,10 @@ export default function Settings({ onOpenWizard, configStatus }) {
               ))}
             </div>
           </section>
+          </>)}
 
-          {/* Data & Backup */}
+          {/* DATA */}
+          {settingsTab === 'data' && (<>
           <section>
             <SectionHeading>Data &amp; Backup</SectionHeading>
             <div className="space-y-4">
@@ -741,7 +822,6 @@ export default function Settings({ onOpenWizard, configStatus }) {
                 placeholder="7"
               />
               <div className="flex items-center gap-3 pt-1">
-                {/* Manual backup download */}
                 <button
                   onClick={async () => {
                     try {
@@ -761,8 +841,6 @@ export default function Settings({ onOpenWizard, configStatus }) {
                     ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" />Backing up…</>
                     : <><Download className="w-3.5 h-3.5" />Backup Now</>}
                 </button>
-
-                {/* Restore from file */}
                 <input
                   ref={restoreInputRef}
                   type="file"
@@ -802,40 +880,9 @@ export default function Settings({ onOpenWizard, configStatus }) {
               <p className="text-[11px] text-slate-600">Backup files (.claudette.gz) are gzip-compressed and contain the full database and config. Keep them somewhere safe.</p>
             </div>
           </section>
+          </>)}
 
-          {/* Monitored Services */}
-          <section>
-            <div className="flex items-center justify-between mb-4">
-              <SectionHeading>Monitored Services</SectionHeading>
-              <button onClick={addService}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 rounded-lg transition-colors">
-                <Plus className="w-3.5 h-3.5" />Add Service
-              </button>
-            </div>
-            {services.length === 0 ? (
-              <p className="text-xs text-slate-700 py-4">No services configured. Add one above.</p>
-            ) : (
-              <div className="border border-[#1a1a30] rounded-lg overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-[10px] text-slate-600 uppercase tracking-wider border-b border-[#1a1a30] bg-[#080812]">
-                      <th className="text-left px-3 py-2">Name</th>
-                      <th className="text-left px-3 py-2 w-16">Type</th>
-                      <th className="text-left px-3 py-2">URL</th>
-                      <th className="text-center px-3 py-2 w-20">Expect</th>
-                      <th className="px-3 py-2 w-16" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {services.map((svc, idx) => (
-                      <ServiceRow key={idx} svc={svc} idx={idx} onSave={updateService} onDelete={deleteService} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
+          </div>
         </div>
       </div>
     </>

@@ -17,6 +17,11 @@ network:
   #   - 8.8.4.4   # Google DNS secondary
   dormant_after_days: 3     # Days offline before a device is auto-marked dormant (shows moon icon, sorted last)
   skull_after_days: 7       # Days offline before a device shows a skull warning icon
+  # vpn_interface: tun0     # Network interface for VPN speed/connectivity tests (Linux only).
+  #                         # Leave commented out to disable VPN checks. Common values:
+  #                         #   tun0  — OpenVPN (default)
+  #                         #   wg0   — WireGuard
+  #                         #   ppp0  — PPP / older VPN clients
   # Optional: assign devices to gateways so the map groups them under the correct router.
   # gateway_assignments:
   #   "192.168.1.1":

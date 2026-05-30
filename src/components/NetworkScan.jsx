@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, ChevronDown, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader, Star, MoreHorizontal, Bug, Moon, Skull } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { deviceThreatLevel } from '../lib/threatMatch.js'
+import { getUIPref, setUIPref } from '../lib/uiPrefs.js'
 
 const WELL_KNOWN = {
   21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP', 53: 'DNS',
@@ -179,7 +180,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
           <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-indigo-400' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} />
           <div className="flex-1 min-w-0">
             <p className={`text-xs font-medium font-mono truncate flex items-center gap-1 ${isSelected ? 'text-slate-100' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-300'}`}>
-              {d.favorited && <Star  className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" />}
+              {d.favorited && <Star  className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" title="Favorited — pinned to top of device list" />}
               {badge === 'skull' && <Skull className="w-3 h-3 text-red-500/60 flex-shrink-0" title="Unreachable for an extended period" />}
               {badge === 'moon'  && <Moon  className="w-3 h-3 text-blue-400/70 flex-shrink-0" fill="currentColor" title="Dormant" />}
               {d.label ? <span className="font-sans text-indigo-300">{d.label}</span> : d.ip}
@@ -196,7 +197,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
             )}
           </div>
           <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-            {isMe && <span className="text-[9px] font-medium text-cyan-400 leading-none">you</span>}
+            {isMe && <span className="text-[9px] font-medium text-cyan-400 leading-none" title="Marked as your device">you</span>}
             {isFiltered
               ? <span className="text-[10px] text-orange-500/70" title="Ping blocked but ports still respond">filtered</span>
               : isOffline
@@ -205,10 +206,10 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
                   : badge === 'moon'
                     ? <span className="text-[10px] text-blue-400/50" title="Marked dormant — will wake automatically on next ping">dormant</span>
                     : <span className="text-[10px] text-slate-500">offline</span>
-                : d.latency != null && <span className="text-[10px] font-mono text-slate-400">{d.latency}ms</span>
+                : d.latency != null && <span className="text-[10px] font-mono text-slate-400" title="Ping round-trip latency">{d.latency}ms</span>
             }
             {openPorts.length > 0 && (
-              <span className={`text-[10px] ${(isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`}>{openPorts.length}p</span>
+              <span className={`text-[10px] ${(isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} title={`${openPorts.length} open port${openPorts.length !== 1 ? 's' : ''} detected`}>{openPorts.length}p</span>
             )}
           </div>
           {threatMap[d.ip] === 'critical' && <AlertTriangle className="w-3 h-3 text-red-400 flex-shrink-0" title="Critical threat detected" />}
@@ -417,7 +418,17 @@ function PortRow({ port }) {
   )
 }
 
-function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress = {} }) {
+// ── Status badge pill (device detail legend) ─────────────────────────────────
+function StatusPill({ icon: Icon, colorClass, label, desc }) {
+  return (
+    <div title={desc} className={`flex items-center gap-1 px-2 py-1 rounded border text-[10px] cursor-default select-none ${colorClass}`}>
+      <Icon className="w-3 h-3 flex-shrink-0" />
+      <span>{label}</span>
+    </div>
+  )
+}
+
+function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress = {}, dormantAfterDays = 3, skullAfterDays = 7 }) {
   const [scanData, setScanData]     = useState(null)
   const [scanning, setScanning]     = useState(false)
   const [scanError, setScanError]   = useState(null)
@@ -612,6 +623,42 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
         <InfoRow icon={Calendar} label="Last Seen"    value={relTime(device.lastSeen)} />
         <InfoRow icon={Clock}    label="Port Scan"    value={(device.ports?.length && device.updatedAt) ? relTime(device.updatedAt) : null} />
       </div>
+
+      {/* Status Flags — explains all active badges for this device */}
+      {(() => {
+        const badge = offlineBadge(device, dormantAfterDays, skullAfterDays)
+        const myKey = localStorage.getItem('claudette:my-device')
+        const isMe  = myKey ? (device.mac && device.mac === myKey) || device.ip === myKey : false
+        const pills = []
+        // Connection status
+        if (device.status === 'online')
+          pills.push(<StatusPill key="online"  icon={Activity}       colorClass="bg-emerald-500/10 border-emerald-500/20 text-emerald-400"  label="Online"      desc="Device responded to the last ping sweep" />)
+        else if (device.status === 'filtered')
+          pills.push(<StatusPill key="filt"    icon={Wifi}           colorClass="bg-orange-500/10 border-orange-500/20 text-orange-400"     label="Filtered"    desc="ICMP ping is blocked, but open TCP ports were detected — device is likely online behind a firewall" />)
+        else if (badge === 'skull')
+          pills.push(<StatusPill key="skull"   icon={Skull}          colorClass="bg-red-900/15 border-red-500/20 text-red-400"              label="Unreachable" desc={`Has not been seen online for ${skullAfterDays}+ days — may be decommissioned or permanently offline`} />)
+        else if (badge === 'moon')
+          pills.push(<StatusPill key="moon"    icon={Moon}           colorClass="bg-blue-500/10 border-blue-500/20 text-blue-400"           label="Dormant"     desc={`Offline for ${dormantAfterDays}+ days or manually marked dormant — still monitored but expected inactive`} />)
+        else
+          pills.push(<StatusPill key="offline" icon={Activity}       colorClass="bg-slate-700/20 border-slate-600/20 text-slate-500"        label="Offline"     desc="Did not respond to the last ping — may be powered off or temporarily unreachable" />)
+        // User-applied flags
+        if (device.favorited)
+          pills.push(<StatusPill key="fav"     icon={Star}           colorClass="bg-amber-500/10 border-amber-500/20 text-amber-400"        label="Favorited"   desc="Pinned to the top of the device list for quick access" />)
+        if (device.flagged)
+          pills.push(<StatusPill key="pest"    icon={Bug}            colorClass="bg-red-500/10 border-red-500/20 text-red-400"              label="Pest flagged" desc="Marked as suspicious or unwanted — review this device's traffic and open ports" />)
+        if (device.dormant && badge !== 'skull')
+          pills.push(<StatusPill key="dorm"    icon={Moon}           colorClass="bg-blue-500/10 border-blue-500/20 text-blue-400"           label="Dormant"     desc="Manually marked as dormant — will resume normal status when next seen online" />)
+        if (isMe)
+          pills.push(<StatusPill key="me"      icon={Monitor}        colorClass="bg-cyan-500/10 border-cyan-500/20 text-cyan-400"           label="My device"   desc="Marked as your machine — highlighted in cyan in the device list" />)
+        if (device.hostnameStale && device.hostname)
+          pills.push(<StatusPill key="stale"   icon={Clock}          colorClass="bg-slate-700/20 border-slate-600/20 text-slate-500"        label="Stale hostname" desc="Hostname was detected in a previous scan but could not be confirmed in the most recent scan" />)
+        return pills.length > 0 ? (
+          <div className="px-6 pt-3 pb-2 border-t border-[#1a1a30]">
+            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Status</p>
+            <div className="flex flex-wrap gap-1.5">{pills}</div>
+          </div>
+        ) : null
+      })()}
 
       {/* Device Label */}
       {device.mac && (
@@ -1085,6 +1132,11 @@ function ConfirmDialog({ message, onConfirm, onCancel }) {
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
+// ── Per-user UI prefs — see src/lib/uiPrefs.js ───────────────────────────────
+const NET_TREE_MIN = 160
+const NET_TREE_MAX = 480
+const NET_TREE_DEFAULT = 224  // w-56 = 14rem = 224px
+
 export default function NetworkScan({ networkScan, threats, services, onScan, onCancel, preSelectedIp, onDeviceUpdated, onClearAll, portScanProgress = {}, deepScan = {}, lastScanDurationMs = null, lastDeepScanDurationMs = null }) {
   const { devices = [], lastScan, scanning, error, progress, subnets = [], devicesFound = 0, gateway = null, gatewayAssignments = {} } = networkScan
   const { running: deepRunning = false, done: deepDone = 0, total: deepTotal = 0, currentIp: deepCurrentIp = null, phase: deepPhase = 'portscan' } = deepScan
@@ -1094,6 +1146,33 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
     if (ms < 60_000) return `${Math.round(ms / 1000)}s`
     return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
   }
+
+  // Resizable device tree panel — persisted per-user via cookie
+  const [treeWidth, setTreeWidth] = useState(() => {
+    const saved = parseInt(getUIPref('network_tree_width'))
+    return !isNaN(saved) ? Math.min(NET_TREE_MAX, Math.max(NET_TREE_MIN, saved)) : NET_TREE_DEFAULT
+  })
+  const [treeResizing, setTreeResizing] = useState(false)
+  const onTreeDragStart = useCallback((e) => {
+    e.preventDefault()
+    setTreeResizing(true)
+    const startX = e.clientX
+    const startW = treeWidth
+    const onMove = (ev) => {
+      setTreeWidth(Math.min(NET_TREE_MAX, Math.max(NET_TREE_MIN, startW + ev.clientX - startX)))
+    }
+    const onUp = (ev) => {
+      const final = Math.min(NET_TREE_MAX, Math.max(NET_TREE_MIN, startW + ev.clientX - startX))
+      setTreeWidth(final)
+      setUIPref('network_tree_width', String(final))
+      setTreeResizing(false)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [treeWidth])
+
   const [selected, setSelected] = useState(null)
   const [mapView, setMapView] = useState(false)
   const [confirm, setConfirm] = useState(null) // { message, onConfirm }
@@ -1406,9 +1485,9 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
           />
         </div>
       ) : (
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left tree */}
-        <div className="w-56 flex-shrink-0">
+      <div className="flex flex-1 overflow-hidden" style={treeResizing ? { userSelect: 'none', cursor: 'col-resize' } : undefined}>
+        {/* Left tree — resizable via drag handle */}
+        <div className="flex-shrink-0 relative overflow-hidden" style={{ width: treeWidth }}>
           {devices.length === 0 && !scanning ? (
             <div className="flex flex-col items-center justify-center h-full text-center p-4">
               <Network className="w-8 h-8 text-indigo-400/20 mb-3" />
@@ -1433,12 +1512,18 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
               skullAfterDays={skullAfterDays}
             />
           )}
+          {/* Drag handle */}
+          <div
+            onMouseDown={onTreeDragStart}
+            className={`absolute top-0 right-0 w-1.5 h-full cursor-col-resize group z-10 ${treeResizing ? 'bg-indigo-500/40' : 'hover:bg-indigo-500/30'} transition-colors`}
+            title="Drag to resize"
+          />
         </div>
 
         {/* Right detail */}
         <div className="flex-1 overflow-hidden border-l border-[#1a1a30]">
           {selectedDevice
-            ? <DeviceDetail key={selectedDevice.ip} device={selectedDevice} knownDevices={devices} onDeviceUpdated={onDeviceUpdated} portScanProgress={portScanProgress} />
+            ? <DeviceDetail key={selectedDevice.ip} device={selectedDevice} knownDevices={devices} onDeviceUpdated={onDeviceUpdated} portScanProgress={portScanProgress} dormantAfterDays={dormantAfterDays} skullAfterDays={skullAfterDays} />
             : <EmptyDetail />
           }
         </div>

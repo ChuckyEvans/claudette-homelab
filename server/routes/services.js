@@ -133,6 +133,9 @@ export function getHistory() {
 
 let _prevInternetOk    = null
 let _internetResults   = []
+let _vpnUp             = false
+let _vpnOk             = null
+let _vpnResults        = []
 
 // Outage-mode: switch to faster polling while internet is down, restore on recovery
 let _outageMode         = false
@@ -175,6 +178,51 @@ function pingHost(host) {
   })
 }
 
+/** Ping a host bound to a specific network interface (Linux only) */
+function pingHostVia(host, iface) {
+  return new Promise(resolve => {
+    const start = Date.now()
+    exec(`ping -c 1 -W 3 -I ${iface} ${host}`, { timeout: 5000 }, (err) => {
+      resolve({ host, ok: !err, ms: Date.now() - start, ts: Date.now() })
+    })
+  })
+}
+
+/** Returns true if a network interface is UP (Linux/Docker only) */
+function isInterfaceUp(iface) {
+  if (process.platform === 'win32') return false
+  try {
+    const out = execSync(`ip link show ${iface} 2>/dev/null`, { timeout: 1000 }).toString()
+    return out.length > 0 && /<[^>]*\bUP\b[^>]*>/.test(out)
+  } catch { return false }
+}
+
+/** Detect the physical (non-VPN) interface to use for direct pings when VPN hijacks the default route */
+function detectPhysicalInterface(vpnIface) {
+  if (process.platform === 'win32') return null
+  try {
+    const out = execSync('ip link show', { timeout: 2000 }).toString()
+    const candidates = []
+    for (const match of out.matchAll(/^\d+:\s+(\S+?)(@\S+)?:\s+<([^>]+)>/gm)) {
+      const name  = match[1]
+      const flags = match[3]
+      if (name === 'lo') continue
+      if (name === vpnIface) continue
+      if (/^(tun|tap|wg|ppp|veth|docker|br-|virbr|dummy)/.test(name)) continue
+      if (!flags.includes('UP')) continue
+      candidates.push(name)
+    }
+    // Prefer the one that carries the default route
+    try {
+      const routeOut = execSync('ip route show default', { timeout: 2000 }).toString()
+      for (const c of candidates) {
+        if (routeOut.includes(`dev ${c}`)) return c
+      }
+    } catch { /* ignore */ }
+    return candidates[0] ?? null
+  } catch { return null }
+}
+
 // Detect the default gateway IP (Linux/Docker only, cached per process lifetime)
 let _cachedGateway = undefined
 function detectGateway() {
@@ -207,11 +255,31 @@ export async function checkConnectivity(broadcast) {
   const cfg = loadConfig()
   const pingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
 
-  const pingResults = await Promise.all(pingHosts.map(pingHost))
+  // VPN check — detect early so we can bind direct pings to the physical interface
+  const VPN_IFACE = cfg?.network?.vpn_interface ?? null
+  _vpnUp = !!VPN_IFACE && isInterfaceUp(VPN_IFACE)
+
+  // If VPN is hijacking the default route, bind direct pings to the physical interface
+  const physIface = _vpnUp ? detectPhysicalInterface(VPN_IFACE) : null
+  if (_vpnUp && physIface) {
+    console.log(`[internet] VPN (${VPN_IFACE}) active — binding direct pings to ${physIface}`)
+  }
+
+  const pingResults = await Promise.all(
+    pingHosts.map(h => physIface ? pingHostVia(h, physIface) : pingHost(h))
+  )
   const httpResult  = await checkHttpHead('http://connectivity-check.ubuntu.com')
   _internetResults  = [...pingResults, httpResult]
 
   const ok = _internetResults.some(r => r.ok)
+
+  if (_vpnUp) {
+    _vpnResults = await Promise.all(pingHosts.map(h => pingHostVia(h, VPN_IFACE)))
+    _vpnOk = _vpnResults.some(r => r.ok)
+  } else {
+    _vpnResults = []
+    _vpnOk = null
+  }
 
   // Gateway check for infra vs ISP failure classification
   const gateway    = detectGateway()
@@ -245,6 +313,9 @@ export async function checkConnectivity(broadcast) {
     outage_mode:      _outageMode,
     interval_seconds: _outageMode ? _outageCheckSecs : null,
     attempt_count:    _outageMode ? _outageAttemptCount : null,
+    vpn_up:           _vpnUp,
+    vpn_ok:           _vpnOk,
+    vpn_results:      _vpnResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
   })
 
   _prevInternetOk = ok
@@ -257,13 +328,13 @@ export async function checkConnectivity(broadcast) {
     _stopOutagePoll()
   }
 
-  if (broadcast) broadcast('internet', { results: _internetResults, ok, ts: Date.now() })
+  if (broadcast) broadcast('internet', { results: _internetResults, ok, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults, ts: Date.now() })
   if (broadcast) broadcast('job_done', { job: 'internet', ts: Date.now() })
   return _internetResults
 }
 
 export function getInternetStatus() {
-  return { results: _internetResults, ok: _internetResults.length ? _internetResults.some(r => r.ok) : null }
+  return { results: _internetResults, ok: _internetResults.length ? _internetResults.some(r => r.ok) : null, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults }
 }
 
 router.get('/internet', async (req, res) => {

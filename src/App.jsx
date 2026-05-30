@@ -199,18 +199,7 @@ export default function App() {
     api.threats.get().then(setThreats).catch(console.error)
     api.network.get().then(d => setNetworkScan(prev => ({ ...prev, ...d }))).catch(console.error)
     api.system.stats().then(setSystemStats).catch(console.error)
-    api.config.get().then(cfg => {
-      // Use localStorage override if present (persists even when server save fails)
-      const localTheme = localStorage.getItem('claudette:theme')
-      const serverTheme = cfg?.ui?.theme
-      // Trust localStorage if set; otherwise fall back to server config and persist it
-      if (localTheme) {
-        applyTheme(localTheme)
-      } else if (serverTheme) {
-        applyTheme(serverTheme)
-        localStorage.setItem('claudette:theme', serverTheme)
-      }
-    }).catch(() => {})
+    api.config.get().catch(() => {})
   }, [auth.authenticated])
 
   // System stats poll every 5s

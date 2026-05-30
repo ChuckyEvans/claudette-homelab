@@ -188,10 +188,18 @@ export function getDb() {
       ping_ms          REAL,
       download_mbps    REAL,
       upload_mbps      REAL,
-      error            TEXT
+      error            TEXT,
+      via              TEXT NOT NULL DEFAULT 'direct'
     );
     CREATE INDEX IF NOT EXISTS idx_speedtest_ts ON speedtest_results (ts DESC);
   `)
+
+  // Add via column to speedtest_results for direct/vpn tracking (migration for existing installs)
+  const stCols = _db.all("PRAGMA table_info(speedtest_results)").map(c => c.name)
+  if (!stCols.includes('via')) {
+    _db.exec("ALTER TABLE speedtest_results ADD COLUMN via TEXT NOT NULL DEFAULT 'direct'")
+    console.log('[db] Added via column to speedtest_results.')
+  }
 
   console.log(`[db] SQLite ready at ${DB_PATH}`)
   return _db
