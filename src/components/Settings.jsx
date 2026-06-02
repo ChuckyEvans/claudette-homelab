@@ -613,6 +613,30 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
   // eslint-disable-next-line react-hooks/refs
   bgJobsRef.current = bgJobs
 
+  // ── DDNS state ────────────────────────────────────────────────────────────
+  const [ddnsEnabled,         setDdnsEnabled]         = useState(false)
+  const [ddnsProvider,        setDdnsProvider]        = useState('noip')
+  const [ddnsInterval,        setDdnsInterval]        = useState(5)
+  const [ddnsRetentionDays,   setDdnsRetentionDays]   = useState(365)
+  const [ddnsNoipUser,        setDdnsNoipUser]        = useState('')
+  const [ddnsNoipPass,        setDdnsNoipPass]        = useState('')
+  const [ddnsNoipHost,        setDdnsNoipHost]        = useState('')
+  const [ddnsDuckToken,       setDdnsDuckToken]       = useState('')
+  const [ddnsDuckDomains,     setDdnsDuckDomains]     = useState('')
+  const [ddnsDynuUser,        setDdnsDynuUser]        = useState('')
+  const [ddnsDynuPass,        setDdnsDynuPass]        = useState('')
+  const [ddnsDynuHost,        setDdnsDynuHost]        = useState('')
+  const [ddnsDyndnsUser,      setDdnsDyndnsUser]      = useState('')
+  const [ddnsDyndnsPass,      setDdnsDyndnsPass]      = useState('')
+  const [ddnsDyndnsHost,      setDdnsDyndnsHost]      = useState('')
+  const [ddnsAfraidUrl,       setDdnsAfraidUrl]       = useState('')
+  const [ddnsCfToken,         setDdnsCfToken]         = useState('')
+  const [ddnsCfZoneId,        setDdnsCfZoneId]        = useState('')
+  const [ddnsCfRecordId,      setDdnsCfRecordId]      = useState('')
+  const [ddnsCfHost,          setDdnsCfHost]          = useState('')
+  const [ddnsStatus,          setDdnsStatus]          = useState(null)
+  const [ddnsUpdating,        setDdnsUpdating]        = useState(false)
+
   // Dirty / unsaved-changes tracking
   const [isDirty,    setIsDirty]    = useState(false)
   const [pendingNav, setPendingNav] = useState(null)  // { proceed: () => void } | null
@@ -771,9 +795,32 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
         setInternetOutageCheckSecs(cfg.schedule?.internet_outage_check_seconds ?? 10)
         setMtrBaselineHours(cfg.schedule?.mtr_baseline_hours ?? 1)
         setMtrOutageRepeatMin(cfg.schedule?.mtr_outage_repeat_minutes ?? 15)
+        // DDNS
+        const d = cfg.ddns ?? {}
+        setDdnsEnabled(d.enabled ?? false)
+        setDdnsProvider(d.provider ?? 'noip')
+        setDdnsInterval(d.check_interval_minutes ?? 5)
+        setDdnsRetentionDays(d.history_retention_days ?? 365)
+        setDdnsNoipUser(d.noip?.username ?? '')
+        setDdnsNoipPass(d.noip?.password ?? '')
+        setDdnsNoipHost(d.noip?.hostname ?? '')
+        setDdnsDuckToken(d.duckdns?.token ?? '')
+        setDdnsDuckDomains(d.duckdns?.domains ?? '')
+        setDdnsDynuUser(d.dynu?.username ?? '')
+        setDdnsDynuPass(d.dynu?.password ?? '')
+        setDdnsDynuHost(d.dynu?.hostname ?? '')
+        setDdnsDyndnsUser(d.dyndns?.username ?? '')
+        setDdnsDyndnsPass(d.dyndns?.password ?? '')
+        setDdnsDyndnsHost(d.dyndns?.hostname ?? '')
+        setDdnsAfraidUrl(d.afraid?.update_url ?? '')
+        setDdnsCfToken(d.cloudflare?.api_token ?? '')
+        setDdnsCfZoneId(d.cloudflare?.zone_id ?? '')
+        setDdnsCfRecordId(d.cloudflare?.record_id ?? '')
+        setDdnsCfHost(d.cloudflare?.hostname ?? '')
       })
       .catch(console.error)
       .finally(() => setLoading(false))
+    api.ddns.status().then(setDdnsStatus).catch(() => {})
     api.network.flags.getAll().then(setFlags).catch(console.error)
   }, [])
 
@@ -819,6 +866,19 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
     sla_notes:           infraSlaNotes.trim(),
   })
 
+  const ddnsPayload = () => ({
+    enabled:  ddnsEnabled,
+    provider: ddnsProvider,
+    check_interval_minutes:  parseInt(ddnsInterval) || 5,
+    history_retention_days:  parseInt(ddnsRetentionDays) || 365,
+    noip:      { username: ddnsNoipUser,    password: ddnsNoipPass,    hostname: ddnsNoipHost },
+    duckdns:   { token:    ddnsDuckToken,   domains:  ddnsDuckDomains },
+    dynu:      { username: ddnsDynuUser,    password: ddnsDynuPass,    hostname: ddnsDynuHost },
+    dyndns:    { username: ddnsDyndnsUser,  password: ddnsDyndnsPass,  hostname: ddnsDyndnsHost },
+    afraid:    { update_url: ddnsAfraidUrl },
+    cloudflare: { api_token: ddnsCfToken, zone_id: ddnsCfZoneId, record_id: ddnsCfRecordId, hostname: ddnsCfHost },
+  })
+
   const onThemeChange = (newTheme) => {
     setTheme(newTheme)
     applyTheme(newTheme)
@@ -837,6 +897,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
         services: services.filter(s => s.name && s.url),
         isp: ispPayload(),
         infra: infraPayload(),
+        ddns: ddnsPayload(),
       })
       setIsDirty(false)
       if (pendingNav) { pendingNav.proceed(); setPendingNav(null) }
@@ -930,6 +991,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
               { id: 'host',       label: 'Host' },
               { id: 'network',    label: 'Network' },
               { id: 'schedule',   label: 'Schedule' },
+              { id: 'ddns',       label: 'DDNS' },
               { id: 'infra',      label: 'Infra & SLA' },
               { id: 'isp',        label: 'ISP & SLA' },
               { id: 'services',   label: 'Services' },
@@ -1188,6 +1250,144 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                 <option value={365}>1 year</option>
               </select>
               <p className="text-[11px] text-slate-600">Events older than this are pruned nightly at 3 am</p>
+            </div>
+          </section>
+          </>)}
+
+          {/* DDNS */}
+          {settingsTab === 'ddns' && (<>
+          <section>
+            <SectionHeading>Dynamic DNS</SectionHeading>
+            <p className="text-[11px] text-slate-600 mb-4">
+              Keeps your hostname pointing to your current public IP. The server checks your IP every N minutes and pushes an update to your DDNS provider if it changes.
+            </p>
+
+            {/* Status card */}
+            {ddnsStatus && (
+              <div className="mb-5 p-3 rounded-lg border border-[#1a1a30] bg-[#060610] space-y-1.5 max-w-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Status</span>
+                  <button type="button" disabled={ddnsUpdating || !ddnsStatus.enabled}
+                    onClick={async () => {
+                      setDdnsUpdating(true)
+                      try {
+                        const r = await api.ddns.update()
+                        setDdnsStatus(r.status)
+                        showToast('DDNS check complete')
+                      } catch (e) { showToast(e.message, 'error') }
+                      finally { setDdnsUpdating(false) }
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium text-indigo-300 border border-indigo-500/30 hover:border-indigo-500/60 bg-indigo-500/5 hover:bg-indigo-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    {ddnsUpdating ? <RefreshCw size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                    Check Now
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                  <span className="text-slate-600">Current IP</span>
+                  <span className="text-slate-300 font-mono">{ddnsStatus.last_ip ?? '—'}</span>
+                  <span className="text-slate-600">Last Updated</span>
+                  <span className="text-slate-400">{ddnsStatus.last_updated ? new Date(ddnsStatus.last_updated).toLocaleString() : '—'}</span>
+                  <span className="text-slate-600">Last Checked</span>
+                  <span className="text-slate-400">{ddnsStatus.last_check ? new Date(ddnsStatus.last_check).toLocaleString() : '—'}</span>
+                  {ddnsStatus.hostname && <><span className="text-slate-600">Hostname</span><span className="text-slate-300 font-mono">{ddnsStatus.hostname}</span></>}
+                </div>
+                {ddnsStatus.last_error && (
+                  <p className="mt-1 text-[11px] text-red-400 bg-red-500/10 rounded px-2 py-1">{ddnsStatus.last_error}</p>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-4 max-w-sm">
+              {/* Enable toggle */}
+              <label className="flex items-center gap-3 cursor-pointer">
+                <div className={`relative w-9 h-5 rounded-full transition-colors ${ddnsEnabled ? 'bg-indigo-600' : 'bg-[#1a1a30]'}`}
+                  onClick={() => { setDdnsEnabled(v => !v); markDirty() }}>
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${ddnsEnabled ? 'translate-x-4' : ''}`} />
+                </div>
+                <span className="text-sm text-slate-300 font-medium">Enable DDNS auto-update</span>
+              </label>
+
+              {/* Provider select */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-slate-400">Provider</label>
+                <select value={ddnsProvider} onChange={e => { setDdnsProvider(e.target.value); markDirty() }}
+                  className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors">
+                  <option value="noip">No-IP (noip.com)</option>
+                  <option value="duckdns">DuckDNS (duckdns.org)</option>
+                  <option value="dynu">Dynu (dynu.com)</option>
+                  <option value="dyndns">DynDNS (dyndns.com)</option>
+                  <option value="afraid">Afraid.org / FreeDNS</option>
+                  <option value="cloudflare">Cloudflare DNS</option>
+                </select>
+              </div>
+
+              {/* Check interval */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-slate-400">Check interval (minutes)</label>
+                <input type="number" min="5" max="1440" step="5"
+                  value={ddnsInterval} onChange={e => { setDdnsInterval(e.target.value); markDirty() }}
+                  className="w-32 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors" />
+                <p className="text-[11px] text-slate-600">Minimum 5 minutes. Only sends an update when your IP actually changes.</p>
+              </div>
+
+              {/* History retention */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-slate-400">History retention (days)</label>
+                <input type="number" min="1" max="3650" step="1"
+                  value={ddnsRetentionDays} onChange={e => { setDdnsRetentionDays(e.target.value); markDirty() }}
+                  className="w-32 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors" />
+                <p className="text-[11px] text-slate-600">How long to keep IP change and error history. Default 365 days (1 year).</p>
+              </div>
+
+              {/* Provider-specific fields */}
+              {ddnsProvider === 'noip' && (<>
+                <Field label="No-IP Username / Email" value={ddnsNoipUser} onChange={e => { setDdnsNoipUser(e.target.value); markDirty() }} placeholder="you@example.com" />
+                <Field label="No-IP Password" type="password" value={ddnsNoipPass} onChange={e => { setDdnsNoipPass(e.target.value); markDirty() }} placeholder="••••••••" />
+                <Field label="Hostname" value={ddnsNoipHost} onChange={e => { setDdnsNoipHost(e.target.value); markDirty() }} placeholder="myhome.ddns.net" />
+              </>)}
+
+              {ddnsProvider === 'duckdns' && (<>
+                <Field label="Token" type="password" value={ddnsDuckToken} onChange={e => { setDdnsDuckToken(e.target.value); markDirty() }} placeholder="your-duckdns-token" />
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-slate-400">Domain(s)</label>
+                  <input value={ddnsDuckDomains} onChange={e => { setDdnsDuckDomains(e.target.value); markDirty() }}
+                    placeholder="myhome  (without .duckdns.org)"
+                    className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 outline-none transition-colors" />
+                  <p className="text-[11px] text-slate-600">Just the subdomain part, e.g. <span className="text-slate-400">myhome</span> — not myhome.duckdns.org. Comma-separated for multiple.</p>
+                </div>
+              </>)}
+
+              {ddnsProvider === 'dynu' && (<>
+                <Field label="Dynu Username" value={ddnsDynuUser} onChange={e => { setDdnsDynuUser(e.target.value); markDirty() }} placeholder="username" />
+                <Field label="Dynu Password" type="password" value={ddnsDynuPass} onChange={e => { setDdnsDynuPass(e.target.value); markDirty() }} placeholder="••••••••" />
+                <Field label="Hostname" value={ddnsDynuHost} onChange={e => { setDdnsDynuHost(e.target.value); markDirty() }} placeholder="myhome.dynu.net" />
+              </>)}
+
+              {ddnsProvider === 'dyndns' && (<>
+                <Field label="DynDNS Username" value={ddnsDyndnsUser} onChange={e => { setDdnsDyndnsUser(e.target.value); markDirty() }} placeholder="username" />
+                <Field label="DynDNS Password" type="password" value={ddnsDyndnsPass} onChange={e => { setDdnsDyndnsPass(e.target.value); markDirty() }} placeholder="••••••••" />
+                <Field label="Hostname" value={ddnsDyndnsHost} onChange={e => { setDdnsDyndnsHost(e.target.value); markDirty() }} placeholder="myhome.dyndns.org" />
+              </>)}
+
+              {ddnsProvider === 'afraid' && (
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-slate-400">Direct Update URL</label>
+                  <input value={ddnsAfraidUrl} onChange={e => { setDdnsAfraidUrl(e.target.value); markDirty() }}
+                    placeholder="https://freedns.afraid.org/dynamic/update.php?..."
+                    className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 outline-none transition-colors font-mono text-xs" />
+                  <p className="text-[11px] text-slate-600">
+                    Get this from afraid.org → Dynamic DNS → your record → Direct URL. Contains your unique key.
+                  </p>
+                </div>
+              )}
+
+              {ddnsProvider === 'cloudflare' && (<>
+                <Field label="API Token" type="password" value={ddnsCfToken} onChange={e => { setDdnsCfToken(e.target.value); markDirty() }} placeholder="Cloudflare API token" />
+                <Field label="Zone ID" value={ddnsCfZoneId} onChange={e => { setDdnsCfZoneId(e.target.value); markDirty() }} placeholder="abc123..." />
+                <Field label="DNS Record ID" value={ddnsCfRecordId} onChange={e => { setDdnsCfRecordId(e.target.value); markDirty() }} placeholder="def456..." />
+                <Field label="Hostname (A record name)" value={ddnsCfHost} onChange={e => { setDdnsCfHost(e.target.value); markDirty() }} placeholder="home.example.com" />
+                <p className="text-[11px] text-slate-600">Zone ID and Record ID are in your Cloudflare dashboard. Create an API token with <em>Zone: DNS: Edit</em> permissions.</p>
+              </>)}
             </div>
           </section>
           </>)}
@@ -1494,7 +1694,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
           {settingsTab === 'appearance' && (<>
           <section>
             <SectionHeading>Appearance</SectionHeading>
-            <div className="grid grid-cols-5 gap-2.5 max-w-2xl">
+            <div className="grid grid-cols-7 gap-2 max-w-4xl">
               {THEMES.map(t => {
                 // cache-bust the preview URL after a custom upload
                 const ver = photoVersions[t.id]
@@ -1514,8 +1714,8 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                         <span className="text-[10px] font-medium text-slate-300 leading-tight block">{t.label}</span>
                       </div>
                     </button>
-                    {/* Upload overlay — photo themes only */}
-                    {t.photo && (
+                    {/* Upload overlay — local photo themes only */}
+                    {t.photo?.startsWith('/') && (
                       <label
                         title="Upload custom photo"
                         onClick={e => e.stopPropagation()}

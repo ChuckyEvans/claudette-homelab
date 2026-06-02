@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { BarChart2, RefreshCw, X, Monitor, Activity, Server, Wifi, Download, Clock, Zap, Search, AlertTriangle, Copy, Check, TrendingDown, ClipboardCheck, Shield, Loader2, ChevronDown } from 'lucide-react'
+import { BarChart2, RefreshCw, X, Monitor, Activity, Server, Wifi, Download, Clock, Zap, Search, AlertTriangle, Copy, Check, TrendingDown, ClipboardCheck, Shield, Loader2, ChevronDown, Globe } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line, ReferenceLine,
@@ -92,21 +92,28 @@ const EV_FILTERS = [
   { label: 'Internet', value: 'internet' },
 ]
 
-const EV_COLORS = {
-  'device.new':        'text-emerald-400 bg-emerald-500/10',
-  'device.online':     'text-sky-400     bg-sky-500/10',
-  'device.offline':    'text-slate-400   bg-white/5',
-  'device.port.open':  'text-indigo-400  bg-indigo-500/10',
-  'service.down':      'text-red-400     bg-red-500/10',
-  'service.up':        'text-emerald-400 bg-emerald-500/10',
-  'internet.down':     'text-red-400     bg-red-500/10',
-  'internet.up':       'text-emerald-400 bg-emerald-500/10',
-  'internet.check':    'text-sky-300     bg-sky-500/5',
-  'scan.complete':     'text-indigo-400  bg-indigo-500/10',
-  'scan.started':      'text-indigo-300  bg-indigo-500/8',
-  'threat.found':      'text-amber-400   bg-amber-500/10',
+const EV_META = {
+  'device.new':         { label: 'New Device',      color: 'text-emerald-400 bg-emerald-500/10' },
+  'device.online':      { label: 'Device Online',   color: 'text-sky-400     bg-sky-500/10'     },
+  'device.offline':     { label: 'Device Offline',  color: 'text-slate-400   bg-white/5'        },
+  'device.port.open':   { label: 'Port Opened',     color: 'text-indigo-400  bg-indigo-500/10'  },
+  'service.down':       { label: 'Service Down',    color: 'text-red-400     bg-red-500/10'     },
+  'service.up':         { label: 'Service Up',      color: 'text-emerald-400 bg-emerald-500/10' },
+  'internet.down':      { label: 'Internet Down',   color: 'text-red-400     bg-red-500/10'     },
+  'internet.up':        { label: 'Internet Up',     color: 'text-emerald-400 bg-emerald-500/10' },
+  'internet.check':     { label: 'Net Check',       color: 'text-sky-300     bg-sky-500/5'      },
+  'scan.complete':      { label: 'Scan Complete',   color: 'text-indigo-400  bg-indigo-500/10'  },
+  'scan.started':       { label: 'Scan Started',    color: 'text-indigo-300  bg-indigo-500/8'   },
+  'scan.blocked':       { label: 'Scan Blocked',    color: 'text-amber-400   bg-amber-500/10'   },
+  'scan.error':         { label: 'Scan Error',      color: 'text-red-400     bg-red-500/10'     },
+  'threat.found':       { label: 'Threat Found',    color: 'text-amber-400   bg-amber-500/10'   },
+  'threat.refresh':     { label: 'Threat Refresh',  color: 'text-amber-300   bg-amber-500/5'    },
+  'service.check':      { label: 'Service Check',   color: 'text-slate-400   bg-white/5'        },
+  'config.saved':       { label: 'Config Saved',    color: 'text-violet-400  bg-violet-500/10'  },
+  'device.ports_cleared': { label: 'Ports Cleared', color: 'text-slate-400   bg-white/5'        },
 }
-function evColor(ev) { return EV_COLORS[ev] ?? 'text-slate-400 bg-white/5' }
+function evColor(ev) { return (EV_META[ev]?.color) ?? 'text-slate-400 bg-white/5' }
+function evLabel(ev) { return (EV_META[ev]?.label) ?? ev }
 
 function fmtDate(ts) {
   if (!ts) return '—'
@@ -122,19 +129,103 @@ function fmtDuration(payload) {
   return s >= 60 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${s.toFixed(1)}s`
 }
 
-function fmtPayload(evName, payload) {
-  if (!payload) return null
-  const p = typeof payload === 'string' ? (() => { try { return JSON.parse(payload) } catch { return {} } })() : payload
+function fmtPayload(evName, payload, row) {
+  if (!payload && !row) return null
+  const p = !payload ? {}
+    : typeof payload === 'string' ? (() => { try { return JSON.parse(payload) } catch { return {} } })()
+    : payload
+
+  // Device events — show hostname / IP / MAC prominently
+  if (evName === 'device.new') {
+    const parts = []
+    if (row?.hostname) parts.push(row.hostname)
+    if (row?.ip)       parts.push(row.ip)
+    if (row?.mac)      parts.push(row.mac)
+    if (p.vendor)      parts.push(p.vendor)
+    return parts.join(' · ') || null
+  }
+  if (evName === 'device.online' || evName === 'device.offline') {
+    const parts = []
+    if (row?.hostname) parts.push(row.hostname)
+    if (row?.ip)       parts.push(row.ip)
+    return parts.join(' · ') || null
+  }
+  if (evName === 'device.port.open') {
+    const parts = []
+    if (row?.hostname || row?.ip) parts.push(row.hostname ?? row.ip)
+    if (p.port)    parts.push(`port ${p.port}`)
+    if (p.service) parts.push(p.service)
+    if (p.version) parts.push(p.version)
+    return parts.join(' · ') || null
+  }
+
+  // Service events
+  if (evName === 'service.down' || evName === 'service.up') {
+    const parts = []
+    if (p.name)    parts.push(p.name)
+    if (p.message) parts.push(p.message)
+    return parts.join(' — ') || null
+  }
+  if (evName === 'service.check') {
+    return `${p.up ?? 0} up · ${p.down ?? 0} down · ${p.total ?? 0} total`
+  }
+
+  // Internet / connectivity events
+  if (evName === 'internet.down') {
+    const type = p.outage_type
+    const gwOk = p.gateway_ok
+    if (type === 'isp')   return 'ISP failure — gateway reachable, external DNS unreachable'
+    if (type === 'infra') return 'Infrastructure failure — gateway unreachable'
+    if (type === 'unknown') return gwOk == null ? 'Connectivity lost' : 'Connectivity lost (unknown type)'
+    return 'Connectivity lost'
+  }
+  if (evName === 'internet.up') {
+    return 'Connectivity restored'
+  }
+  if (evName === 'internet.check') {
+    if (!p.results?.length) return p.ok ? 'Online' : 'Offline'
+    const hosts = p.results.map(r => `${r.host.replace(/^https?:\/\//, '')} ${r.ok ? `${r.ms}ms` : '✗'}`).join(' · ')
+    const vpn = p.vpn_up ? (p.vpn_ok ? ' · VPN ✓' : ' · VPN ✗') : ''
+    return (p.ok ? '✓ ' : '✗ ') + hosts + vpn
+  }
+
+  // Scan events
+  if (evName === 'scan.complete') {
+    const parts = [`${p.devices_found ?? 0} devices`]
+    if (p.subnets?.length) parts.push(p.subnets.join(', '))
+    return parts.join(' on ')
+  }
+  if (evName === 'scan.started') {
+    return p.subnets?.join(', ') ?? null
+  }
+  if (evName === 'scan.blocked') {
+    return [p.subnet, p.reason].filter(Boolean).join(' — ')
+  }
+  if (evName === 'scan.error') {
+    return p.error ?? 'Unknown error'
+  }
+
+  // Threat events
+  if (evName === 'threat.refresh' || evName === 'threat.found') {
+    const parts = []
+    if (p.new_count != null) parts.push(`${p.new_count} new`)
+    if (p.total     != null) parts.push(`${p.total} total`)
+    return parts.join(', ') || null
+  }
+
+  // Config
+  if (evName === 'config.saved') return p.section ? `section: ${p.section}` : 'Settings updated'
+
+  // Fallback — render known fields intelligently
   const parts = []
-  if (p.hostname)              parts.push(p.hostname)
-  if (p.ip)                    parts.push(p.ip)
-  if (p.port)                  parts.push(`port ${p.port}`)
-  if (p.name)                  parts.push(p.name)
-  if (p.devices_found != null) parts.push(`${p.devices_found} devices`)
-  if (p.up != null)            parts.push(`${p.up} up / ${p.down ?? 0} down`)
-  if (p.ok != null && evName?.startsWith('internet')) parts.push(p.ok ? 'online' : 'offline')
-  if (parts.length === 0)      return JSON.stringify(p).slice(0, 80)
-  return parts.join(' · ')
+  if (p.hostname) parts.push(p.hostname)
+  if (p.ip)       parts.push(p.ip)
+  if (p.name)     parts.push(p.name)
+  if (p.message)  parts.push(p.message)
+  if (p.error)    parts.push(p.error)
+  if (parts.length) return parts.join(' · ')
+  const str = JSON.stringify(p)
+  return str === '{}' ? null : str.slice(0, 120)
 }
 
 function fmtMs(ms) {
@@ -706,6 +797,7 @@ const TABS = [
   { id: 'internet',  label: 'Internet',   Icon: Wifi      },
   { id: 'vpn',       label: 'VPN',        Icon: Shield    },
   { id: 'speedtest', label: 'Speed Test', Icon: Zap       },
+  { id: 'ddns',      label: 'DDNS',       Icon: Globe     },
   { id: 'activity',  label: 'Activity',   Icon: Activity  },
 ]
 
@@ -742,6 +834,7 @@ export default function Reports() {
   const [selectedCheck,        setSelectedCheck]        = useState(null)
   const [selectedOutage,       setSelectedOutage]       = useState(null) // outage object with optional .diagnostics
   const [traceActive,          setTraceActive]          = useState(false) // drives top progress bar
+  const [ddnsData,             setDdnsData]             = useState(null)  // { status, history }
 
   function clearOutage() { setSelectedOutage(null) }
   const { toasts, add: addToast } = useToast()
@@ -808,11 +901,21 @@ export default function Reports() {
     }
   }, [range])
 
+  const loadDdns = useCallback(async () => {
+    try {
+      const [status, history] = await Promise.all([api.ddns.status(), api.ddns.history()])
+      setDdnsData({ status, history })
+    } catch (e) {
+      console.error('[Reports/ddns]', e)
+    }
+  }, [])
+
   useEffect(() => { loadData()    }, [loadData])
   useEffect(() => { loadCharts()  }, [loadCharts])
   useEffect(() => { loadInternet() }, [loadInternet])
   useEffect(() => { loadSpeedtest() }, [loadSpeedtest])
   useEffect(() => { loadOutages()  }, [loadOutages])
+  useEffect(() => { loadDdns()     }, [loadDdns])
 
   useEffect(() => {
     api.reports.devices().then(r => setDevices(r.devices ?? [])).catch(() => {})
@@ -2648,6 +2751,227 @@ export default function Reports() {
           )
         })()}
 
+        {/* ── DDNS ── */}
+        {tab === 'ddns' && (() => {
+          const ds = ddnsData?.status ?? null
+          const history = ddnsData?.history ?? []
+          const ipChanges = history.filter(e => e.event === 'ip_changed')
+          const failures  = history.filter(e => e.event === 'update_failed')
+
+          const providerLabel = {
+            noip: 'No-IP', duckdns: 'DuckDNS', dynu: 'Dynu',
+            dyndns: 'DynDNS', afraid: 'Afraid.org', cloudflare: 'Cloudflare',
+          }
+
+          const notConfigured = !ds?.provider
+
+          return (
+            <div className="space-y-5">
+
+              {/* ── Hero config banner ─────────────────────────────────── */}
+              <div className={`rounded-xl border px-5 py-4 flex flex-col md:flex-row md:items-center gap-4 ${
+                notConfigured
+                  ? 'bg-[#0a0a18] border-[#1a1a30]'
+                  : ds?.enabled
+                    ? 'bg-emerald-950/20 border-emerald-500/20'
+                    : 'bg-[#0a0a18] border-amber-500/20'
+              }`}>
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                    notConfigured ? 'bg-slate-500/10' : ds?.enabled ? 'bg-emerald-500/15' : 'bg-amber-500/10'
+                  }`}>
+                    <Globe className={`w-5 h-5 ${notConfigured ? 'text-slate-600' : ds?.enabled ? 'text-emerald-400' : 'text-amber-400'}`} />
+                  </div>
+                  <div className="min-w-0">
+                    {notConfigured ? (
+                      <>
+                        <p className="text-sm font-semibold text-slate-400">DDNS Not Configured</p>
+                        <p className="text-[11px] text-slate-600">Go to Settings → DDNS to set up your provider and hostname.</p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-base font-bold text-white font-mono truncate">{ds.hostname ?? '(hostname not set)'}</span>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                            ds.enabled
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                              : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                          }`}>{ds.enabled ? 'Active' : 'Disabled'}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {providerLabel[ds.provider] ?? ds.provider}
+                          {' · '}checked every {ds.interval} min
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {!notConfigured && (
+                  <div className="flex gap-6 flex-shrink-0 text-center">
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Current IP</p>
+                      <p className={`text-sm font-mono font-bold ${ds.last_ip ? 'text-emerald-300' : 'text-slate-600'}`}>{ds.last_ip ?? '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Last Updated</p>
+                      <p className="text-sm text-slate-300">{ds.last_updated ? new Date(ds.last_updated).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Last Checked</p>
+                      <p className="text-sm text-slate-300">{ds.last_check ? new Date(ds.last_check).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Last error banner */}
+              {ds?.last_error && (
+                <div className="flex items-start gap-3 bg-red-950/30 border border-red-500/30 rounded-xl px-4 py-3">
+                  <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-semibold text-red-400 mb-0.5">Last update error</p>
+                    <p className="text-[11px] text-red-300 font-mono">{ds.last_error}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Stat cards ─────────────────────────────────────────── */}
+              {!notConfigured && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Provider',       value: providerLabel[ds?.provider] ?? ds?.provider ?? '—', color: 'text-sky-300' },
+                    { label: 'Dynamic Host',   value: ds?.hostname ?? '—',  color: ds?.hostname ? 'text-indigo-300' : 'text-slate-600', mono: true, small: true },
+                    { label: 'IP Changes',     value: ipChanges.length,     color: 'text-emerald-300' },
+                    { label: 'Failed Updates', value: failures.length,      color: failures.length > 0 ? 'text-red-400' : 'text-slate-500' },
+                  ].map(({ label, value, color, mono, small }) => (
+                    <div key={label} className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl px-4 py-3">
+                      <p className="text-[11px] text-slate-500 mb-1">{label}</p>
+                      <p className={`font-bold tabular-nums truncate ${color} ${mono ? 'font-mono' : ''} ${small ? 'text-sm' : 'text-lg'}`}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* ── IP change history ───────────────────────────────────── */}
+              <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl overflow-hidden">
+                <div className="px-4 py-3 border-b border-[#1a1a30] flex items-center justify-between">
+                  <span className="text-sm font-semibold text-white">IP Change History</span>
+                  <span className="text-[11px] text-slate-500">{ipChanges.length} change{ipChanges.length !== 1 ? 's' : ''} recorded</span>
+                </div>
+                {ipChanges.length === 0 ? (
+                  <div className="py-10 flex flex-col items-center gap-2 text-slate-600">
+                    <Globe className="w-7 h-7 opacity-30" />
+                    <p className="text-sm">{notConfigured ? 'Configure DDNS in Settings first' : 'No IP changes recorded yet — your IP will be logged here when it changes'}</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-[#1a1a30] bg-[#080810]">
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Time</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Provider</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Hostname</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Old IP</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">New IP</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Provider Response</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#0f0f20]">
+                        {ipChanges.map((e, i) => (
+                          <tr key={i} className="hover:bg-white/[0.02] transition-colors">
+                            <td className="px-4 py-2 text-slate-400 tabular-nums whitespace-nowrap">{fmtDate(e.ts)}</td>
+                            <td className="px-4 py-2 text-slate-300">{providerLabel[e.provider] ?? e.provider ?? '—'}</td>
+                            <td className="px-4 py-2 font-mono text-indigo-300 text-[11px]">{e.hostname ?? ds?.hostname ?? '—'}</td>
+                            <td className="px-4 py-2 font-mono text-slate-500">{e.old_ip ?? <span className="text-slate-700 italic">first record</span>}</td>
+                            <td className="px-4 py-2 font-mono text-emerald-300 font-semibold">{e.new_ip}</td>
+                            <td className="px-4 py-2 text-slate-500 font-mono text-[11px]">{e.response ?? '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Failed updates ─────────────────────────────────────── */}
+              {failures.length > 0 && (
+                <div className="bg-[#0a0a18] border border-red-500/20 rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-red-500/20 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-red-400 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4" />
+                      Failed Updates
+                    </span>
+                    <span className="text-[11px] text-red-500/60">{failures.length} failure{failures.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-[#1a1a30] bg-[#080810]">
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Time</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Provider</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">IP at time</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Error</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#0f0f20]">
+                        {failures.map((e, i) => (
+                          <tr key={i} className="hover:bg-white/[0.02] transition-colors">
+                            <td className="px-4 py-2 text-slate-400 tabular-nums whitespace-nowrap">{fmtDate(e.ts)}</td>
+                            <td className="px-4 py-2 text-slate-300">{providerLabel[e.provider] ?? e.provider ?? '—'}</td>
+                            <td className="px-4 py-2 font-mono text-slate-400">{e.ip ?? '—'}</td>
+                            <td className="px-4 py-2 text-red-400">{e.error}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Full event log ─────────────────────────────────────── */}
+              {history.length > 0 && (
+                <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-[#1a1a30]">
+                    <span className="text-sm font-semibold text-white">Full Event Log</span>
+                    <span className="text-[11px] text-slate-500 ml-2">{history.length} events (newest first, max 200)</span>
+                  </div>
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-[#080810] z-10">
+                        <tr className="border-b border-[#1a1a30]">
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Time</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Event</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#0f0f20]">
+                        {history.map((e, i) => (
+                          <tr key={i} className="hover:bg-white/[0.02] transition-colors">
+                            <td className="px-4 py-2 text-slate-500 tabular-nums whitespace-nowrap">{fmtDate(e.ts)}</td>
+                            <td className="px-4 py-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${
+                                e.event === 'ip_changed'
+                                  ? 'text-emerald-400 bg-emerald-500/10'
+                                  : 'text-red-400 bg-red-500/10'
+                              }`}>{e.event}</span>
+                            </td>
+                            <td className="px-4 py-2 text-slate-400 font-mono text-[11px]">
+                              {e.event === 'ip_changed'
+                                ? `${e.old_ip ?? '?'} → ${e.new_ip}${e.hostname ? ` (${e.hostname})` : ''}`
+                                : e.error ?? '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )
+        })()}
+
         {/* ── ACTIVITY ── */}
         {tab === 'activity' && (
           <>
@@ -2681,8 +3005,7 @@ export default function Reports() {
                     <thead>
                       <tr className="border-b border-[#1a1a30]">
                         <th className="px-4 py-2 text-left text-slate-500 font-medium w-36">Time</th>
-                        <th className="px-4 py-2 text-left text-slate-500 font-medium w-44">Event</th>
-                        <th className="px-4 py-2 text-left text-slate-500 font-medium w-24">Duration</th>
+                        <th className="px-4 py-2 text-left text-slate-500 font-medium w-36">Event</th>
                         <th className="px-4 py-2 text-left text-slate-500 font-medium">Details</th>
                       </tr>
                     </thead>
@@ -2692,22 +3015,52 @@ export default function Reports() {
                           if (!activitySearch) return true
                           const s = activitySearch.toLowerCase()
                           const p = ev.payload ? (typeof ev.payload === 'string' ? ev.payload : JSON.stringify(ev.payload)) : ''
-                          return ev.event?.toLowerCase().includes(s) || p.toLowerCase().includes(s)
+                          return ev.event?.toLowerCase().includes(s)
+                            || ev.hostname?.toLowerCase().includes(s)
+                            || ev.ip?.toLowerCase().includes(s)
+                            || ev.mac?.toLowerCase().includes(s)
+                            || p.toLowerCase().includes(s)
                         })
-                        .map((ev, i) => (
-                        <tr key={i} className="hover:bg-white/[0.02] transition-colors">
-                          <td className="px-4 py-2 text-slate-500 tabular-nums whitespace-nowrap">{fmtDate(ev.ts)}</td>
-                          <td className="px-4 py-2">
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${evColor(ev.event)}`}>
-                              {ev.event}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2 font-mono tabular-nums whitespace-nowrap text-slate-400">
-                            {fmtDuration(ev.payload) ?? <span className="text-slate-700">—</span>}
-                          </td>
-                          <td className="px-4 py-2 text-slate-400 max-w-xs truncate">{fmtPayload(ev.event, ev.payload)}</td>
-                        </tr>
-                      ))}
+                        .map((ev, i) => {
+                          const detail = fmtPayload(ev.event, ev.payload, ev)
+                          const dur    = fmtDuration(ev.payload)
+                          return (
+                          <tr key={i} className="hover:bg-white/[0.02] transition-colors group">
+                            <td className="px-4 py-2.5 text-slate-500 tabular-nums whitespace-nowrap align-top">{fmtDate(ev.ts)}</td>
+                            <td className="px-4 py-2.5 align-top">
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap ${evColor(ev.event)}`}>
+                                {evLabel(ev.event)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 align-top">
+                              <div className="space-y-0.5">
+                                {/* Primary detail — hostname / name / main info */}
+                                {(ev.hostname || ev.ip || ev.mac) && (
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                    {ev.hostname && (
+                                      <span className="text-white font-medium">{ev.hostname}</span>
+                                    )}
+                                    {ev.ip && (
+                                      <span className="font-mono text-sky-400/80 text-[11px]">{ev.ip}</span>
+                                    )}
+                                    {ev.mac && (
+                                      <span className="font-mono text-slate-500 text-[10px]">{ev.mac}</span>
+                                    )}
+                                  </div>
+                                )}
+                                {/* Secondary detail from payload */}
+                                {detail && (
+                                  <div className="text-slate-400 leading-relaxed">{detail}</div>
+                                )}
+                                {/* Duration inline if present */}
+                                {dur && (
+                                  <div className="text-slate-500 text-[11px]">Duration: {dur}</div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                          )
+                        })}
                     </tbody>
                   </table>
                 </div>

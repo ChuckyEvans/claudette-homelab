@@ -87,7 +87,7 @@ export default function Layout({ page, setPage, services, _threats, username, on
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
       <aside
-        className={`relative bg-[#080812] border-r border-[#1a1a30] flex flex-col flex-shrink-0${isDragging ? '' : ' transition-[width] duration-200'}`}
+        className={`relative bg-[#080812]/70 border-r border-[#1a1a30] flex flex-col flex-shrink-0${isDragging ? '' : ' transition-[width] duration-200'}`}
         style={{ width: collapsed ? 56 : sidebarWidth }}
       >
 

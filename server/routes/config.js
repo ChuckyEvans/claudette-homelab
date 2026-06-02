@@ -137,6 +137,51 @@ router.post('/', (req, res) => {
     : (existingRetention.days ?? 90)
   config.retention = { days: retentionDays }
 
+  // ── DDNS settings ────────────────────────────────────────────────────────
+  const existingDdns = loadConfig()?.ddns ?? {}
+  const VALID_DDNS_PROVIDERS = ['noip', 'duckdns', 'dynu', 'dyndns', 'afraid', 'cloudflare']
+  const rawDdns = body.ddns ?? null
+  if (rawDdns !== null) {
+    const provider = VALID_DDNS_PROVIDERS.includes(rawDdns.provider) ? rawDdns.provider : (existingDdns.provider ?? 'noip')
+    config.ddns = {
+      enabled:  rawDdns.enabled === true || rawDdns.enabled === 'true',
+      provider,
+      check_interval_minutes:   Math.max(5, Math.min(1440, parseInt(rawDdns.check_interval_minutes) || 5)),
+      history_retention_days:    Math.max(1, Math.min(3650, parseInt(rawDdns.history_retention_days) || 365)),
+      // Per-provider credential blocks — sanitize each field
+      noip: {
+        username: sanitize(rawDdns.noip?.username ?? existingDdns.noip?.username ?? '', /[^a-zA-Z0-9@._-]/g, 128),
+        password: String(rawDdns.noip?.password ?? existingDdns.noip?.password ?? '').slice(0, 256),
+        hostname: sanitize(rawDdns.noip?.hostname ?? existingDdns.noip?.hostname ?? '', /[^a-zA-Z0-9._-]/g, 128),
+      },
+      duckdns: {
+        token:   sanitize(rawDdns.duckdns?.token   ?? existingDdns.duckdns?.token   ?? '', /[^a-zA-Z0-9_-]/g, 128),
+        domains: sanitize(rawDdns.duckdns?.domains ?? existingDdns.duckdns?.domains ?? '', /[^a-zA-Z0-9,._-]/g, 256),
+      },
+      dynu: {
+        username: sanitize(rawDdns.dynu?.username ?? existingDdns.dynu?.username ?? '', /[^a-zA-Z0-9@._-]/g, 128),
+        password: String(rawDdns.dynu?.password ?? existingDdns.dynu?.password ?? '').slice(0, 256),
+        hostname: sanitize(rawDdns.dynu?.hostname ?? existingDdns.dynu?.hostname ?? '', /[^a-zA-Z0-9._-]/g, 128),
+      },
+      dyndns: {
+        username: sanitize(rawDdns.dyndns?.username ?? existingDdns.dyndns?.username ?? '', /[^a-zA-Z0-9@._-]/g, 128),
+        password: String(rawDdns.dyndns?.password ?? existingDdns.dyndns?.password ?? '').slice(0, 256),
+        hostname: sanitize(rawDdns.dyndns?.hostname ?? existingDdns.dyndns?.hostname ?? '', /[^a-zA-Z0-9._-]/g, 128),
+      },
+      afraid: {
+        update_url: String(rawDdns.afraid?.update_url ?? existingDdns.afraid?.update_url ?? '').slice(0, 512),
+      },
+      cloudflare: {
+        api_token: String(rawDdns.cloudflare?.api_token  ?? existingDdns.cloudflare?.api_token  ?? '').slice(0, 256),
+        zone_id:   sanitize(rawDdns.cloudflare?.zone_id  ?? existingDdns.cloudflare?.zone_id   ?? '', /[^a-zA-Z0-9]/g, 64),
+        record_id: sanitize(rawDdns.cloudflare?.record_id ?? existingDdns.cloudflare?.record_id ?? '', /[^a-zA-Z0-9]/g, 64),
+        hostname:  sanitize(rawDdns.cloudflare?.hostname  ?? existingDdns.cloudflare?.hostname  ?? '', /[^a-zA-Z0-9._-]/g, 128),
+      },
+    }
+  } else {
+    config.ddns = existingDdns
+  }
+
   try {
     fs.writeFileSync(getConfigPath(), yaml.dump(config))
     resetConfig()

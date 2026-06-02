@@ -186,6 +186,11 @@ export const api = {
       body: file,
     }),
   },
+  ddns: {
+    status:  () => request('/ddns/status'),
+    update:  () => request('/ddns/update', { method: 'POST' }),
+    history: () => request('/ddns/history'),
+  },
 }
 
 export function createEventSource(onEvent) {

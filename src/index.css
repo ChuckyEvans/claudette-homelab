@@ -248,8 +248,252 @@
   --ac-600:  13 148 136;  /* teal-600 */
   --ac-700:  15 118 110;  /* teal-700 */
 }
+/* ── New photo themes (internet — picsum.photos) ─────────────────────────── */
+[data-theme="archipelago"] {
+  --theme-bg-color: #000810;
+  --ac-300: 125 211 252;  /* sky-300 */
+  --ac-400:  56 189 248;  /* sky-400 */
+  --ac-500:  14 165 233;  /* sky-500 */
+  --ac-600:   2 132 199;  /* sky-600 */
+  --ac-700:   3 105 161;  /* sky-700 */
+}
+[data-theme="canyon"] {
+  --theme-bg-color: #0d0500;
+  --ac-300: 253 186 116;  /* orange-300 */
+  --ac-400: 251 146  60;  /* orange-400 */
+  --ac-500: 249 115  22;  /* orange-500 */
+  --ac-600: 234  88  12;  /* orange-600 */
+  --ac-700: 194  65  12;  /* orange-700 */
+}
+[data-theme="cherry"] {
+  --theme-bg-color: #0d0006;
+  --ac-300: 249 168 212;  /* pink-300 */
+  --ac-400: 244 114 182;  /* pink-400 */
+  --ac-500: 236  72 153;  /* pink-500 */
+  --ac-600: 219  39 119;  /* pink-600 */
+  --ac-700: 190  24  93;  /* pink-700 */
+}
+[data-theme="citynight"] {
+  --theme-bg-color: #06040e;
+  --ac-300: 216 180 254;  /* violet-300 */
+  --ac-400: 192 132 252;  /* violet-400 */
+  --ac-500: 168  85 247;  /* violet-500 */
+  --ac-600: 147  51 234;  /* violet-600 */
+  --ac-700: 126  34 206;  /* violet-700 */
+}
+[data-theme="crater"] {
+  --theme-bg-color: #000a0d;
+  --ac-300: 103 232 249;  /* cyan-300 */
+  --ac-400:  34 211 238;  /* cyan-400 */
+  --ac-500:   6 182 212;  /* cyan-500 */
+  --ac-600:   8 145 178;  /* cyan-600 */
+  --ac-700:  14 116 144;  /* cyan-700 */
+}
+[data-theme="dunes"] {
+  --theme-bg-color: #0a0800;
+  --ac-300: 252 211  77;  /* amber-300 */
+  --ac-400: 251 191  36;  /* amber-400 */
+  --ac-500: 245 158  11;  /* amber-500 */
+  --ac-600: 217 119   6;  /* amber-600 */
+  --ac-700: 180  83   9;  /* amber-700 */
+}
+[data-theme="fjord"] {
+  --theme-bg-color: #010810;
+  --ac-300: 125 211 252;  /* sky-300 */
+  --ac-400:  56 189 248;  /* sky-400 */
+  --ac-500:  14 165 233;  /* sky-500 */
+  --ac-600:   2 132 199;  /* sky-600 */
+  --ac-700:   3 105 161;  /* sky-700 */
+}
+[data-theme="iceberg"] {
+  --theme-bg-color: #00040d;
+  --ac-300: 186 230 253;  /* sky-200 */
+  --ac-400: 147 197 253;  /* blue-300 */
+  --ac-500:  96 165 250;  /* blue-400 */
+  --ac-600:  59 130 246;  /* blue-500 */
+  --ac-700:  37 101 235;  /* blue-600 */
+}
+[data-theme="jungle"] {
+  --theme-bg-color: #030d00;
+  --ac-300: 190 242 100;  /* lime-300 */
+  --ac-400: 163 230  53;  /* lime-400 */
+  --ac-500: 132 204  22;  /* lime-500 */
+  --ac-600: 101 163  13;  /* lime-600 */
+  --ac-700:  77 124   8;  /* lime-700 */
+}
+[data-theme="karst"] {
+  --theme-bg-color: #00070a;
+  --ac-300:  94 234 212;  /* teal-300 */
+  --ac-400:  45 212 191;  /* teal-400 */
+  --ac-500:  20 184 166;  /* teal-500 */
+  --ac-600:  13 148 136;  /* teal-600 */
+  --ac-700:  15 118 110;  /* teal-700 */
+}
+[data-theme="lagoon"] {
+  --theme-bg-color: #000a08;
+  --ac-300: 110 231 183;  /* emerald-300 */
+  --ac-400:  52 211 153;  /* emerald-400 */
+  --ac-500:  16 185 129;  /* emerald-500 */
+  --ac-600:   5 150 105;  /* emerald-600 */
+  --ac-700:   4 120  87;  /* emerald-700 */
+}
+[data-theme="lakeshore"] {
+  --theme-bg-color: #010810;
+  --ac-300: 125 211 252;  /* sky-300 */
+  --ac-400:  56 189 248;  /* sky-400 */
+  --ac-500:  14 165 233;  /* sky-500 */
+  --ac-600:   2 132 199;  /* sky-600 */
+  --ac-700:   3 105 161;  /* sky-700 */
+}
+[data-theme="lightning"] {
+  --theme-bg-color: #09090a;
+  --ac-300: 253 224  71;  /* yellow-300 */
+  --ac-400: 250 204  21;  /* yellow-400 */
+  --ac-500: 234 179   8;  /* yellow-500 */
+  --ac-600: 202 138   4;  /* yellow-600 */
+  --ac-700: 161 110   2;  /* yellow-700 */
+}
+[data-theme="mangrove"] {
+  --theme-bg-color: #010a03;
+  --ac-300:  74 222 128;  /* green-300 */
+  --ac-400:  34 197  94;  /* green-400 */
+  --ac-500:  22 163  74;  /* green-500 */
+  --ac-600:  21 128  61;  /* green-600 */
+  --ac-700:  20 101  48;  /* green-700 */
+}
+[data-theme="meadow"] {
+  --theme-bg-color: #010d05;
+  --ac-300: 110 231 183;  /* emerald-300 */
+  --ac-400:  52 211 153;  /* emerald-400 */
+  --ac-500:  16 185 129;  /* emerald-500 */
+  --ac-600:   5 150 105;  /* emerald-600 */
+  --ac-700:   4 120  87;  /* emerald-700 */
+}
+[data-theme="mesa"] {
+  --theme-bg-color: #0d0200;
+  --ac-300: 252 165 165;  /* red-300 */
+  --ac-400: 248 113 113;  /* red-400 */
+  --ac-500: 239  68  68;  /* red-500 */
+  --ac-600: 220  38  38;  /* red-600 */
+  --ac-700: 185  28  28;  /* red-700 */
+}
+[data-theme="nebula"] {
+  --theme-bg-color: #08000e;
+  --ac-300: 216 180 254;  /* violet-300 */
+  --ac-400: 192 132 252;  /* violet-400 */
+  --ac-500: 168  85 247;  /* violet-500 */
+  --ac-600: 147  51 234;  /* violet-600 */
+  --ac-700: 126  34 206;  /* violet-700 */
+}
+[data-theme="pampas"] {
+  --theme-bg-color: #0a0800;
+  --ac-300: 253 230 138;  /* amber-200 */
+  --ac-400: 252 211  77;  /* amber-300 */
+  --ac-500: 251 191  36;  /* amber-400 */
+  --ac-600: 245 158  11;  /* amber-500 */
+  --ac-700: 217 119   6;  /* amber-600 */
+}
+[data-theme="peak"] {
+  --theme-bg-color: #00040d;
+  --ac-300: 125 211 252;  /* sky-300 */
+  --ac-400:  56 189 248;  /* sky-400 */
+  --ac-500:  14 165 233;  /* sky-500 */
+  --ac-600:   2 132 199;  /* sky-600 */
+  --ac-700:   3 105 161;  /* sky-700 */
+}
+[data-theme="rainforest"] {
+  --theme-bg-color: #000d04;
+  --ac-300:  74 222 128;  /* green-300 */
+  --ac-400:  34 197  94;  /* green-400 */
+  --ac-500:  22 163  74;  /* green-500 */
+  --ac-600:  21 128  61;  /* green-600 */
+  --ac-700:  20 101  48;  /* green-700 */
+}
+[data-theme="temple"] {
+  --theme-bg-color: #0a0700;
+  --ac-300: 252 211  77;  /* amber-300 */
+  --ac-400: 251 191  36;  /* amber-400 */
+  --ac-500: 245 158  11;  /* amber-500 */
+  --ac-600: 217 119   6;  /* amber-600 */
+  --ac-700: 180  83   9;  /* amber-700 */
+}
+[data-theme="tidepool"] {
+  --theme-bg-color: #000a0d;
+  --ac-300: 103 232 249;  /* cyan-300 */
+  --ac-400:  34 211 238;  /* cyan-400 */
+  --ac-500:   6 182 212;  /* cyan-500 */
+  --ac-600:   8 145 178;  /* cyan-600 */
+  --ac-700:  14 116 144;  /* cyan-700 */
+}
+[data-theme="tundra"] {
+  --theme-bg-color: #02050d;
+  --ac-300: 186 230 253;  /* sky-200 */
+  --ac-400: 147 197 253;  /* blue-300 */
+  --ac-500:  96 165 250;  /* blue-400 */
+  --ac-600:  59 130 246;  /* blue-500 */
+  --ac-700:  37 101 235;  /* blue-600 */
+}
+[data-theme="typhoon"] {
+  --theme-bg-color: #030507;
+  --ac-300: 203 213 225;  /* slate-300 */
+  --ac-400: 148 163 184;  /* slate-400 */
+  --ac-500: 100 116 139;  /* slate-500 */
+  --ac-600:  71  85 105;  /* slate-600 */
+  --ac-700:  51  65  85;  /* slate-700 */
+}
+[data-theme="valley"] {
+  --theme-bg-color: #020a03;
+  --ac-300:  74 222 128;  /* green-300 */
+  --ac-400:  34 197  94;  /* green-400 */
+  --ac-500:  22 163  74;  /* green-500 */
+  --ac-600:  21 128  61;  /* green-600 */
+  --ac-700:  20 101  48;  /* green-700 */
+}
+[data-theme="vineyard"] {
+  --theme-bg-color: #0d0006;
+  --ac-300: 253 164 175;  /* rose-300 */
+  --ac-400: 251 113 133;  /* rose-400 */
+  --ac-500: 244  63  94;  /* rose-500 */
+  --ac-600: 225  29  72;  /* rose-600 */
+  --ac-700: 190  18  60;  /* rose-700 */
+}
+[data-theme="waterfall"] {
+  --theme-bg-color: #000a08;
+  --ac-300:  94 234 212;  /* teal-300 */
+  --ac-400:  45 212 191;  /* teal-400 */
+  --ac-500:  20 184 166;  /* teal-500 */
+  --ac-600:  13 148 136;  /* teal-600 */
+  --ac-700:  15 118 110;  /* teal-700 */
+}
+[data-theme="wetlands"] {
+  --theme-bg-color: #030a00;
+  --ac-300: 190 242 100;  /* lime-300 */
+  --ac-400: 163 230  53;  /* lime-400 */
+  --ac-500: 132 204  22;  /* lime-500 */
+  --ac-600: 101 163  13;  /* lime-600 */
+  --ac-700:  77 124   8;  /* lime-700 */
+}
+[data-theme="wildfire"] {
+  --theme-bg-color: #0d0100;
+  --ac-300: 253 186 116;  /* orange-300 */
+  --ac-400: 251 146  60;  /* orange-400 */
+  --ac-500: 249 115  22;  /* orange-500 */
+  --ac-600: 234  88  12;  /* orange-600 */
+  --ac-700: 194  65  12;  /* orange-700 */
+}
 
 /* ── Per-theme body backgrounds ──────────────────────────────────────────── */
+
+/* Generic rule for internet photo themes (local themes override below) */
+[data-photo-theme] body {
+  background-color: var(--theme-bg-color, #030610);
+  background-image:
+    linear-gradient(rgba(0,0,0,var(--bg-dim,.45)), rgba(0,0,0,var(--bg-dim,.45))),
+    var(--theme-photo);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
 
 [data-theme="dark"] body {
   background-color: #0a0a10;
@@ -467,19 +711,6 @@
 [data-theme="cobalt"] body {
   background-color: #010814;
   background-image: linear-gradient(160deg, #010814 0%, #020d1e 60%, #01050e 100%);
-  background-attachment: fixed;
-}
-
-/* ── Photo-theme sidebar glass effect ────────────────────────────────────── */
-/* backdrop-filter can't reliably sample body backgrounds inside overflow    */
-/* containers. Instead, draw the same photo directly on the sidebar using    */
-/* background-attachment: fixed so it aligns with the body (viewport coords  */
-/* are identical), creating a genuine see-through appearance.                */
-[data-photo-theme] aside {
-  background-image:
-    linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)),
-    var(--theme-photo);
-  background-size: cover;
   background-attachment: fixed;
 }
 

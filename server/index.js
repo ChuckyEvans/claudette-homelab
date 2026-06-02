@@ -19,6 +19,8 @@ import auditRouter from './routes/audit.js'
 import reportsRouter from './routes/reports.js'
 import authRouter from './routes/auth.js'
 import themesRouter from './routes/themes.js'
+import ddnsRouter from './routes/ddns.js'
+import { checkAndUpdateDdns } from './utils/ddns.js'
 import { pruneOldData, getDataDir } from './db.js'
 import { requireAuth } from './middleware/auth.js'
 
@@ -39,7 +41,7 @@ app.use(helmet({
       scriptSrc:     ["'self'"],
       scriptSrcAttr: ["'none'"],
       styleSrc:      ["'self'", "'unsafe-inline'"], // Tailwind + React inline styles
-      imgSrc:        ["'self'", "data:", "blob:"],
+      imgSrc:        ["'self'", "data:", "blob:", "https://picsum.photos"],
       connectSrc:    ["'self'"],
       workerSrc:     ["'self'", "blob:"],  // allow WebRTC worker threads
       fontSrc:       ["'self'", "data:"],
@@ -116,6 +118,7 @@ app.use('/api/config', configRouter)
 app.use('/api/audit', auditRouter)
 app.use('/api/reports', reportsRouter)
 app.use('/api/themes', themesRouter)
+app.use('/api/ddns', ddnsRouter)
 
 // ── Static (production) ───────────────────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
@@ -144,6 +147,7 @@ setTimeout(() => startBackgroundArpSniffer(), 3000)
 setTimeout(() => startMdnsSniffer(), 4000)
 
 // Run once on startup
+setTimeout(() => checkAndUpdateDdns(loadConfig()).catch(e => console.error('[jobs] ddns:', e.message)), 8000)
 setTimeout(() => runChecks(broadcast).catch(e => console.error('[jobs] check:', e.message)), 2000)
 setTimeout(() => checkConnectivity(broadcast).catch(e => console.error('[jobs] internet:', e.message)), 4000)
 setTimeout(() => refreshThreats(broadcast).catch(e => console.error('[jobs] threats:', e.message)), 5000)
@@ -224,6 +228,15 @@ function scheduleJobs() {
   if (backupDays > 0) {
     _tasks.push(cron.schedule('0 2 * * *', () => {
       if (due('backup', backupDays * 86_400_000)) doAutoBackup()
+    }))
+  }
+
+  const ddnsCfg = cfg?.ddns
+  if (ddnsCfg?.enabled) {
+    const ddnsMin = Math.max(5, ddnsCfg.check_interval_minutes ?? 15)
+    console.log(`[jobs] DDNS check: ${minutesToCron(ddnsMin)} (provider=${ddnsCfg.provider})`)
+    _tasks.push(cron.schedule(minutesToCron(ddnsMin), () => {
+      checkAndUpdateDdns(loadConfig()).catch(e => console.error('[jobs] ddns:', e.message))
     }))
   }
 }
