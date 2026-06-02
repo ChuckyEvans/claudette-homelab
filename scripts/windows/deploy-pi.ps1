@@ -8,6 +8,7 @@
 #   .\scripts\windows\deploy-pi.ps1                          # full deploy: upload source, build on Pi, restart container
 #   .\scripts\windows\deploy-pi.ps1 -Quick                   # fast path: sync server/ files only, restart container (~5s)
 #   .\scripts\windows\deploy-pi.ps1 -SkipBuild               # skip Docker build, restart using existing image on Pi
+#   .\scripts\windows\deploy-pi.ps1 -PreBuilt                # ship local dist/ to Pi — skips npm build on Pi (~2x faster)
 #   .\scripts\windows\deploy-pi.ps1 -PiHost 192.168.1.50     # override Pi host
 #
 param(
@@ -15,6 +16,7 @@ param(
     [string]$PiUser    = '',   # override SSH user
     [string]$SshKey    = '',   # override SSH key path
     [switch]$SkipBuild,        # skip image rebuild, re-use existing image already on the Pi
+    [switch]$PreBuilt,         # ship local dist/ to Pi, skip npm build on Pi (~2x faster Docker build)
     [switch]$Quick,            # fast path: skip Docker, just sync app files into running container
     [string]$KodiHost  = '',   # optional: deploy Kodi addon to this LibreELEC/Kodi host
     [string]$KodiUser  = 'root' # SSH user for Kodi host (LibreELEC default: root)
@@ -108,11 +110,50 @@ if ($Quick) {
     exit 0
 }
 
+# ── 1a. PreBuilt path: ship local dist/ and build image without npm build on Pi ──
+if ($PreBuilt) {
+    Write-Host "`n[1/2] Uploading pre-built dist + server (skipping npm build on Pi)..." -ForegroundColor Cyan
+    $SrcTar  = Join-Path $env:TEMP 'claudette-src.tar'
+    $include = @('server','dist','package.json','package-lock.json')
+    $existing = $include | Where-Object { Test-Path (Join-Path $ProjectRoot $_) }
+    tar -cf $SrcTar -C $ProjectRoot @existing
+    if ($LASTEXITCODE -ne 0) { Write-Error "tar failed."; exit 1 }
+    $sizeMB = [math]::Round((Get-Item $SrcTar).Length / 1MB, 1)
+    Write-Host "      Tarball: ${sizeMB} MB" -ForegroundColor DarkGray
+    scp @SshArgs $SrcTar "${PiUser}@${PiHost}:/tmp/claudette-src.tar"
+    if ($LASTEXITCODE -ne 0) { Write-Error "scp failed."; exit 1 }
+    Remove-Item $SrcTar -Force
+    Write-Host "      Uploaded. Building on Pi (no npm build)..." -ForegroundColor DarkGray
+    $CacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    # Write an inline Dockerfile to a temp file and ship it alongside the tarball
+    $inlineDockerfile = @'
+FROM node:22-alpine
+RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && apk add --no-cache nmap nmap-scripts tcpdump curl traceroute mtr
+WORKDIR /app
+COPY package*.json ./
+RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && npm ci --omit=dev
+ARG CACHEBUST=1
+COPY server/ ./server/
+COPY dist/ ./dist/
+RUN mkdir -p /app/data
+EXPOSE 7654
+ENV NODE_ENV=production
+CMD ["node", "server/index.js"]
+'@
+    $tmpDockerfile = Join-Path $env:TEMP 'claudette-Dockerfile'
+    [System.IO.File]::WriteAllText($tmpDockerfile, $inlineDockerfile)
+    scp @SshArgs $tmpDockerfile "${PiUser}@${PiHost}:/tmp/claudette-Dockerfile"
+    if ($LASTEXITCODE -ne 0) { Write-Error "scp Dockerfile failed."; exit 1 }
+    Remove-Item $tmpDockerfile -Force
+    Invoke-Ssh "rm -rf /tmp/claudette-build && mkdir -p /tmp/claudette-build && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm /tmp/claudette-src.tar && mv /tmp/claudette-Dockerfile /tmp/claudette-build/Dockerfile && cd /tmp/claudette-build && sudo env DOCKER_BUILDKIT=0 docker build --build-arg CACHEBUST=$CacheBust -t claudette:latest . && cd / && rm -rf /tmp/claudette-build"
+    Write-Host "      Built." -ForegroundColor Green
+}
+
 # ── 1. Upload source + build on Pi ───────────────────────────────────────────
-if (-not $SkipBuild) {
+elseif (-not $SkipBuild) {
     Write-Host "`n[1/2] Uploading source + building on Pi (native ARM64)..." -ForegroundColor Cyan
     $SrcTar  = Join-Path $env:TEMP 'claudette-src.tar'
-    $include = @('server','src','package.json','package-lock.json','Dockerfile',
+    $include = @('server','src','public','package.json','package-lock.json','Dockerfile',
                  'vite.config.js','postcss.config.js','tailwind.config.js','index.html',
                  'eslint.config.js','.dockerignore')
     $existing = $include | Where-Object { Test-Path (Join-Path $ProjectRoot $_) }
@@ -124,11 +165,12 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { Write-Error "scp failed."; exit 1 }
     Remove-Item $SrcTar -Force
     Write-Host "      Uploaded. Building on Pi (this takes a few minutes)..." -ForegroundColor DarkGray
-    Invoke-Ssh "rm -rf /tmp/claudette-build && mkdir -p /tmp/claudette-build && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm /tmp/claudette-src.tar && cd /tmp/claudette-build && sudo env DOCKER_BUILDKIT=0 docker build -t claudette:latest . && cd / && rm -rf /tmp/claudette-build"
+    $CacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    Invoke-Ssh "rm -rf /tmp/claudette-build && mkdir -p /tmp/claudette-build && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm /tmp/claudette-src.tar && cd /tmp/claudette-build && sudo env DOCKER_BUILDKIT=0 docker build --build-arg CACHEBUST=$CacheBust -t claudette:latest . && cd / && rm -rf /tmp/claudette-build"
     Write-Host "      Built." -ForegroundColor Green
 } else {
     Write-Host "`n[1/2] Skipping build — reusing existing image on Pi." -ForegroundColor DarkGray
-}
+} # end elseif -not $SkipBuild
 
 # ── 2. Restart container on Pi ────────────────────────────────────────────────
 Write-Host "`n[2/2] Restarting container on Pi..." -ForegroundColor Cyan

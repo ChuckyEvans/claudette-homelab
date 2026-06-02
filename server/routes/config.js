@@ -61,6 +61,8 @@ router.post('/', (req, res) => {
       backup_interval_days:     Math.max(0, (n => Number.isFinite(n) ? n : 0)(parseInt(body.schedule?.backup_interval_days))),
       backup_keep_days:              Math.min(365, Math.max(1, (n => Number.isFinite(n) ? n : 7)(parseInt(body.schedule?.backup_keep_days)))),
       internet_outage_check_seconds: Math.max(5, Math.min(300, (n => Number.isFinite(n) ? n : 10)(parseInt(body.schedule?.internet_outage_check_seconds)))),
+      mtr_baseline_hours:       Math.max(0, Math.min(24, (n => Number.isFinite(n) ? n : 1)(parseInt(body.schedule?.mtr_baseline_hours)))),
+      mtr_outage_repeat_minutes: Math.max(0, Math.min(60, (n => Number.isFinite(n) ? n : 15)(parseInt(body.schedule?.mtr_outage_repeat_minutes)))),
     },
   }
   const existingNetwork = loadConfig()?.network ?? {}
@@ -107,11 +109,26 @@ router.post('/', (req, res) => {
   config.isp = {
     name:                String(body.isp?.name                 ?? existingIsp.name                 ?? '').slice(0, 128),
     connection_type:     String(body.isp?.connection_type      ?? existingIsp.connection_type      ?? 'broadband').slice(0, 32),
-    expected_uptime:     parseFloat(body.isp?.expected_uptime  ?? existingIsp.expected_uptime      ?? 100) || 100,
+    expected_uptime:     (v => isNaN(v) ? 100 : v)(parseFloat(body.isp?.expected_uptime ?? existingIsp.expected_uptime)),
     plan_download_mbps:  parseFloat(body.isp?.plan_download_mbps ?? existingIsp.plan_download_mbps ?? 0) || 0,
     plan_upload_mbps:    parseFloat(body.isp?.plan_upload_mbps   ?? existingIsp.plan_upload_mbps   ?? 0) || 0,
     account_number:      String(body.isp?.account_number        ?? existingIsp.account_number      ?? '').slice(0, 64),
     support_email:       String(body.isp?.support_email         ?? existingIsp.support_email        ?? '').slice(0, 128),
+    sla_url:             String(body.isp?.sla_url               ?? existingIsp.sla_url              ?? '').slice(0, 512),
+    sla_notes:           String(body.isp?.sla_notes             ?? existingIsp.sla_notes            ?? '').slice(0, 1024),
+  }
+
+  const existingInfra = loadConfig()?.infra ?? {}
+  config.infra = {
+    name:                String(body.infra?.name                 ?? existingInfra.name                 ?? '').slice(0, 128),
+    connection_type:     String(body.infra?.connection_type      ?? existingInfra.connection_type      ?? 'fibre').slice(0, 32),
+    sla_pct:             parseFloat(body.infra?.sla_pct          ?? existingInfra.sla_pct              ?? existingIsp.infra_sla_pct ?? 0) || 0,
+    plan_download_mbps:  parseFloat(body.infra?.plan_download_mbps ?? existingInfra.plan_download_mbps ?? 0) || 0,
+    plan_upload_mbps:    parseFloat(body.infra?.plan_upload_mbps   ?? existingInfra.plan_upload_mbps   ?? 0) || 0,
+    account_number:      String(body.infra?.account_number        ?? existingInfra.account_number      ?? '').slice(0, 64),
+    support_email:       String(body.infra?.support_email         ?? existingInfra.support_email        ?? '').slice(0, 128),
+    sla_url:             String(body.infra?.sla_url               ?? existingInfra.sla_url              ?? '').slice(0, 512),
+    sla_notes:           String(body.infra?.sla_notes             ?? existingInfra.sla_notes            ?? '').slice(0, 1024),
   }
 
   const existingRetention = loadConfig()?.retention ?? {}

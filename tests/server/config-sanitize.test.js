@@ -32,11 +32,27 @@ function buildIsp(body, existing = {}) {
   return {
     name:               String(body.isp?.name               ?? existing.name               ?? '').slice(0, 128),
     connection_type:    String(body.isp?.connection_type     ?? existing.connection_type    ?? 'broadband').slice(0, 32),
-    expected_uptime:    parseFloat(body.isp?.expected_uptime ?? existing.expected_uptime    ?? 100) || 100,
+    expected_uptime:    (v => isNaN(v) ? 100 : v)(parseFloat(body.isp?.expected_uptime ?? existing.expected_uptime)),
     plan_download_mbps: parseFloat(body.isp?.plan_download_mbps ?? existing.plan_download_mbps ?? 0) || 0,
     plan_upload_mbps:   parseFloat(body.isp?.plan_upload_mbps   ?? existing.plan_upload_mbps   ?? 0) || 0,
     account_number:     String(body.isp?.account_number     ?? existing.account_number     ?? '').slice(0, 64),
     support_email:      String(body.isp?.support_email      ?? existing.support_email      ?? '').slice(0, 128),
+    sla_url:            String(body.isp?.sla_url            ?? existing.sla_url            ?? '').slice(0, 512),
+    sla_notes:          String(body.isp?.sla_notes          ?? existing.sla_notes          ?? '').slice(0, 1024),
+  }
+}
+
+function buildInfra(body, existing = {}, existingIsp = {}) {
+  return {
+    name:               String(body.infra?.name               ?? existing.name               ?? '').slice(0, 128),
+    connection_type:    String(body.infra?.connection_type    ?? existing.connection_type    ?? 'fibre').slice(0, 32),
+    sla_pct:            parseFloat(body.infra?.sla_pct        ?? existing.sla_pct            ?? existingIsp.infra_sla_pct ?? 0) || 0,
+    plan_download_mbps: parseFloat(body.infra?.plan_download_mbps ?? existing.plan_download_mbps ?? 0) || 0,
+    plan_upload_mbps:   parseFloat(body.infra?.plan_upload_mbps   ?? existing.plan_upload_mbps   ?? 0) || 0,
+    account_number:     String(body.infra?.account_number    ?? existing.account_number    ?? '').slice(0, 64),
+    support_email:      String(body.infra?.support_email     ?? existing.support_email     ?? '').slice(0, 128),
+    sla_url:            String(body.infra?.sla_url           ?? existing.sla_url           ?? '').slice(0, 512),
+    sla_notes:          String(body.infra?.sla_notes         ?? existing.sla_notes         ?? '').slice(0, 1024),
   }
 }
 
@@ -204,14 +220,126 @@ describe('buildIsp()', () => {
     expect(buildIsp({ isp: { support_email: 'a'.repeat(200) } }).support_email).toHaveLength(128)
   })
 
-  it('falls back expected_uptime to 100 when invalid', () => {
+  it('falls back expected_uptime to 100 when value is non-numeric', () => {
     expect(buildIsp({ isp: { expected_uptime: 'bad' } }).expected_uptime).toBe(100)
-    expect(buildIsp({ isp: { expected_uptime: 0     } }).expected_uptime).toBe(100) // falsy → fallback
+  })
+
+  it('accepts 0 as a valid expected_uptime (means no independent ISP SLA)', () => {
+    expect(buildIsp({ isp: { expected_uptime: 0 } }).expected_uptime).toBe(0)
   })
 
   it('falls back plan speeds to 0 when invalid', () => {
     expect(buildIsp({ isp: { plan_download_mbps: 'bad' } }).plan_download_mbps).toBe(0)
     expect(buildIsp({ isp: { plan_upload_mbps: null    } }).plan_upload_mbps).toBe(0)
+  })
+
+  it('defaults sla_url to empty string', () => {
+    expect(buildIsp({}).sla_url).toBe('')
+  })
+
+  it('accepts and truncates sla_url to 512 chars', () => {
+    expect(buildIsp({ isp: { sla_url: 'https://example.com/sla' } }).sla_url).toBe('https://example.com/sla')
+    expect(buildIsp({ isp: { sla_url: 'x'.repeat(600) } }).sla_url).toHaveLength(512)
+  })
+
+  it('persists existing sla_url when body omits it', () => {
+    expect(buildIsp({}, { sla_url: 'https://isp.com/sla' }).sla_url).toBe('https://isp.com/sla')
+  })
+
+  it('defaults sla_notes to empty string', () => {
+    expect(buildIsp({}).sla_notes).toBe('')
+  })
+
+  it('accepts and truncates sla_notes to 1024 chars', () => {
+    expect(buildIsp({ isp: { sla_notes: 'SLA terms here' } }).sla_notes).toBe('SLA terms here')
+    expect(buildIsp({ isp: { sla_notes: 'y'.repeat(1500) } }).sla_notes).toHaveLength(1024)
+  })
+
+  it('does not contain infra_sla_pct (moved to cfg.infra.sla_pct)', () => {
+    expect(buildIsp({})).not.toHaveProperty('infra_sla_pct')
+  })
+})
+
+// ── buildInfra() ──────────────────────────────────────────────────────────────
+
+describe('buildInfra()', () => {
+  it('returns defaults when body.infra is missing', () => {
+    const r = buildInfra({})
+    expect(r.name).toBe('')
+    expect(r.connection_type).toBe('fibre')
+    expect(r.sla_pct).toBe(0)
+    expect(r.plan_download_mbps).toBe(0)
+    expect(r.plan_upload_mbps).toBe(0)
+    expect(r.account_number).toBe('')
+    expect(r.support_email).toBe('')
+    expect(r.sla_url).toBe('')
+    expect(r.sla_notes).toBe('')
+  })
+
+  it('persists existing values when body.infra is missing', () => {
+    const existing = { name: 'Openreach FTTP', connection_type: 'fibre', sla_pct: 99.9 }
+    const r = buildInfra({}, existing)
+    expect(r.name).toBe('Openreach FTTP')
+    expect(r.connection_type).toBe('fibre')
+    expect(r.sla_pct).toBe(99.9)
+  })
+
+  it('accepts all valid fields', () => {
+    const r = buildInfra({ infra: {
+      name: 'Openreach FTTP', connection_type: 'fibre', sla_pct: 99.5,
+      plan_download_mbps: 1000, plan_upload_mbps: 50,
+      account_number: 'ACC-123', support_email: 'support@openreach.co.uk',
+      sla_url: 'https://openreach.co.uk/sla', sla_notes: 'See appendix B',
+    }})
+    expect(r.name).toBe('Openreach FTTP')
+    expect(r.connection_type).toBe('fibre')
+    expect(r.sla_pct).toBe(99.5)
+    expect(r.plan_download_mbps).toBe(1000)
+    expect(r.plan_upload_mbps).toBe(50)
+    expect(r.account_number).toBe('ACC-123')
+    expect(r.support_email).toBe('support@openreach.co.uk')
+    expect(r.sla_url).toBe('https://openreach.co.uk/sla')
+    expect(r.sla_notes).toBe('See appendix B')
+  })
+
+  it('truncates name to 128 chars', () => {
+    expect(buildInfra({ infra: { name: 'x'.repeat(200) } }).name).toHaveLength(128)
+  })
+
+  it('defaults sla_pct to 0', () => {
+    expect(buildInfra({}).sla_pct).toBe(0)
+  })
+
+  it('accepts a valid sla_pct', () => {
+    expect(buildInfra({ infra: { sla_pct: 99.9 } }).sla_pct).toBe(99.9)
+  })
+
+  it('falls back sla_pct to 0 when invalid', () => {
+    expect(buildInfra({ infra: { sla_pct: 'bad' } }).sla_pct).toBe(0)
+    expect(buildInfra({ infra: { sla_pct: null  } }).sla_pct).toBe(0)
+  })
+
+  it('persists existing sla_pct when body omits it', () => {
+    expect(buildInfra({}, { sla_pct: 95 }).sla_pct).toBe(95)
+  })
+
+  it('migrates legacy isp.infra_sla_pct when both existing and isp existing are absent', () => {
+    expect(buildInfra({}, {}, { infra_sla_pct: 99 }).sla_pct).toBe(99)
+  })
+
+  it('falls back plan speeds to 0 when invalid', () => {
+    expect(buildInfra({ infra: { plan_download_mbps: 'bad' } }).plan_download_mbps).toBe(0)
+    expect(buildInfra({ infra: { plan_upload_mbps: null    } }).plan_upload_mbps).toBe(0)
+  })
+
+  it('accepts and truncates sla_url to 512 chars', () => {
+    expect(buildInfra({ infra: { sla_url: 'https://example.com/sla' } }).sla_url).toBe('https://example.com/sla')
+    expect(buildInfra({ infra: { sla_url: 'x'.repeat(600) } }).sla_url).toHaveLength(512)
+  })
+
+  it('accepts and truncates sla_notes to 1024 chars', () => {
+    expect(buildInfra({ infra: { sla_notes: 'SLA terms here' } }).sla_notes).toBe('SLA terms here')
+    expect(buildInfra({ infra: { sla_notes: 'y'.repeat(1500) } }).sla_notes).toHaveLength(1024)
   })
 })
 

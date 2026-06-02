@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Eye, EyeOff, Lock } from 'lucide-react'
 import { api } from '../lib/api.js'
-const claudetteLogo = '/favicon.svg'
+import ClaudetteLogo from './ClaudetteLogo.jsx'
 
 export default function AuthModal({ onAuthenticated }) {
   const [username, setUsername] = useState('')
@@ -40,7 +40,7 @@ export default function AuthModal({ onAuthenticated }) {
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-[#0d0d1a] border border-[#1a1a30] rounded-2xl w-full max-w-sm shadow-2xl">
         <div className="px-8 pt-8 pb-0 flex items-center gap-2.5">
-          <img src={claudetteLogo} alt="Claudette" className="w-8 h-8" />
+          <ClaudetteLogo className="w-8 h-8" />
           <span className="text-white font-bold tracking-widest text-sm uppercase">Claudette</span>
         </div>
 

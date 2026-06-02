@@ -12,6 +12,7 @@ import { getDb, audit } from '../db.js'
 import { loadConfig } from '../config.js'
 import { execSync, exec as _execCallback } from 'child_process'
 import { promisify } from 'util'
+import { promises as dns } from 'dns'
 const exec = promisify(_execCallback)
 
 const CF_BASE = 'https://speed.cloudflare.com'
@@ -92,8 +93,25 @@ async function getClientMeta() {
   }
 }
 
+/**
+ * Auto-detect an active VPN/tunnel interface when none is configured.
+ * Looks for any UP tun*, tap*, wg*, or ppp* interface.
+ */
+function detectActiveVpnInterface() {
+  if (process.platform === 'win32') return null
+  try {
+    const out = execSync('ip link show', { timeout: 2000 }).toString()
+    for (const match of out.matchAll(/^\d+:\s+(\S+?)(@\S+)?:\s+<([^>]+)>/gm)) {
+      const name  = match[1]
+      const flags = match[3]
+      if (/^(tun|tap|wg|ppp)/.test(name) && flags.includes('UP')) return name
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
 /** Returns true if a network interface is UP (Linux only) */
-function isInterfaceUp(iface) {
+export function isInterfaceUp(iface) {
   if (process.platform === 'win32') return false
   try {
     const out = execSync(`ip link show ${iface} 2>/dev/null`, { timeout: 1000 }).toString()
@@ -134,8 +152,32 @@ function detectPhysicalInterface(vpnIface) {
   } catch { return null }
 }
 
+/**
+ * Find the LAN gateway for `iface`, bypassing any VPN-hijacked default route.
+ * Tries: (1) explicit default route via iface, (2) reachable ARP neighbour,
+ * (3) conventional .1 address inferred from the iface's own IP.
+ */
+async function detectGatewayForIface(iface) {
+  try {
+    const { stdout } = await exec(`ip route show default dev ${iface} 2>/dev/null`, { timeout: 2000 })
+    const m = stdout.match(/default via (\d{1,3}(?:\.\d{1,3}){3})/)
+    if (m) return m[1]
+  } catch { /* ignore */ }
+  try {
+    const { stdout } = await exec(`ip neigh show dev ${iface} nud reachable 2>/dev/null | awk '{print $1}' | head -1`, { timeout: 2000 })
+    const ip = stdout.trim()
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)) return ip
+  } catch { /* ignore */ }
+  try {
+    const { stdout } = await exec(`ip -4 addr show dev ${iface} 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -1`, { timeout: 2000 })
+    const ip = stdout.trim()
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)) return ip.replace(/\.\d+$/, '.1')
+  } catch { /* ignore */ }
+  return null
+}
+
 /** Fetch Cloudflare /meta via a specific interface using curl */
-async function getClientMetaVia(iface) {
+export async function getClientMetaVia(iface) {
   try {
     const { stdout } = await exec(
       `curl --interface ${iface} -s --max-time 8 -H "Accept: application/json" "${CF_BASE}/meta"`,
@@ -220,8 +262,8 @@ function persistSpeedTestRow(row) {
 }
 
 /**
- * Run a full speed test and persist the result.
- * Also runs a VPN test via tun0 if the interface is up.
+ * Run a direct (ISP) speed test and persist the result.
+ * VPN tests are run separately via runVpnSpeedTest() (manual only).
  * Returns the direct test row object.
  */
 export async function runSpeedTest(broadcast) {
@@ -231,7 +273,9 @@ export async function runSpeedTest(broadcast) {
 
   // Detect VPN early — if it's up we must bind the direct test to the physical interface
   // to prevent the VPN's default route from hijacking the "direct" measurement.
-  const VPN_IFACE = loadConfig()?.network?.vpn_interface ?? null
+  // Fall back to auto-detection if vpn_interface is not set in config (e.g. persisted config
+  // pre-dates the field) so we still bypass the VPN even without explicit configuration.
+  const VPN_IFACE = loadConfig()?.network?.vpn_interface ?? detectActiveVpnInterface()
   const vpnActive = VPN_IFACE ? isInterfaceUp(VPN_IFACE) : false
   const physIface = vpnActive ? detectPhysicalInterface(VPN_IFACE) : null
 
@@ -239,6 +283,28 @@ export async function runSpeedTest(broadcast) {
     console.log(`[speedtest] VPN (${VPN_IFACE}) is active — binding direct test to physical interface: ${physIface}`)
   } else if (vpnActive) {
     console.warn(`[speedtest] VPN (${VPN_IFACE}) is active but could not detect physical interface — direct test may measure VPN throughput`)
+  }
+
+  // When VPN hijacks the default route, curl --interface only sets the source IP — the kernel
+  // still routes via tun0 (VPN's /1 routes beat the /0 default). Fix: inject a temporary /32
+  // host-route for speed.cloudflare.com via the physical gateway so our traffic truly bypasses
+  // the VPN. A /32 is more specific than both /1 routes and wins the longest-prefix match.
+  // Requires CAP_NET_ADMIN (container is started with --cap-add NET_ADMIN).
+  let _tempRouteIp = null
+  if (vpnActive && physIface) {
+    try {
+      const gw = await detectGatewayForIface(physIface)
+      if (gw) {
+        const { address: cfIp } = await dns.lookup('speed.cloudflare.com')
+        if (cfIp && /^\d{1,3}(?:\.\d{1,3}){3}$/.test(cfIp)) {
+          await exec(`ip route replace ${cfIp}/32 via ${gw} dev ${physIface}`, { timeout: 2000 })
+          _tempRouteIp = cfIp
+          console.log(`[speedtest] Direct route injected: ${cfIp}/32 via ${gw} dev ${physIface}`)
+        }
+      }
+    } catch (e) {
+      console.warn('[speedtest] Could not inject direct route:', e.message)
+    }
   }
 
   try {
@@ -273,27 +339,15 @@ export async function runSpeedTest(broadcast) {
   } catch (err) {
     console.error('[speedtest] Direct failed:', err.message)
     row.error = err.message
+  } finally {
+    // Always remove the temporary host-route so it doesn't linger
+    if (_tempRouteIp) {
+      exec(`ip route del ${_tempRouteIp}/32 2>/dev/null`, { timeout: 2000 }).catch(() => {})
+      console.log(`[speedtest] Direct route removed: ${_tempRouteIp}/32`)
+    }
   }
 
   persistSpeedTestRow(row)
-
-  // VPN test — run via configured vpn_interface if the interface is up
-  let vpnRow = null
-  if (VPN_IFACE && vpnActive) {
-    console.log(`[speedtest] VPN interface ${VPN_IFACE} is up — running VPN test…`)
-    // Fetch VPN meta first — this gets the actual exit node IP/ISP (different from direct)
-    const vpnMeta = await getClientMetaVia(VPN_IFACE)
-    vpnRow = { ts: Date.now(), via: 'vpn', error: null, ...vpnMeta }
-    try {
-      const result = await runSpeedTestVia(VPN_IFACE)
-      Object.assign(vpnRow, result)
-      console.log(`[speedtest] VPN — ↓${vpnRow.download_mbps} Mbps ↑${vpnRow.upload_mbps} Mbps ping=${vpnRow.ping_ms}ms`)
-    } catch (err) {
-      console.error('[speedtest] VPN test failed:', err.message)
-      vpnRow.error = err.message
-    }
-    persistSpeedTestRow(vpnRow)
-  }
 
   // Broadcast SSE event
   if (broadcast) {
@@ -305,12 +359,46 @@ export async function runSpeedTest(broadcast) {
       upload_mbps: row.upload_mbps,
       isp: row.client_isp,
       error: row.error,
-      vpn: vpnRow ? {
-        ping_ms: vpnRow.ping_ms,
-        download_mbps: vpnRow.download_mbps,
-        upload_mbps: vpnRow.upload_mbps,
-        error: vpnRow.error,
-      } : null,
+    })
+    broadcast('job_done', { job: 'speedtest', ts: Date.now() })
+  }
+
+  return row
+}
+
+/**
+ * Run a VPN speed test on demand and persist the result.
+ * Only runs if vpn_interface is configured and the interface is up.
+ * Returns the VPN test row object.
+ */
+export async function runVpnSpeedTest(broadcast) {
+  const VPN_IFACE = loadConfig()?.network?.vpn_interface ?? null
+  if (!VPN_IFACE) throw new Error('No vpn_interface configured in config.yaml')
+  if (!isInterfaceUp(VPN_IFACE)) throw new Error(`${VPN_IFACE} is not up`)
+
+  console.log(`[speedtest] Starting VPN speed test via ${VPN_IFACE}…`)
+  const vpnMeta = await getClientMetaVia(VPN_IFACE)
+  const row = { ts: Date.now(), via: 'vpn', error: null, ...vpnMeta }
+  try {
+    const result = await runSpeedTestVia(VPN_IFACE)
+    Object.assign(row, result)
+    console.log(`[speedtest] VPN — ↓${row.download_mbps} Mbps ↑${row.upload_mbps} Mbps ping=${row.ping_ms}ms`)
+  } catch (err) {
+    console.error('[speedtest] VPN test failed:', err.message)
+    row.error = err.message
+  }
+
+  persistSpeedTestRow(row)
+
+  if (broadcast) {
+    broadcast('speedtest', {
+      ts: row.ts,
+      via: 'vpn',
+      ping_ms: row.ping_ms,
+      download_mbps: row.download_mbps,
+      upload_mbps: row.upload_mbps,
+      isp: row.client_isp,
+      error: row.error,
     })
     broadcast('job_done', { job: 'speedtest', ts: Date.now() })
   }

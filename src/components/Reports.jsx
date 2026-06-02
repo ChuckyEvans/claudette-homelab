@@ -1,21 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { BarChart2, RefreshCw, X, Monitor, Activity, Server, Wifi, Download, Clock, Zap, Search, AlertTriangle, Copy, Check, TrendingDown, ClipboardCheck } from 'lucide-react'
+import { BarChart2, RefreshCw, X, Monitor, Activity, Server, Wifi, Download, Clock, Zap, Search, AlertTriangle, Copy, Check, TrendingDown, ClipboardCheck, Shield, Loader2, ChevronDown } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line, ReferenceLine,
 } from 'recharts'
-import { api, exportToCsv, exportToPng, exportToPdf } from '../lib/api.js'
+import { api, exportToCsv, exportToPdf } from '../lib/api.js'
 import Pagination from './Pagination.jsx'
+import TopProgressBar from './TopProgressBar.jsx'
 
 const PAGE_SIZE = 50
 
 // ── Lightweight toast ─────────────────────────────────────────────────────────
 function useToast() {
   const [toasts, setToasts] = useState([])
-  const add = useCallback((message) => {
+  const add = useCallback((message, type = 'success') => {
     const id = Date.now()
-    setToasts(prev => [...prev, { id, message }])
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000)
+    setToasts(prev => [...prev, { id, message, type }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000)
   }, [])
   return { toasts, add }
 }
@@ -25,10 +26,14 @@ function ToastStack({ toasts }) {
     <div className="fixed bottom-6 right-6 z-[300] flex flex-col gap-2 pointer-events-none">
       {toasts.map(t => (
         <div key={t.id}
-          className="flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-2xl text-sm font-medium
-            bg-emerald-950/95 border-emerald-500/30 text-emerald-300 backdrop-blur-sm
-            animate-[fadeSlideUp_0.2s_ease-out]">
-          <ClipboardCheck className="w-4 h-4 flex-shrink-0" />
+          className={`flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-2xl text-sm font-medium backdrop-blur-sm animate-[fadeSlideUp_0.2s_ease-out] ${
+            t.type === 'error'
+              ? 'bg-red-950/95 border-red-500/30 text-red-300'
+              : 'bg-emerald-950/95 border-emerald-500/30 text-emerald-300'
+          }`}>
+          {t.type === 'error'
+            ? <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            : <ClipboardCheck className="w-4 h-4 flex-shrink-0" />}
           {t.message}
         </div>
       ))}
@@ -160,9 +165,546 @@ function ChartTip({ active, payload, label, labelFormatter }) {
   )
 }
 
+// ── mtr output parser + hop table ───────────────────────────────────────────
+function parseMtrHops(text) {
+  if (!text) return null
+  const hops = []
+  for (const line of text.split('\n')) {
+    const m = line.match(/^\s*(\d+)\.\|--\s+(\S+)\s+([\d.]+)%\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/)
+    if (m) hops.push({
+      hop: parseInt(m[1]), host: m[2],
+      loss: parseFloat(m[3]), snt: parseInt(m[4]),
+      last: parseFloat(m[5]), avg: parseFloat(m[6]),
+      best: parseFloat(m[7]), wrst: parseFloat(m[8]), stdev: parseFloat(m[9]),
+    })
+  }
+  return hops.length >= 1 ? hops : null
+}
+
+function latencyStyle(ms) {
+  if (ms < 10)  return { dot: 'bg-emerald-500 border-emerald-400', badge: 'text-emerald-300', bar: 'bg-emerald-500' }
+  if (ms < 30)  return { dot: 'bg-sky-500 border-sky-400',         badge: 'text-sky-300',     bar: 'bg-sky-500'     }
+  if (ms < 80)  return { dot: 'bg-amber-500 border-amber-400',     badge: 'text-amber-300',   bar: 'bg-amber-500'   }
+  return              { dot: 'bg-red-500 border-red-400',           badge: 'text-red-300',     bar: 'bg-red-500'     }
+}
+
+function MtrPathView({ hops }) {
+  const dest = hops[hops.length - 1]
+  const totalAvg = dest?.avg ?? 0
+  const anyLoss = hops.some(h => h.loss > 0)
+  const intermediatHops = hops.slice(0, -1)
+  return (
+    <div className="bg-[#080810] border border-[#1a1a30] rounded-xl px-4 py-4">
+      {/* Route summary */}
+      <div className="flex items-center justify-between mb-3 pb-3 border-b border-[#1a1a30]">
+        <div className="flex items-center gap-2 text-[11px] font-mono">
+          <span className="text-indigo-300 font-semibold">Pi</span>
+          <span className="text-slate-600">→</span>
+          <span className="text-emerald-300 font-semibold">8.8.8.8</span>
+        </div>
+        <div className="flex items-center gap-3 text-[10px]">
+          <span className="text-slate-500">{hops.length} hops</span>
+          <span className={`font-mono font-semibold ${latencyStyle(totalAvg).badge}`}>{totalAvg.toFixed(1)}ms total</span>
+          {anyLoss && <span className="text-red-400 font-semibold">packet loss</span>}
+        </div>
+      </div>
+
+      {/* Source node */}
+      <div className="flex items-center gap-3 mb-1">
+        <div className="w-8 h-8 rounded-full bg-indigo-500/20 border-2 border-indigo-400 flex items-center justify-center flex-shrink-0">
+          <Server className="w-3.5 h-3.5 text-indigo-400" />
+        </div>
+        <div>
+          <div className="text-xs font-semibold text-indigo-300">Pi (source)</div>
+          <div className="text-[10px] text-slate-500">origin</div>
+        </div>
+      </div>
+
+      {/* Intermediate hops */}
+      {intermediatHops.map((h) => {
+        const s = latencyStyle(h.avg)
+        const barWidth = Math.min(100, Math.max(4, (h.avg / 200) * 100))
+        return (
+          <div key={h.hop}>
+            <div className="flex items-stretch gap-3">
+              <div className="w-8 flex justify-center"><div className="w-px bg-slate-700 flex-1" /></div>
+              <div className="flex items-center gap-2 py-1">
+                <div className="h-1.5 rounded-full bg-slate-800 w-20 overflow-hidden">
+                  <div className={`h-full rounded-full ${s.bar}`} style={{ width: `${barWidth}%` }} />
+                </div>
+                <span className={`text-[10px] font-mono ${s.badge}`}>{h.avg.toFixed(1)}ms</span>
+                {h.loss > 0 && <span className="text-[10px] text-red-400 font-mono">{h.loss.toFixed(1)}% loss</span>}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center flex-shrink-0 bg-[#0d0d20] ${s.dot}`}>
+                <span className="text-[10px] font-bold text-slate-300">{h.hop}</span>
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-mono truncate text-slate-300">{h.host}</div>
+                <div className="text-[10px] text-slate-600">best {h.best.toFixed(1)} · worst {h.wrst.toFixed(1)}ms · {h.snt} probes</div>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+
+      {/* Final connector to destination */}
+      {dest && (() => {
+        const s = latencyStyle(dest.avg)
+        const barWidth = Math.min(100, Math.max(4, (dest.avg / 200) * 100))
+        return (
+          <>
+            <div className="flex items-stretch gap-3">
+              <div className="w-8 flex justify-center"><div className="w-px bg-emerald-700/50 flex-1" /></div>
+              <div className="flex items-center gap-2 py-1">
+                <div className="h-1.5 rounded-full bg-slate-800 w-20 overflow-hidden">
+                  <div className={`h-full rounded-full ${s.bar}`} style={{ width: `${barWidth}%` }} />
+                </div>
+                <span className={`text-[10px] font-mono ${s.badge}`}>{dest.avg.toFixed(1)}ms</span>
+                {dest.loss > 0 && <span className="text-[10px] text-red-400 font-mono">{dest.loss.toFixed(1)}% loss</span>}
+              </div>
+            </div>
+            {/* Destination terminal node */}
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center flex-shrink-0">
+                <Wifi className="w-3.5 h-3.5 text-emerald-400" />
+              </div>
+              <div className="flex-1 flex items-center justify-between min-w-0">
+                <div className="min-w-0">
+                  <div className="text-xs font-mono font-semibold text-emerald-300">{dest.host}</div>
+                  <div className="text-[10px] text-slate-600">best {dest.best.toFixed(1)} · worst {dest.wrst.toFixed(1)}ms · hop {dest.hop}</div>
+                </div>
+                <span className="text-[10px] font-semibold text-emerald-500 ml-2 flex-shrink-0">destination reached</span>
+              </div>
+            </div>
+          </>
+        )
+      })()}
+    </div>
+  )
+}
+
+function MtrTable({ output }) {
+  const [view, setView] = useState('path')
+  const hops = parseMtrHops(output)
+  if (!hops) {
+    return (
+      <pre className="bg-[#080810] border border-[#1a1a30] rounded-xl px-4 py-3 text-[11px] font-mono text-slate-300 overflow-x-auto whitespace-pre leading-relaxed max-h-64 overflow-y-auto">{output}</pre>
+    )
+  }
+  return (
+    <div>
+      <div className="flex items-center justify-end gap-1 mb-2">
+        <button onClick={() => setView('path')}  className={`text-[10px] px-2.5 py-1 rounded-lg border transition-colors ${view === 'path'  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' : 'text-slate-500 border-[#1a1a30] hover:text-slate-300'}`}>Path</button>
+        <button onClick={() => setView('table')} className={`text-[10px] px-2.5 py-1 rounded-lg border transition-colors ${view === 'table' ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' : 'text-slate-500 border-[#1a1a30] hover:text-slate-300'}`}>Table</button>
+      </div>
+      {view === 'path' ? <MtrPathView hops={hops} /> : (
+        <div className="rounded-xl overflow-hidden border border-[#1a1a30]">
+          <table className="w-full text-[11px] font-mono">
+            <thead>
+              <tr className="border-b border-[#1a1a30] bg-[#0a0a1a]">
+                <th className="px-3 py-1.5 text-left text-slate-500 font-medium">#</th>
+                <th className="px-3 py-1.5 text-left text-slate-500 font-medium">IP / Host</th>
+                <th className="px-3 py-1.5 text-right text-slate-500 font-medium">Loss</th>
+                <th className="px-3 py-1.5 text-right text-slate-500 font-medium">Avg ms</th>
+                <th className="px-3 py-1.5 text-right text-slate-500 font-medium">Best</th>
+                <th className="px-3 py-1.5 text-right text-slate-500 font-medium">Worst</th>
+              </tr>
+            </thead>
+            <tbody>
+              {hops.map((h, i) => (
+                <tr key={h.hop} className="border-b border-[#1a1a30] last:border-0 bg-[#080810] hover:bg-[#0d0d20] transition-colors">
+                  <td className="px-3 py-1.5 text-slate-600">{h.hop}</td>
+                  <td className={`px-3 py-1.5 ${i === hops.length - 1 ? 'text-emerald-400 font-semibold' : 'text-slate-300'}`}>{h.host}</td>
+                  <td className={`px-3 py-1.5 text-right ${h.loss > 0 ? 'text-red-400' : 'text-slate-500'}`}>{h.loss.toFixed(1)}%</td>
+                  <td className="px-3 py-1.5 text-right text-sky-300">{h.avg.toFixed(1)}</td>
+                  <td className="px-3 py-1.5 text-right text-emerald-400">{h.best.toFixed(1)}</td>
+                  <td className="px-3 py-1.5 text-right text-amber-400">{h.wrst.toFixed(1)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Outage-specific traceroute view ─────────────────────────────────────────
+function isPrivateIp(host) {
+  if (!host || host === '???') return false
+  return /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(host)
+}
+
+function OutageMtrPath({ hops, outageType }) {
+  const reachable    = hops.filter(h => h.loss < 100 && h.host !== '???')
+  const lastReachable = reachable[reachable.length - 1] ?? null
+  const firstDead    = hops.find(h => h.loss >= 100 || h.host === '???')
+  const reachedCount = reachable.length
+
+  let stopLabel = 'stopped'
+  if (reachedCount === 0) stopLabel = 'local down'
+  else if (isPrivateIp(lastReachable?.host)) stopLabel = 'stopped in LAN'
+  else stopLabel = 'stopped at ISP'
+
+  return (
+    <div className="bg-[#080810] border border-[#1a1a30] rounded-xl px-4 py-4">
+      {/* Summary */}
+      <div className="flex items-start justify-between gap-3 mb-4 pb-3 border-b border-[#1a1a30]">
+        <div>
+          {lastReachable ? (
+            <>
+              <p className="text-[11px] text-slate-300">
+                Furthest reached:
+                <span className="font-mono text-emerald-400 ml-1">hop {lastReachable.hop} · {lastReachable.host}</span>
+                {isPrivateIp(lastReachable.host) && <span className="ml-1.5 text-[10px] text-slate-500">(local network)</span>}
+              </p>
+              <p className="text-[10px] text-slate-500 mt-0.5">
+                {reachedCount} of {hops.length} traced hop{hops.length !== 1 ? 's' : ''} responded
+                {firstDead && ` · packets stopped at hop ${firstDead.hop}`}
+                {outageType === 'infra' && reachedCount <= 1 ? ' — local router/switch issue' : ''}
+              </p>
+            </>
+          ) : (
+            <p className="text-[11px] font-semibold text-red-400">No hops reached · local network unreachable</p>
+          )}
+        </div>
+        <span className={`flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded border whitespace-nowrap ${
+          reachedCount === 0 ? 'bg-red-500/15 border-red-500/30 text-red-400' :
+          isPrivateIp(lastReachable?.host) ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400' :
+          'bg-orange-500/10 border-orange-500/30 text-orange-400'
+        }`}>{stopLabel}</span>
+      </div>
+
+      {/* Vertical path */}
+      <div>
+        {/* Source */}
+        <div className="flex items-center gap-3">
+          <div className="w-7 h-7 rounded-full bg-indigo-500/20 border-2 border-indigo-400 flex items-center justify-center flex-shrink-0">
+            <Server className="w-3 h-3 text-indigo-400" />
+          </div>
+          <span className="text-[11px] font-semibold text-indigo-300">Pi (source)</span>
+        </div>
+
+        {hops.map((h) => {
+          const isDead       = h.loss >= 100 || h.host === '???'
+          const isLast       = lastReachable?.hop === h.hop
+          const isFirstDead  = firstDead?.hop === h.hop
+          return (
+            <div key={h.hop}>
+              {/* Connector line */}
+              <div className="flex items-stretch gap-3">
+                <div className="w-7 flex justify-center">
+                  <div className={`w-px flex-1 ${isDead ? 'bg-red-800/40' : 'bg-slate-700'}`} />
+                </div>
+                <div className={`flex items-center gap-1.5 py-0.5 text-[10px] font-mono ${isDead ? 'text-red-800' : 'text-slate-600'}`}>
+                  {isDead ? '×' : `${h.avg.toFixed(1)}ms`}
+                  {isLast && <span className="text-emerald-600 text-[9px] font-semibold uppercase tracking-wide ml-1">← last reached</span>}
+                </div>
+              </div>
+              {/* Dead-zone separator */}
+              {isFirstDead && (
+                <div className="flex items-center gap-2 my-1.5 ml-10">
+                  <div className="flex-1 h-px bg-red-700/30" />
+                  <span className="text-[10px] text-red-500/80 font-semibold whitespace-nowrap">no response beyond here</span>
+                  <div className="flex-1 h-px bg-red-700/30" />
+                </div>
+              )}
+              {/* Hop node */}
+              <div className="flex items-center gap-3">
+                <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                  isDead ? 'bg-red-950/30 border-red-800/50' :
+                  isLast ? 'bg-emerald-500/15 border-emerald-500' :
+                  'bg-[#0d0d20] border-slate-700'
+                }`}>
+                  {isDead
+                    ? <span className="text-[9px] text-red-600 font-bold">✗</span>
+                    : <span className="text-[9px] text-slate-400 font-bold">{h.hop}</span>}
+                </div>
+                <div className="min-w-0">
+                  <div className={`text-[11px] font-mono ${
+                    isDead ? 'text-red-700' : isLast ? 'text-emerald-400 font-semibold' : 'text-slate-300'
+                  }`}>
+                    {h.host === '???' ? '??? (no response)' : h.host}
+                    {!isDead && isPrivateIp(h.host) && <span className="ml-1.5 text-[10px] text-slate-600">local</span>}
+                  </div>
+                  {!isDead && (
+                    <div className="text-[10px] text-slate-600">
+                      avg {h.avg.toFixed(1)} · best {h.best.toFixed(1)} · worst {h.wrst.toFixed(1)}ms · {h.loss.toFixed(1)}% loss
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+
+        {/* Destination — always unreachable during an outage */}
+        <div className="flex items-stretch gap-3">
+          <div className="w-7 flex justify-center"><div className="w-px flex-1 bg-red-800/30" /></div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="w-7 h-7 rounded-full bg-red-950/20 border-2 border-red-800/40 flex items-center justify-center flex-shrink-0">
+            <Wifi className="w-3 h-3 text-red-700" />
+          </div>
+          <div>
+            <div className="text-[11px] font-mono text-red-600">8.8.8.8 (destination)</div>
+            <div className="text-[10px] text-red-800">unreachable during outage</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function OutageMtrView({ output, outageType }) {
+  const hops = parseMtrHops(output)
+  if (!hops) {
+    return (
+      <pre className="bg-[#080810] border border-[#1a1a30] rounded-xl px-4 py-3 text-[11px] font-mono text-slate-300 overflow-x-auto whitespace-pre leading-relaxed max-h-64 overflow-y-auto">{output || 'No traceroute data'}</pre>
+    )
+  }
+  return <OutageMtrPath hops={hops} outageType={outageType} />
+}
+
+// ── Multi-select dropdown ─────────────────────────────────────────────────────
+function MultiSelectDropdown({ label, options, selected, onApply, className }) {
+  const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(new Set(selected))
+  const ref = useRef(null)
+  useEffect(() => { setPending(new Set(selected)) }, [selected])
+  useEffect(() => {
+    if (!open) return
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  function toggle(v) { setPending(p => { const s = new Set(p); s.has(v) ? s.delete(v) : s.add(v); return s }) }
+  function apply() { onApply([...pending]); setOpen(false) }
+  function clear()  { setPending(new Set()); onApply([]); setOpen(false) }
+  const count = selected.length
+  return (
+    <div ref={ref} className={`relative ${className ?? ''}`}>
+      <button
+        onClick={() => { setPending(new Set(selected)); setOpen(v => !v) }}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+          count > 0
+            ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300'
+            : 'border-[#1a1a30] text-slate-400 hover:text-slate-200'
+        }`}
+      >
+        {label}
+        {count > 0 && <span className="bg-indigo-500/40 text-indigo-200 rounded px-1 text-[10px]">{count}</span>}
+        <ChevronDown className="w-3 h-3 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-50 bg-[#0d0d20] border border-[#1a1a35] rounded-xl shadow-2xl min-w-[200px] max-w-[280px]">
+          <div className="max-h-52 overflow-y-auto p-2 space-y-0.5">
+            {options.map(opt => (
+              <label key={opt.value} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer">
+                <input type="checkbox" checked={pending.has(opt.value)} onChange={() => toggle(opt.value)} className="w-3.5 h-3.5 accent-indigo-500" />
+                <span className="text-xs text-slate-300 truncate">{opt.label}</span>
+              </label>
+            ))}
+            {options.length === 0 && <p className="text-xs text-slate-600 px-2 py-1">No options</p>}
+          </div>
+          <div className="flex gap-2 px-3 py-2 border-t border-[#1a1a30]">
+            <button onClick={apply} className="flex-1 px-2 py-1 text-xs bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/40 rounded-lg transition-colors">OK</button>
+            <button onClick={clear} className="px-2 py-1 text-xs border border-[#1a1a30] text-slate-500 hover:text-slate-300 rounded-lg transition-colors">Clear all</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Check detail modal ───────────────────────────────────────────────────────
+function CheckDetailModal({ check, onClose, onTraceStart, onTraceEnd }) {
+  const [traceroute, setTraceroute] = useState(null)
+  const [tracing,    setTracing]    = useState(false)
+  const [traceError, setTraceError] = useState(null)
+
+  async function runTraceroute() {
+    setTracing(true)
+    setTraceError(null)
+    onTraceStart?.()
+    try {
+      const data = await api.reports.runTraceroute()
+      setTraceroute(data.output)
+    } catch (e) {
+      setTraceError(e.message || 'Traceroute failed')
+    } finally {
+      setTracing(false)
+      onTraceEnd?.()
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <div
+        className="relative bg-[#0d0d1a] border border-[#1a1a35] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#1a1a30]">
+          <div className="flex items-center gap-3">
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-lg border ${
+              check.ok
+                ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                : 'bg-red-500/15 text-red-400 border-red-500/20'
+            }`}>{check.ok ? 'Online' : 'Offline'}</span>
+            <span className="text-slate-300 text-sm font-medium">
+              {new Date(check.ts).toLocaleString('en-GB')}
+            </span>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-5">
+          {/* Summary row */}
+          <div className="flex flex-wrap gap-6 text-xs">
+            {check.gateway && (
+              <div>
+                <p className="text-slate-500 uppercase tracking-wide mb-0.5">Gateway</p>
+                <p className="text-slate-200 font-mono">{check.gateway}</p>
+              </div>
+            )}
+            {check.avgMs != null && (
+              <div>
+                <p className="text-slate-500 uppercase tracking-wide mb-0.5">Direct Avg</p>
+                <p className="text-sky-300 font-mono">{check.avgMs} ms</p>
+              </div>
+            )}
+            {check.vpn_up && check.vpnAvgMs != null && (
+              <div>
+                <p className="text-slate-500 uppercase tracking-wide mb-0.5">VPN Avg</p>
+                <p className="text-violet-300 font-mono">{check.vpnAvgMs} ms</p>
+              </div>
+            )}
+            {check.outage_type && (
+              <div>
+                <p className="text-slate-500 uppercase tracking-wide mb-0.5">Outage Type</p>
+                <p className={`font-medium ${
+                  check.outage_type === 'isp' ? 'text-amber-400' : 'text-red-400'
+                }`}>
+                  {check.outage_type === 'isp' ? 'ISP (gateway ok)' : 'Infrastructure (gateway down)'}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Per-host ping results */}
+          {check.hosts?.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-slate-400 mb-2">Ping Results</p>
+              <div className="rounded-lg overflow-hidden border border-[#1a1a30]">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="bg-[#0a0a18] border-b border-[#1a1a30]">
+                      <th className="px-3 py-2 text-left text-slate-500">Host</th>
+                      <th className="px-3 py-2 text-center text-slate-500">Status</th>
+                      <th className="px-3 py-2 text-right text-slate-500">Latency</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {check.hosts.map((h, i) => (
+                      <tr key={i} className="border-b border-[#1a1a30] last:border-0">
+                        <td className="px-3 py-2 text-slate-300 font-mono">{h.host}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                            h.ok ? 'text-emerald-400 bg-emerald-500/10' : 'text-red-400 bg-red-500/10'
+                          }`}>{h.ok ? 'OK' : 'FAIL'}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right text-slate-400 font-mono">
+                          {h.ms != null ? `${h.ms} ms` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* VPN hosts */}
+          {check.vpn_up && check.vpnHosts?.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-violet-400 mb-2">VPN Ping Results</p>
+              <div className="rounded-lg overflow-hidden border border-violet-500/20">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="bg-violet-500/5 border-b border-violet-500/20">
+                      <th className="px-3 py-2 text-left text-slate-500">Host</th>
+                      <th className="px-3 py-2 text-center text-slate-500">Status</th>
+                      <th className="px-3 py-2 text-right text-slate-500">Latency</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {check.vpnHosts.map((h, i) => (
+                      <tr key={i} className="border-b border-violet-500/15 last:border-0">
+                        <td className="px-3 py-2 text-slate-300 font-mono">{h.host}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
+                            h.ok ? 'text-emerald-400 bg-emerald-500/10' : 'text-red-400 bg-red-500/10'
+                          }`}>{h.ok ? 'OK' : 'FAIL'}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right text-violet-300 font-mono">
+                          {h.ms != null ? `${h.ms} ms` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Live traceroute */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-slate-400">Live Traceroute to 8.8.8.8</p>
+              <button
+                onClick={runTraceroute}
+                disabled={tracing}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/20 transition-colors disabled:opacity-50 disabled:cursor-wait"
+              >
+                {tracing
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Activity className="w-3.5 h-3.5" />}
+                {tracing ? 'Running…' : 'Run Traceroute'}
+              </button>
+            </div>
+            {tracing && (
+              <div className="rounded-lg bg-[#0a0a18] border border-[#1a1a30] p-3 space-y-1.5 overflow-hidden">
+                {[80,60,70,50,65].map((w,i) => (
+                  <div key={i} className="h-2.5 rounded bg-slate-800 overflow-hidden" style={{width:`${w}%`}}>
+                    <div className="h-full bg-gradient-to-r from-transparent via-slate-600 to-transparent animate-[shimmer_1.5s_infinite]" style={{animationDelay:`${i*0.15}s`}} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {traceError && (
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{traceError}</p>
+            )}
+            {traceroute && <MtrTable output={traceroute} />}
+            {!traceroute && !traceError && !tracing && (
+              <p className="text-xs text-slate-600 italic">Click &ldquo;Run Traceroute&rdquo; to probe the current network path from the Pi</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const TABS = [
   { id: 'overview',  label: 'Overview',   Icon: BarChart2 },
   { id: 'internet',  label: 'Internet',   Icon: Wifi      },
+  { id: 'vpn',       label: 'VPN',        Icon: Shield    },
   { id: 'speedtest', label: 'Speed Test', Icon: Zap       },
   { id: 'activity',  label: 'Activity',   Icon: Activity  },
 ]
@@ -171,7 +713,7 @@ export default function Reports() {
   const [tab,          setTab]          = useState('overview')
   const [range,        setRange]        = useState('30d')
   const [eventFilter,  setEventFilter]  = useState('')
-  const [macFilter,    setMacFilter]    = useState('')
+  const [macFilter,    setMacFilter]    = useState([])
   const [subnetFilter, setSubnetFilter] = useState('')
   const [page,         setPage]         = useState(0)
   const [activitySearch, setActivitySearch] = useState('')
@@ -180,19 +722,28 @@ export default function Reports() {
   const [devices,      setDevices]      = useState([])
   const [subnets,      setSubnets]      = useState([])
   const [ispConfig,    setIspConfig]    = useState({})
+  const [infraConfig,  setInfraConfig]  = useState({})
   const [loading,      setLoading]      = useState(false)
   const [drillDay,     setDrillDay]     = useState(null) // { from, to, label }
   const [internetData,  setInternetData]  = useState(null)
   const [speedtestData, setSpeedtestData] = useState(null)
   const [exporting,     setExporting]     = useState(null)
   const [running,       setRunning]       = useState(false)
+  const [runningVpn,    setRunningVpn]    = useState(false)
   const [outageData,    setOutageData]    = useState(null)
   const [copiedIsp,     setCopiedIsp]     = useState(false)
-  const [internetStatusFilter, setInternetStatusFilter] = useState('') // '' | 'online' | 'offline'
+  const [networkConfig, setNetworkConfig] = useState({})
+  const [vpnMeta,       setVpnMeta]       = useState(null)
+  const [internetStatusFilter, setInternetStatusFilter] = useState('') // '' | 'online' | 'offline' | 'isp' | 'infra'
   const [internetSearch,       setInternetSearch]       = useState('')
   const [speedtestSearch,      setSpeedtestSearch]      = useState('')
   const [speedtestBelowSla,    setSpeedtestBelowSla]    = useState(false)
-  const [speedtestViaFilter,   setSpeedtestViaFilter]   = useState('')
+  const [speedtestServerFilter, setSpeedtestServerFilter] = useState([])
+  const [selectedCheck,        setSelectedCheck]        = useState(null)
+  const [selectedOutage,       setSelectedOutage]       = useState(null) // outage object with optional .diagnostics
+  const [traceActive,          setTraceActive]          = useState(false) // drives top progress bar
+
+  function clearOutage() { setSelectedOutage(null) }
   const { toasts, add: addToast } = useToast()
   const tableRef = useRef(null)
 
@@ -204,7 +755,7 @@ export default function Reports() {
       const res = await api.reports.get({
         from, to,
         ...(eventFilter  && { event:  eventFilter }),
-        ...(macFilter    && { mac:    macFilter }),
+        ...(macFilter.length > 0 && { mac: macFilter.join(',') }),
         ...(subnetFilter && { subnet: subnetFilter }),
         limit:  PAGE_SIZE,
         offset: page * PAGE_SIZE,
@@ -269,7 +820,10 @@ export default function Reports() {
       const raw = cfg?.network?.subnets ?? (cfg?.network?.subnet ? [cfg.network.subnet] : [])
       setSubnets(raw)
       setIspConfig(cfg?.isp ?? {})
+      setInfraConfig(cfg?.infra ?? {})
+      setNetworkConfig({ connectivity_hosts: cfg?.network?.connectivity_hosts ?? [], vpn_interface: cfg?.network?.vpn_interface ?? null })
     }).catch(() => {})
+    api.services.vpnMeta().then(m => { if (m) setVpnMeta(m) }).catch(() => {})
   }, [])
 
   function changeRange(r) { setRange(r); setDrillDay(null); setPage(0) }
@@ -299,80 +853,172 @@ export default function Reports() {
   const fmtLocalTs = ts => { const d = new Date(ts); const p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` }
   const rangeLabel = drillDay ? drillDay.label : RANGE_LABELS[range]
 
-  // Latest VPN exit metadata from speedtest rows — used in Internet + SpeedTest tabs
-  const vpnExitIsp = speedtestData?.results?.find(r => r.via === 'vpn') ?? null
+  // VPN exit metadata: prefer the persisted state (updated on every connectivity check),
+  // fall back to the most recent VPN speedtest row in the current range.
+  const vpnExitIsp = vpnMeta ?? speedtestData?.results?.find(r => r.via === 'vpn') ?? null
 
   async function handleExportCsv() {
     try {
       setExporting('csv')
       const to   = drillDay?.to   ?? Date.now()
       const from = drillDay?.from ?? (to - rangeMs(range))
-      // Fetch all data types concurrently
       const [inetData, speedData, evData, outData] = await Promise.all([
-        api.reports.internet({ from, to, limit: 5000 }),
-        api.reports.speedtest({ from, to, limit: 5000 }),
-        api.reports.get({ from, to, ...(eventFilter && { event: eventFilter }), ...(macFilter && { mac: macFilter }), limit: 5000, offset: 0 }),
+        api.reports.internet({ from, to, limit: 10000 }),
+        api.reports.speedtest({ from, to, limit: 10000 }),
+        api.reports.get({ from, to, ...(eventFilter && { event: eventFilter }), ...(macFilter.length > 0 && { mac: macFilter.join(',') }), limit: 10000, offset: 0 }),
         api.reports.outages({ from, to }),
       ])
-      const rows = [
-        // Internet outage incidents (most important for ISP accountability)
-        ...(outData.outages ?? []).map((o, _i) => ({
+      const pDown = ispConfig?.plan_download_mbps ?? 0
+      const pUp   = ispConfig?.plan_upload_mbps   ?? 0
+      const isp   = ispConfig?.name ?? ''
+      const acct  = ispConfig?.account_number ?? ''
+
+      // Shared empty template keeps columns aligned across all sections
+      const empty = {
+        section: '', timestamp_local: '', timestamp_utc: '', event: '',
+        // outage fields
+        duration_sec: '', outage_type: '', uptime_before_sec: '', gateway: '',
+        // internet check fields
+        latency_ms: '', hosts_checked: '', hosts_up: '', hosts_down: '', vpn_up: '', vpn_latency_ms: '',
+        // speedtest fields
+        via: '', download_mbps: '', upload_mbps: '', ping_ms: '',
+        plan_down_mbps: '', plan_up_mbps: '', down_pct_of_plan: '', up_pct_of_plan: '',
+        server_name: '', server_host: '', server_location: '', client_ip: '', client_isp: '', client_city: '',
+        // traceroute hop fields (for outage_diag_hop rows)
+        hop_num: '', hop_ip: '', hop_loss_pct: '', hop_avg_ms: '', hop_best_ms: '', hop_worst_ms: '', hop_probes: '',
+        // last-reached hop summary (for internet_outage rows)
+        last_reached_hop: '', last_reached_ip: '', last_reached_avg_ms: '',
+        // context
+        isp: '', account: '', notes: '',
+      }
+      const row = (overrides) => ({ ...empty, isp, account: acct, ...overrides })
+
+      const rows = []
+
+      // ── Outage incidents ──────────────────────────────────────────────────
+      for (const o of outData.outages ?? []) {
+        const oHops = o.diagnostics?.traceroute ? parseMtrHops(o.diagnostics.traceroute) : null
+        const oLast = oHops ? [...oHops].reverse().find(h => h.loss < 100 && h.host !== '???') : null
+        rows.push(row({
           section: 'internet_outage',
-          timestamp: fmtLocalTs(o.start),
+          timestamp_local: fmtLocalTs(o.start),
+          timestamp_utc:   new Date(o.start).toISOString(),
           event: o.ongoing ? 'internet.outage.ongoing' : 'internet.outage',
-          detail: `duration:${fmtMs(o.durationMs)}${o.ongoing ? '+' : ''} end:${o.end ? fmtLocalTs(o.end) : 'ongoing'}`,
-          device: '',
-        })),
-        // Internet connectivity checks
-        ...(inetData.checks ?? []).map(c => ({
-          section: 'internet',
-          timestamp: fmtLocalTs(c.ts),
-          event: c.ok ? 'online' : 'offline',
-          detail: c.avgMs != null ? `${c.avgMs}ms` : '',
-          device: '',
-        })),
-        // Speed tests
-        ...(speedData.results ?? []).map(r => {
-          const pDown = ispConfig?.plan_download_mbps ?? 0
-          const pUp   = ispConfig?.plan_upload_mbps   ?? 0
-          const dPct  = pDown > 0 && r.download_mbps != null ? ` (${Math.round(r.download_mbps / pDown * 100)}%)` : ''
-          const uPct  = pUp   > 0 && r.upload_mbps   != null ? ` (${Math.round(r.upload_mbps   / pUp   * 100)}%)` : ''
-          return {
-            section: 'speedtest',
-            timestamp: fmtLocalTs(r.ts),
-            event: 'speedtest',
-            detail: [
-              r.download_mbps != null ? `down:${r.download_mbps}Mbps${dPct}` : '',
-              r.upload_mbps   != null ? `up:${r.upload_mbps}Mbps${uPct}` : '',
-              r.ping_ms       != null ? `ping:${r.ping_ms}ms` : '',
-              r.server_name ?? r.server_host ? `srv:${r.server_name ?? r.server_host}` : '',
-            ].filter(Boolean).join(' '),
-            device: r.client_ip ?? '',
+          duration_sec:        o.durationMs != null ? Math.round(o.durationMs / 1000) : '',
+          outage_type:         o.outage_type ?? '',
+          uptime_before_sec:   o.uptimeBeforeMs != null ? Math.round(o.uptimeBeforeMs / 1000) : '',
+          gateway:             o.diagnostics?.gateway ?? '',
+          last_reached_hop:    oLast ? oLast.hop  : (oHops ? 0 : ''),
+          last_reached_ip:     oLast ? oLast.host : (oHops ? 'none' : ''),
+          last_reached_avg_ms: oLast ? oLast.avg.toFixed(1) : '',
+          notes: o.ongoing ? 'ONGOING' : `ended ${o.end ? fmtLocalTs(o.end) : ''}`,
+        }))
+        // Per-hop traceroute rows from stored diagnostics
+        const tr = o.diagnostics?.traceroute
+        if (tr) {
+          const hops = parseMtrHops(tr)
+          if (hops) {
+            for (const h of hops) {
+              rows.push(row({
+                section:        'outage_diag_hop',
+                timestamp_local: fmtLocalTs(o.start),
+                timestamp_utc:   new Date(o.start).toISOString(),
+                event:          `outage_ts:${o.start}`,
+                hop_num:        h.hop,
+                hop_ip:         h.host,
+                hop_loss_pct:   h.loss,
+                hop_avg_ms:     h.avg,
+                hop_best_ms:    h.best,
+                hop_worst_ms:   h.wrst,
+                hop_probes:     h.snt,
+              }))
+            }
+          } else {
+            // Store raw traceroute as a single notes row
+            rows.push(row({
+              section:        'outage_diag_trace',
+              timestamp_local: fmtLocalTs(o.start),
+              timestamp_utc:   new Date(o.start).toISOString(),
+              event:          `outage_ts:${o.start}`,
+              notes:          tr.replace(/\n/g, ' | ').substring(0, 500),
+            }))
           }
-        }),
-        // All events
-        ...(evData.events ?? []).map(e => ({
-          section: e.source ?? 'event',
-          timestamp: fmtLocalTs(e.ts),
-          event: e.event,
-          detail: e.payload ? JSON.stringify(e.payload) : '',
-          device: e.hostname || e.ip || e.mac || '',
-        })),
-      ].sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        }
+        // Per-host ping detail rows
+        for (const h of o.diagnostics?.ping_detail ?? []) {
+          rows.push(row({
+            section:        'outage_diag_ping',
+            timestamp_local: fmtLocalTs(o.start),
+            timestamp_utc:   new Date(o.start).toISOString(),
+            event:          `outage_ts:${o.start}`,
+            hop_ip:         h.host ?? h.ip ?? '',
+            latency_ms:     h.ms ?? '',
+            notes:          h.ok ? 'up' : 'down',
+          }))
+        }
+      }
+
+      // ── Internet connectivity checks ──────────────────────────────────────
+      for (const c of inetData.checks ?? []) {
+        rows.push(row({
+          section:         'internet_check',
+          timestamp_local: fmtLocalTs(c.ts),
+          timestamp_utc:   new Date(c.ts).toISOString(),
+          event:           c.ok ? 'online' : 'offline',
+          latency_ms:      c.avgMs ?? '',
+          hosts_checked:   c.hostCount ?? '',
+          hosts_up:        c.okCount ?? '',
+          hosts_down:      (c.hostCount ?? 0) - (c.okCount ?? 0) || '',
+          vpn_up:          c.vpn_up ? 'yes' : 'no',
+          vpn_latency_ms:  c.vpnAvgMs ?? '',
+          gateway:         c.gateway ?? '',
+          outage_type:     c.outage_type ?? '',
+        }))
+      }
+
+      // ── Speed tests ───────────────────────────────────────────────────────
+      for (const r of speedData.results ?? []) {
+        const dPct = pDown > 0 && r.download_mbps != null ? Math.round(r.download_mbps / pDown * 100) : ''
+        const uPct = pUp   > 0 && r.upload_mbps   != null ? Math.round(r.upload_mbps   / pUp   * 100) : ''
+        rows.push(row({
+          section:          'speedtest',
+          timestamp_local:  fmtLocalTs(r.ts),
+          timestamp_utc:    new Date(r.ts).toISOString(),
+          event:            'speedtest',
+          via:              r.via ?? 'direct',
+          download_mbps:    r.download_mbps ?? '',
+          upload_mbps:      r.upload_mbps   ?? '',
+          ping_ms:          r.ping_ms       ?? '',
+          plan_down_mbps:   pDown || '',
+          plan_up_mbps:     pUp   || '',
+          down_pct_of_plan: dPct,
+          up_pct_of_plan:   uPct,
+          server_name:      r.server_name     ?? '',
+          server_host:      r.server_host     ?? '',
+          server_location:  r.server_location ?? '',
+          client_ip:        r.client_ip       ?? '',
+          client_isp:       r.client_isp      ?? '',
+          client_city:      r.client_city     ?? '',
+          notes:            r.error ? `error: ${r.error}` : (dPct && dPct < 50 ? `only ${dPct}% of contracted speed` : ''),
+        }))
+      }
+
+      // ── All other events ──────────────────────────────────────────────────
+      for (const e of evData.events ?? []) {
+        rows.push(row({
+          section:         e.source ?? 'event',
+          timestamp_local: fmtLocalTs(e.ts),
+          timestamp_utc:   new Date(e.ts).toISOString(),
+          event:           e.event,
+          notes:           e.payload ? JSON.stringify(e.payload).substring(0, 300) : '',
+          hop_ip:          e.hostname || e.ip || e.mac || '',
+        }))
+      }
+
+      rows.sort((a, b) => (b.timestamp_utc || '').localeCompare(a.timestamp_utc || ''))
       exportToCsv(rows, `claudette-report-${dateStamp()}.csv`)
     } catch (e) {
       console.error('CSV export failed:', e)
-    } finally {
-      setExporting(null)
-    }
-  }
-
-  async function handleExportPng() {
-    try {
-      setExporting('png')
-      await exportToPng('reports-root', `claudette-report-${dateStamp()}.png`)
-    } catch (e) {
-      console.error('PNG export failed:', e)
     } finally {
       setExporting(null)
     }
@@ -383,7 +1029,6 @@ export default function Reports() {
       setExporting('pdf')
       const to   = drillDay?.to   ?? Date.now()
       const from = drillDay?.from ?? (to - rangeMs(range))
-      // Fetch full dataset for PDF
       const [speedData, evData] = await Promise.all([
         api.reports.speedtest({ from, to, limit: 200 }),
         api.reports.get({ from, to, limit: 200, offset: 0 }),
@@ -418,6 +1063,19 @@ export default function Reports() {
     }
   }
 
+  async function handleRunVpnSpeedtest() {
+    try {
+      setRunningVpn(true)
+      await api.reports.runVpnSpeedtest()
+      // VPN test is one direction at a time, ~35s
+      setTimeout(() => { loadSpeedtest(); setRunningVpn(false) }, 35000)
+    } catch (e) {
+      console.error('VPN speed test failed:', e)
+      addToast(e.message || 'VPN speed test failed', 'error')
+      setRunningVpn(false)
+    }
+  }
+
   function handleCopyIspReport() {
     const isp  = ispConfig?.name            || 'Unknown ISP'
     const conn = ispConfig?.connection_type || 'broadband'
@@ -444,6 +1102,9 @@ export default function Reports() {
       lines.push(`Longest incident:   ${fmtMs(outageData?.longestMs ?? 0)}`)
       lines.push(`Average latency:    ${stats.avgLatency} ms`)
       lines.push(`Checks performed:   ${stats.totalChecks}`)
+      if ((stats.ispFailures ?? 0) > 0)   lines.push(`ISP failures:       ${stats.ispFailures} (internet unreachable, gateway was OK — ISP-side issue)`)
+      if ((stats.infraFailures ?? 0) > 0) lines.push(`Infra failures:     ${stats.infraFailures} (local gateway unreachable — router/switch issue)`)
+      if (stats.gateway) lines.push(`Gateway detected:   ${stats.gateway}`)
       lines.push('')
     }
     if (outageData?.outages?.length) {
@@ -484,6 +1145,13 @@ export default function Reports() {
       if (planUp   > 0 && wUp   !== Infinity) lines.push(`Worst upload:           ${wUp} Mbps  (${Math.round(wUp   / planUp   * 100)}% of plan)`)
       lines.push('')
     }
+    if (ispConfig?.sla_url || ispConfig?.sla_notes) {
+      lines.push('SLA EVIDENCE')
+      lines.push('------------')
+      if (ispConfig.sla_url)   lines.push(`SLA document: ${ispConfig.sla_url}`)
+      if (ispConfig.sla_notes) lines.push(`Notes: ${ispConfig.sla_notes}`)
+      lines.push('')
+    }
     lines.push('---')
     lines.push('Report generated by Claudette Network Monitor')
     const text = lines.join('\n')
@@ -506,6 +1174,127 @@ export default function Reports() {
   return (
     <div id="reports-root" className="flex flex-col h-full overflow-hidden">
       <ToastStack toasts={toasts} />
+
+      {/* Check detail modal */}
+      <TopProgressBar active={traceActive} progress={null} />
+
+      {selectedCheck && (
+        <CheckDetailModal
+          check={selectedCheck}
+          onClose={() => setSelectedCheck(null)}
+          onTraceStart={() => setTraceActive(true)}
+          onTraceEnd={() => setTraceActive(false)}
+        />
+      )}
+
+      {/* Outage detail modal */}
+      {selectedOutage && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) clearOutage() }}>
+          <div className="w-full max-w-2xl max-h-[85vh] flex flex-col bg-[#0d0d1f] border border-red-500/30 rounded-2xl shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-start justify-between px-5 py-4 border-b border-red-500/20 flex-shrink-0">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertTriangle className="w-4 h-4 text-red-400" />
+                  <span className="text-sm font-semibold text-red-300">Outage Detail</span>
+                  {selectedOutage.outage_type === 'isp'
+                    ? <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/10 border border-orange-500/30 text-orange-400">ISP</span>
+                    : selectedOutage.outage_type === 'infra'
+                    ? <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-500/10 border border-yellow-500/30 text-yellow-400">Infra</span>
+                    : null}
+                  {selectedOutage.ongoing && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 border border-red-500/40 text-red-400 animate-pulse">⚠ ONGOING</span>}
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
+                  <span>Started: <span className="text-red-300">{new Date(selectedOutage.start).toLocaleString('en-GB')}</span></span>
+                  {selectedOutage.end && <span>Restored: <span className="text-emerald-400">{new Date(selectedOutage.end).toLocaleString('en-GB')}</span></span>}
+                  <span>Duration: <span className="text-red-300 font-bold">{fmtMs(selectedOutage.durationMs)}{selectedOutage.ongoing ? '+' : ''}</span></span>
+                  {selectedOutage.uptimeBeforeMs != null && <span>Was up for: <span className="text-slate-400">{fmtMs(selectedOutage.uptimeBeforeMs)}</span></span>}
+                </div>
+              </div>
+              <button onClick={clearOutage} className="p-1.5 hover:bg-white/5 rounded-lg transition-colors">
+                <X className="w-4 h-4 text-slate-400" />
+              </button>
+            </div>
+            {/* Body */}
+            <div className="overflow-y-auto flex-1 p-5 space-y-4">
+              {/* Outage summary — always shown */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="rounded-xl px-4 py-3 border border-red-500/20 bg-[#0a0a18]">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Started</p>
+                  <p className="text-sm font-semibold text-red-300 tabular-nums">{new Date(selectedOutage.start).toLocaleString('en-GB')}</p>
+                </div>
+                <div className="rounded-xl px-4 py-3 border border-[#1a1a30] bg-[#0a0a18]">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Restored</p>
+                  <p className="text-sm font-semibold tabular-nums">
+                    {selectedOutage.ongoing
+                      ? <span className="text-red-400 animate-pulse">Still offline</span>
+                      : <span className="text-emerald-400">{new Date(selectedOutage.end).toLocaleString('en-GB')}</span>}
+                  </p>
+                </div>
+                <div className="rounded-xl px-4 py-3 border border-red-500/20 bg-[#0a0a18]">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Down For</p>
+                  <p className="text-xl font-bold text-red-300 tabular-nums">{fmtMs(selectedOutage.durationMs)}{selectedOutage.ongoing ? '+' : ''}</p>
+                </div>
+                {selectedOutage.uptimeBeforeMs != null && (
+                  <div className="rounded-xl px-4 py-3 border border-[#1a1a30] bg-[#0a0a18]">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Was Up For</p>
+                    <p className="text-sm font-semibold text-slate-300 tabular-nums">{fmtMs(selectedOutage.uptimeBeforeMs)}</p>
+                  </div>
+                )}
+                {selectedOutage.outage_type && (
+                  <div className="rounded-xl px-4 py-3 border border-[#1a1a30] bg-[#0a0a18]">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Cause</p>
+                    {selectedOutage.outage_type === 'isp'
+                      ? <span className="px-2 py-1 rounded text-xs font-bold bg-orange-500/10 border border-orange-500/30 text-orange-400">ISP fault</span>
+                      : <span className="px-2 py-1 rounded text-xs font-bold bg-yellow-500/10 border border-yellow-500/30 text-yellow-400">Infrastructure (local)</span>}
+                  </div>
+                )}
+              </div>
+
+              {/* Diagnostics section */}
+              {selectedOutage.diagnostics ? (
+                <>
+                  {/* Ping results at time of outage */}
+                  {selectedOutage.diagnostics.ping_detail?.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                        <Wifi className="w-3 h-3" /> Connectivity at Outage Start
+                        {selectedOutage.diagnostics.gateway && <span className="text-slate-600 normal-case font-normal">· gateway: <span className="font-mono">{selectedOutage.diagnostics.gateway}</span></span>}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedOutage.diagnostics.ping_detail.map((r, i) => (
+                          <span key={i} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] border font-mono ${
+                            r.ok ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-400' : 'bg-red-500/10 border-red-500/25 text-red-400'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${r.ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                            {r.host}
+                            {r.ms != null && <span className="text-[10px] opacity-70">{r.ms}ms</span>}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* Traceroute */}
+                  <div>
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-2">
+                      <Activity className="w-3 h-3" /> Packet Path at Outage Start
+                      <span className="text-slate-600 normal-case font-normal">captured {new Date(selectedOutage.diagnostics.captured_at).toLocaleString('en-GB')}</span>
+                    </p>
+                    <OutageMtrView output={selectedOutage.diagnostics.traceroute || ''} outageType={selectedOutage.outage_type} />
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#1a1a30] bg-[#080810] text-[11px] text-slate-600">
+                  <Activity className="w-4 h-4 opacity-40 flex-shrink-0" />
+                  No diagnostics stored for this outage — traceroute and ping detail are captured automatically when internet goes down
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between px-6 pt-5 pb-3 flex-shrink-0">
         <div className="flex items-center gap-2.5">
           <BarChart2 className="w-5 h-5 text-indigo-400" />
@@ -525,16 +1314,13 @@ export default function Reports() {
             <Download className={`w-3.5 h-3.5 ${exporting === 'csv' ? 'animate-spin' : ''}`} />
             {exporting === 'csv' ? 'CSV...' : 'CSV'}
           </button>
-          <button onClick={handleExportPng} disabled={exporting} title="Export to PNG"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#1a1a35] text-slate-400 hover:text-slate-200 hover:border-[#2a2a4a] rounded-lg transition-colors disabled:opacity-40">
-            <Download className={`w-3.5 h-3.5 ${exporting === 'png' ? 'animate-spin' : ''}`} />
-            {exporting === 'png' ? 'PNG...' : 'PNG'}
-          </button>
           <button onClick={handleExportPdf} disabled={exporting} title="Export to PDF"
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#1a1a35] text-slate-400 hover:text-slate-200 hover:border-[#2a2a4a] rounded-lg transition-colors disabled:opacity-40">
             <Download className={`w-3.5 h-3.5 ${exporting === 'pdf' ? 'animate-spin' : ''}`} />
             {exporting === 'pdf' ? 'PDF...' : 'PDF'}
           </button>
+
+
         </div>
       </div>
 
@@ -583,13 +1369,12 @@ export default function Reports() {
                 >{f.label}</button>
               ))}
               {devices.length > 0 && (
-                <select value={macFilter} onChange={e => { setMacFilter(e.target.value); setPage(0) }}
-                  className="bg-[#0a0a18] border border-[#1a1a30] rounded-lg px-2.5 py-1 text-xs text-slate-400 focus:outline-none focus:border-indigo-500/60">
-                  <option value="">All devices</option>
-                  {devices.map(d => (
-                    <option key={d.mac} value={d.mac}>{d.hostname || d.ip || d.mac}</option>
-                  ))}
-                </select>
+                <MultiSelectDropdown
+                  label="Devices"
+                  options={devices.map(d => ({ value: d.mac, label: d.hostname || d.ip || d.mac }))}
+                  selected={macFilter}
+                  onApply={macs => { setMacFilter(macs); setPage(0) }}
+                />
               )}
               {subnets.length > 1 && (
                 <select value={subnetFilter} onChange={e => { setSubnetFilter(e.target.value); setPage(0) }}
@@ -631,14 +1416,6 @@ export default function Reports() {
                   Below SLA only
                 </button>
               )}
-              <button onClick={() => setSpeedtestViaFilter(v => v === 'vpn' ? '' : 'vpn')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                  speedtestViaFilter === 'vpn'
-                    ? 'bg-violet-600/25 border-violet-500/50 text-violet-300'
-                    : 'border-[#1a1a30] text-slate-400 hover:text-slate-200'
-                }`}>
-                VPN only
-              </button>
             </>
           )}
 
@@ -667,6 +1444,118 @@ export default function Reports() {
         {/* ── OVERVIEW ── */}
         {tab === 'overview' && (
           <>
+            {/* ── Internet health summary ── */}
+            {chartData?.internetStats && (() => {
+              const stats     = chartData.internetStats
+              const uptime    = Number(stats.uptime)
+              const outages   = outageData?.totalOutages   ?? 0
+              const downMs    = outageData?.totalDowntimeMs ?? 0
+              const longestMs = outageData?.longestMs       ?? 0
+              const avgLat    = stats.avgLatency
+              const ispName   = ispConfig?.name ?? null
+              // Latest direct speed test
+              const latestDirect = speedtestData?.results?.find(r => (r.via ?? 'direct') === 'direct')
+              const planDown     = ispConfig?.plan_download_mbps ?? 0
+              const planUp       = ispConfig?.plan_upload_mbps   ?? 0
+              // Ongoing outage
+              const ongoing = outageData?.outages?.find(o => o.ongoing)
+              return (
+                <div className={`rounded-xl border p-4 ${ongoing ? 'bg-red-950/25 border-red-500/40' : outages > 0 ? 'bg-[#0a0a18] border-amber-500/20' : 'bg-[#0a0a18] border-emerald-500/15'}`}>
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+                        <Wifi className={`w-3 h-3 ${ongoing ? 'text-red-400' : outages > 0 ? 'text-amber-400' : 'text-emerald-400'}`} />
+                        Internet Health
+                        <span className="normal-case tracking-normal font-normal text-slate-600">{rangeLabel}</span>
+                        {ispName && <span className="normal-case tracking-normal font-normal text-slate-600">· {ispName}</span>}
+                      </p>
+                      {ongoing && (
+                        <p className="text-xs text-red-300 font-semibold mb-2 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3 h-3" />
+                          Currently offline — down for {fmtMs(ongoing.durationMs)}+
+                          <button onClick={() => setTab('internet')} className="text-[10px] text-red-400/70 hover:text-red-300 underline ml-1">view details</button>
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-x-6 gap-y-2">
+                        {/* Uptime */}
+                        <div>
+                          <p className="text-[10px] text-slate-600 mb-0.5">Uptime</p>
+                          <p className={`text-2xl font-bold tabular-nums ${uptime === 100 ? 'text-emerald-400' : uptime >= 99 ? 'text-amber-400' : 'text-red-400'}`}>
+                            {uptime === 100 ? '100%' : `${uptime.toFixed(3)}%`}
+                          </p>
+                        </div>
+                        {/* Outages */}
+                        <div>
+                          <p className="text-[10px] text-slate-600 mb-0.5">Outages</p>
+                          <p className={`text-2xl font-bold tabular-nums ${outages === 0 ? 'text-emerald-400' : 'text-red-400'}`}>{outages}</p>
+                        </div>
+                        {/* Total downtime */}
+                        {downMs > 0 && (
+                          <div>
+                            <p className="text-[10px] text-slate-600 mb-0.5">Total downtime</p>
+                            <p className="text-2xl font-bold tabular-nums text-red-400">{fmtMs(downMs)}</p>
+                          </div>
+                        )}
+                        {/* Longest outage */}
+                        {longestMs > 0 && (
+                          <div>
+                            <p className="text-[10px] text-slate-600 mb-0.5">Longest outage</p>
+                            <p className="text-xl font-bold tabular-nums text-red-300">{fmtMs(longestMs)}</p>
+                          </div>
+                        )}
+                        {/* Avg latency */}
+                        {avgLat != null && (
+                          <div>
+                            <p className="text-[10px] text-slate-600 mb-0.5">Avg latency</p>
+                            <p className={`text-2xl font-bold tabular-nums ${avgLat < 30 ? 'text-emerald-400' : avgLat < 80 ? 'text-amber-400' : 'text-red-400'}`}>{avgLat} ms</p>
+                          </div>
+                        )}
+                        {/* Checks */}
+                        <div>
+                          <p className="text-[10px] text-slate-600 mb-0.5">Checks run</p>
+                          <p className="text-2xl font-bold tabular-nums text-slate-400">{stats.totalChecks.toLocaleString()}</p>
+                        </div>
+                        {/* ISP / infra fault split */}
+                        {((stats.ispFailures ?? 0) > 0 || (stats.infraFailures ?? 0) > 0) && (
+                          <div>
+                            <p className="text-[10px] text-slate-600 mb-0.5">Fault attribution</p>
+                            <p className="text-sm font-semibold">
+                              {(stats.ispFailures ?? 0) > 0 && <span className="text-orange-400">{stats.ispFailures} ISP</span>}
+                              {(stats.ispFailures ?? 0) > 0 && (stats.infraFailures ?? 0) > 0 && <span className="text-slate-600 mx-1">·</span>}
+                              {(stats.infraFailures ?? 0) > 0 && <span className="text-yellow-400">{stats.infraFailures} Infra</span>}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Latest speed test */}
+                    {latestDirect && (
+                      <div className="border-l border-[#1a1a30] pl-4 min-w-[140px]">
+                        <p className="text-[10px] text-slate-600 mb-2">Latest speed test</p>
+                        <div className="space-y-1">
+                          <p className={`text-sm font-bold tabular-nums ${planDown > 0 && latestDirect.download_mbps < planDown * 0.8 ? 'text-red-400' : 'text-emerald-400'}`}>
+                            ↓ {latestDirect.download_mbps ?? '—'} Mbps
+                            {planDown > 0 && latestDirect.download_mbps != null && <span className="text-[10px] font-normal text-slate-600 ml-1">({Math.round(latestDirect.download_mbps / planDown * 100)}%)</span>}
+                          </p>
+                          <p className={`text-sm font-bold tabular-nums ${planUp > 0 && latestDirect.upload_mbps < planUp * 0.8 ? 'text-red-400' : 'text-sky-400'}`}>
+                            ↑ {latestDirect.upload_mbps ?? '—'} Mbps
+                            {planUp > 0 && latestDirect.upload_mbps != null && <span className="text-[10px] font-normal text-slate-600 ml-1">({Math.round(latestDirect.upload_mbps / planUp * 100)}%)</span>}
+                          </p>
+                          {latestDirect.ping_ms != null && <p className="text-xs text-slate-500">{latestDirect.ping_ms} ms ping</p>}
+                          <p className="text-[10px] text-slate-700">{new Date(latestDirect.ts).toLocaleString('en-GB')}</p>
+                        </div>
+                        <button onClick={() => setTab('speedtest')} className="text-[10px] text-indigo-400/60 hover:text-indigo-300 mt-2">all tests →</button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={() => setTab('internet')} className="text-[10px] text-indigo-400/60 hover:text-indigo-300 transition-colors">Internet details →</button>
+                    {outages > 0 && <button onClick={() => setTab('internet')} className="text-[10px] text-red-400/60 hover:text-red-300 transition-colors">View outage log →</button>}
+                  </div>
+                </div>
+              )
+            })()}
+
             {/* Summary count cards */}
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
               {[
@@ -765,21 +1654,47 @@ export default function Reports() {
         {tab === 'internet' && (
           <>
             {/* Connection path info banner */}
-            {(ispConfig?.name || vpnExitIsp) && (
-              <div className="flex flex-wrap gap-2">
-                {ispConfig?.name && (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0a0a18] border border-[#1a1a30] text-[11px] text-slate-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400 inline-block" />
-                    Direct · <span className="text-slate-300 font-medium">{ispConfig.name}</span>
-                    {ispConfig.connection_type && <span className="text-slate-600 ml-1">({ispConfig.connection_type})</span>}
+            {(ispConfig?.name || vpnExitIsp || chartData?.internetStats?.gateway || networkConfig?.connectivity_hosts?.length > 0) && (
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap gap-2">
+                  {/* Direct path */}
+                  <span className="flex items-center flex-wrap gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0a0a18] border border-sky-500/15 text-[11px]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400 inline-block flex-shrink-0" />
+                    <span className="text-slate-500">Direct</span>
+                    {ispConfig?.name && <><span className="text-slate-700">·</span><span className="text-slate-300 font-medium">{ispConfig.name}</span></>}
+                    {ispConfig?.connection_type && <span className="text-slate-600">({ispConfig.connection_type})</span>}
+                    {(ispConfig?.plan_download_mbps > 0 || ispConfig?.plan_upload_mbps > 0) && (
+                      <span className="text-slate-600 border-l border-[#1a1a30] pl-1.5">
+                        {ispConfig.plan_download_mbps > 0 && ispConfig.plan_upload_mbps > 0
+                          ? `plan: ${ispConfig.plan_download_mbps}↓/${ispConfig.plan_upload_mbps}↑ Mbps`
+                          : ispConfig.plan_download_mbps > 0
+                          ? `plan: ${ispConfig.plan_download_mbps} Mbps ↓`
+                          : `plan: ${ispConfig.plan_upload_mbps} Mbps ↑`}
+                      </span>
+                    )}
+                    {chartData?.internetStats?.gateway && (
+                      <span className="text-slate-600 border-l border-[#1a1a30] pl-1.5" title="Detected default gateway (local router)">
+                        gw: <span className="font-mono text-slate-500">{chartData.internetStats.gateway}</span>
+                      </span>
+                    )}
+                    {(() => {
+                      const detectedIsp = speedtestData?.results?.find(r => (r.via ?? 'direct') === 'direct')?.client_isp
+                      if (detectedIsp && detectedIsp !== ispConfig?.name) {
+                        return <span className="text-slate-600 border-l border-[#1a1a30] pl-1.5">detected: <span className="text-slate-500">{detectedIsp}</span></span>
+                      }
+                      return null
+                    })()}
                   </span>
-                )}
-                {vpnExitIsp?.client_isp && (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0a0a18] border border-violet-500/20 text-[11px] text-violet-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400 inline-block" />
-                    VPN exit · <span className="text-violet-300 font-medium">{vpnExitIsp.client_isp}</span>
-                    {vpnExitIsp.client_city && <span className="text-violet-600 ml-1">· {vpnExitIsp.client_city}{vpnExitIsp.client_country ? `, ${vpnExitIsp.client_country}` : ''}</span>}
-                  </span>
+                </div>
+                {/* Pinging hosts */}
+                {networkConfig?.connectivity_hosts?.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                    <span className="text-slate-600 uppercase tracking-wide">Pinging</span>
+                    {networkConfig.connectivity_hosts.map(h => (
+                      <span key={h} className="font-mono text-slate-600 bg-[#0a0a18] border border-[#1a1a30] px-1.5 py-0.5 rounded">{h}</span>
+                    ))}
+                    <span className="text-slate-700">+ http://connectivity-check.ubuntu.com</span>
+                  </div>
                 )}
               </div>
             )}
@@ -790,28 +1705,35 @@ export default function Reports() {
                 <span className="w-2 h-2 rounded-full bg-sky-400 inline-block" /> Direct Connection
                 {ispConfig?.name && <span className="normal-case tracking-normal font-normal text-slate-600">· {ispConfig.name}{ispConfig.connection_type ? ` (${ispConfig.connection_type})` : ''}</span>}
               </p>
-              {chartData?.internetStats ? (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {[
-                    { label: 'Uptime',         value: `${Number(chartData.internetStats.uptime).toFixed(chartData.internetStats.uptime === 100 ? 1 : 3)}%`, color: chartData.internetStats.uptime < 99.9 ? 'text-red-400' : chartData.internetStats.uptime < 100 ? 'text-amber-400' : 'text-emerald-400', Icon: Wifi },
-                    { label: 'Avg Latency',    value: `${chartData.internetStats.avgLatency}ms`,  color: 'text-sky-400',    Icon: Zap      },
-                    { label: 'Checks Total',   value: chartData.internetStats.totalChecks,        color: 'text-indigo-400', Icon: Clock    },
-                    { label: 'Status Changes', value: chartData.internetStats.changes,            color: 'text-slate-300',  Icon: Activity },
-                  ].map(({ label, value, color, Icon }) => (
-                    <div key={label} className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${
-                      label === 'Uptime' && chartData.internetStats.uptime < 100 ? 'border-red-500/40' : 'border-sky-500/15'
-                    }`}>
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Icon className={`w-3 h-3 ${color}`} />
-                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</span>
+              {chartData?.internetStats ? (() => {
+                const stats    = chartData.internetStats
+                const uptime   = Number(stats.uptime)
+                const periodMs = drillDay ? (drillDay.to - drillDay.from) : rangeMs(range)
+                const uptimeMs = Math.round(periodMs * (uptime / 100))
+                const downMs   = outageData?.totalDowntimeMs ?? 0
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+                    {[
+                      { label: 'Uptime %',        value: `${uptime.toFixed(uptime === 100 ? 1 : 3)}%`,  color: uptime < 99.9 ? 'text-red-400' : uptime < 100 ? 'text-amber-400' : 'text-emerald-400', border: uptime < 100 ? 'border-red-500/40' : 'border-sky-500/15',    Icon: Wifi     },
+                      { label: 'Total Online',     value: fmtMs(uptimeMs),                              color: uptime === 100 ? 'text-emerald-400' : 'text-sky-400',                                    border: 'border-sky-500/15',                                           Icon: Wifi     },
+                      { label: 'Total Offline',    value: downMs > 0 ? fmtMs(downMs) : '—',             color: downMs > 0 ? 'text-red-400' : 'text-slate-600',                                          border: downMs > 0 ? 'border-red-500/40' : 'border-sky-500/15',        Icon: Activity },
+                      { label: 'Avg Latency',      value: `${stats.avgLatency} ms`,                     color: 'text-sky-400',                                                                           border: 'border-sky-500/15',                                           Icon: Zap      },
+                      { label: 'Checks Run',       value: stats.totalChecks.toLocaleString(),            color: 'text-indigo-400',                                                                        border: 'border-sky-500/15',                                           Icon: Clock    },
+                      { label: 'Status Changes',   value: stats.changes,                                color: 'text-slate-300',                                                                         border: 'border-sky-500/15',                                           Icon: Activity },
+                    ].map(({ label, value, color, border, Icon }) => (
+                      <div key={label} className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${border}`}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Icon className={`w-3 h-3 ${color}`} />
+                          <span className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</span>
+                        </div>
+                        <p className={`text-xl font-bold tabular-nums ${color}`}>{value}</p>
                       </div>
-                      <p className={`text-xl font-bold tabular-nums ${color}`}>{value}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {['Uptime', 'Avg Latency', 'Checks Total', 'Status Changes'].map(l => (
+                    ))}
+                  </div>
+                )
+              })() : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+                  {['Uptime %', 'Total Online', 'Total Offline', 'Avg Latency', 'Checks Run', 'Status Changes'].map(l => (
                     <div key={l} className="rounded-xl px-4 py-3 border border-[#1a1a30] bg-[#0a0a18] animate-pulse">
                       <div className="h-3 w-20 bg-[#1a1a30] rounded mb-2" />
                       <div className="h-6 w-12 bg-[#1a1a30] rounded" />
@@ -821,67 +1743,22 @@ export default function Reports() {
               )}
             </div>
 
-            {/* ── VPN Tunnel stats — fully independent of direct stats ── */}
-            {(() => {
-              const checks = internetData?.checks ?? []
-              const vpnChecks = checks.filter(c => c.vpn_up != null)
-              if (vpnChecks.length === 0) return null
-              const vpnOkChecks = vpnChecks.filter(c => c.vpn_ok !== false)
-              const vpnUptime   = vpnChecks.length > 0 ? parseFloat(((vpnOkChecks.length / vpnChecks.length) * 100).toFixed(1)) : null
-              const vpnLatMs    = vpnChecks.filter(c => c.vpnAvgMs != null)
-              const vpnAvgLat   = vpnLatMs.length > 0 ? Math.round(vpnLatMs.reduce((s, c) => s + c.vpnAvgMs, 0) / vpnLatMs.length) : null
-              const vpnDownChecks = vpnChecks.filter(c => c.vpn_ok === false).length
-              return (
-                <div>
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-violet-500 inline-block" /> VPN Tunnel
-                    {vpnExitIsp?.client_isp && <span className="normal-case tracking-normal font-normal text-violet-500/70">· exit via {vpnExitIsp.client_isp}{vpnExitIsp.client_city ? `, ${vpnExitIsp.client_city}` : ''}</span>}
-                    <span className="normal-case tracking-normal font-normal text-slate-600 text-[10px]">(independent of direct path)</span>
-                  </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${vpnUptime != null && vpnUptime < 99 ? 'border-red-500/30' : 'border-violet-500/20'}`}>
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Wifi className="w-3 h-3 text-violet-400" />
-                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">VPN Uptime</span>
-                      </div>
-                      <p className={`text-xl font-bold tabular-nums ${vpnUptime != null && vpnUptime < 99 ? 'text-red-400' : 'text-violet-400'}`}>
-                        {vpnUptime != null ? `${vpnUptime}%` : '—'}
-                      </p>
-                    </div>
-                    <div className="rounded-xl px-4 py-3 border border-violet-500/20 bg-[#0a0a18]">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Zap className="w-3 h-3 text-violet-400" />
-                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">Avg Latency</span>
-                      </div>
-                      <p className="text-xl font-bold tabular-nums text-violet-400">{vpnAvgLat != null ? `${vpnAvgLat} ms` : '—'}</p>
-                    </div>
-                    <div className="rounded-xl px-4 py-3 border border-violet-500/20 bg-[#0a0a18]">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Clock className="w-3 h-3 text-violet-400" />
-                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">Checks w/ VPN</span>
-                      </div>
-                      <p className="text-xl font-bold tabular-nums text-violet-400">{vpnChecks.length}</p>
-                    </div>
-                    <div className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${vpnDownChecks > 0 ? 'border-red-500/30' : 'border-violet-500/20'}`}>
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Activity className="w-3 h-3 text-violet-400" />
-                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">VPN Drops</span>
-                      </div>
-                      <p className={`text-xl font-bold tabular-nums ${vpnDownChecks > 0 ? 'text-red-400' : 'text-violet-400'}`}>{vpnDownChecks}</p>
-                    </div>
-                  </div>
-                </div>
-              )
-            })()}
-
             {/* SLA pass/fail panel + percentile pills */}
             {chartData?.internetStats && (() => {
-              const uptime  = Number(chartData.internetStats.uptime)
-              const target  = ispConfig?.expected_uptime ?? null
-              const TIERS   = [100, 99.999, 99.99, 99.9, 99.5, 99, 95, 90]
-              // Nearest standard tier at or below the configured target (for ring highlight)
-              const targetTier = target !== null
-                ? (TIERS.includes(target) ? target : (TIERS.find(t => t <= target) ?? null))
+              const uptime       = Number(chartData.internetStats.uptime)
+              const totalChecks  = chartData.internetStats.totalChecks ?? 0
+              const ispFails     = chartData.internetStats.ispFailures  ?? 0
+              const infraFails   = chartData.internetStats.infraFailures ?? 0
+              // ISP-attributable uptime = remove only ISP-caused failures from denominator
+              const ispUptime    = totalChecks > 0 ? ((totalChecks - ispFails)   / totalChecks * 100) : 100
+              // Infra-attributable uptime = remove only infra-caused failures
+              const infraUptime  = totalChecks > 0 ? ((totalChecks - infraFails) / totalChecks * 100) : 100
+              const ispTarget    = (ispConfig?.expected_uptime ?? 0) > 0 ? ispConfig.expected_uptime : null
+              const infraTarget  = (infraConfig?.sla_pct ?? 0) > 0 ? infraConfig.sla_pct : null
+              const TIERS        = [100, 99.999, 99.99, 99.9, 99.5, 99, 95, 90]
+              // Nearest standard tier at or below the configured ISP target (for ring highlight)
+              const targetTier   = ispTarget !== null
+                ? (TIERS.includes(ispTarget) ? ispTarget : (TIERS.find(t => t <= ispTarget) ?? null))
                 : null
               const pDown   = ispConfig?.plan_download_mbps ?? 0
               const pUp     = ispConfig?.plan_upload_mbps   ?? 0
@@ -889,18 +1766,20 @@ export default function Reports() {
               const avgUp   = chartData?.speedStats?.avgUp   ?? null
               const slaDown = pDown > 0 ? pDown : null
               const slaUp   = pUp   > 0 ? pUp   : null
-              const uptimePass = target !== null ? uptime >= target : null
+              const uptimePass     = ispTarget   !== null ? uptime     >= ispTarget   : null
+              const ispUptimePass  = ispTarget   !== null ? ispUptime  >= ispTarget   : null
+              const infraUptimePass = infraTarget !== null ? infraUptime >= infraTarget : null
               return (
                 <div className="space-y-2">
-                  {/* Percentile tier pills */}
+                  {/* Percentile tier pills — based on overall uptime */}
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[10px] text-slate-500 uppercase tracking-wide mr-1">Uptime tiers</span>
+                    <span className="text-[10px] text-slate-500 uppercase tracking-wide mr-1">Overall uptime tiers</span>
                     {TIERS.map(tier => {
-                      const pass    = uptime >= tier
+                      const pass     = uptime >= tier
                       const isTarget = tier === targetTier
                       return (
                         <span key={tier}
-                          title={(isTarget ? '⊙ Your SLA target — ' : '') + (pass ? `✓ Meets ${tier}% SLA` : `✗ Below ${tier}% SLA`)}
+                          title={(isTarget ? '⊙ Your ISP SLA target — ' : '') + (pass ? `✓ Meets ${tier}%` : `✗ Below ${tier}%`)}
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-default ${
                             pass
                               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
@@ -910,29 +1789,48 @@ export default function Reports() {
                         </span>
                       )
                     })}
-                    {target !== null && (
-                      <span className="text-[10px] text-slate-600 ml-1">· SLA target: {target}%</span>
+                    {ispTarget !== null && (
+                      <span className="text-[10px] text-slate-600 ml-1">· ISP SLA target: {ispTarget}%</span>
                     )}
                   </div>
-                  {/* SLA summary row (only if ISP config is set) */}
-                  {(target !== null || slaDown !== null || slaUp !== null) && (
+                  {/* SLA pass/fail badges */}
+                  {(ispTarget !== null || infraTarget !== null || slaDown !== null || slaUp !== null) && (
                     <div className="flex flex-wrap gap-2">
-                      {target !== null && (
+                      {/* Overall uptime vs ISP SLA */}
+                      {ispTarget !== null && (
                         <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${
-                          uptimePass
-                            ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300'
-                            : 'bg-red-500/8 border-red-500/25 text-red-300'
-                        }`}>
+                          uptimePass ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300' : 'bg-red-500/8 border-red-500/25 text-red-300'
+                        }`} title="Overall measured uptime vs ISP contracted SLA">
                           <span>{uptimePass ? '✓' : '✗'}</span>
-                          <span className="font-medium">Uptime SLA</span>
-                          <span className="opacity-70">{uptime.toFixed(uptime === 100 ? 1 : 3)}% / {target}% target</span>
+                          <span className="font-medium">Overall Uptime</span>
+                          <span className="opacity-70">{uptime.toFixed(uptime === 100 ? 1 : 3)}% / {ispTarget}% ISP SLA</span>
+                        </div>
+                      )}
+                      {/* ISP-only uptime (excluding infra failures) vs ISP SLA */}
+                      {ispTarget !== null && ispFails > 0 && (
+                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${
+                          ispUptimePass ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300' : 'bg-red-500/8 border-red-500/25 text-red-300'
+                        }`} title={`Uptime excluding ISP-caused failures only (${ispFails} ISP-side check${ispFails !== 1 ? 's' : ''} failed)`}>
+                          <span>{ispUptimePass ? '✓' : '✗'}</span>
+                          <span className="font-medium">ISP-Attributable</span>
+                          <span className="opacity-70">{ispUptime.toFixed(3)}%</span>
+                          <span className="opacity-40 text-[10px]">({ispFails} ISP fail{ispFails !== 1 ? 's' : ''})</span>
+                        </div>
+                      )}
+                      {/* Infra uptime vs infra SLA target */}
+                      {infraTarget !== null && (
+                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${
+                          infraUptimePass ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300' : 'bg-amber-500/8 border-amber-500/25 text-amber-300'
+                        }`} title={`Local infra uptime vs your ${infraTarget}% target (${infraFails} infra check${infraFails !== 1 ? 's' : ''} failed — gateway unreachable)`}>
+                          <span>{infraUptimePass ? '✓' : '✗'}</span>
+                          <span className="font-medium">Infra Uptime</span>
+                          <span className="opacity-70">{infraUptime.toFixed(3)}% / {infraTarget}% target</span>
+                          <span className="opacity-40 text-[10px]">({infraFails} infra fail{infraFails !== 1 ? 's' : ''})</span>
                         </div>
                       )}
                       {slaDown !== null && avgDown !== null && (
                         <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${
-                          avgDown >= slaDown
-                            ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300'
-                            : 'bg-red-500/8 border-red-500/25 text-red-300'
+                          avgDown >= slaDown ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300' : 'bg-red-500/8 border-red-500/25 text-red-300'
                         }`}>
                           <span>{avgDown >= slaDown ? '✓' : '✗'}</span>
                           <span className="font-medium">Download SLA</span>
@@ -941,15 +1839,24 @@ export default function Reports() {
                       )}
                       {slaUp !== null && avgUp !== null && (
                         <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs ${
-                          avgUp >= slaUp
-                            ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300'
-                            : 'bg-red-500/8 border-red-500/25 text-red-300'
+                          avgUp >= slaUp ? 'bg-emerald-500/8 border-emerald-500/25 text-emerald-300' : 'bg-red-500/8 border-red-500/25 text-red-300'
                         }`}>
                           <span>{avgUp >= slaUp ? '✓' : '✗'}</span>
                           <span className="font-medium">Upload SLA</span>
                           <span className="opacity-70">{avgUp} / {slaUp} Mbps plan</span>
                         </div>
                       )}
+                    </div>
+                  )}
+                  {/* SLA source link */}
+                  {ispConfig?.sla_url && (
+                    <div className="flex items-center gap-1.5">
+                      <a href={ispConfig.sla_url} target="_blank" rel="noreferrer"
+                        className="flex items-center gap-1 text-[10px] text-indigo-400/70 hover:text-indigo-300 transition-colors">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                        SLA document
+                      </a>
+                      {ispConfig.sla_notes && <span className="text-[10px] text-slate-600">· {ispConfig.sla_notes.slice(0, 100)}{ispConfig.sla_notes.length > 100 ? '…' : ''}</span>}
                     </div>
                   )}
                 </div>
@@ -1015,11 +1922,14 @@ export default function Reports() {
                         <th className="px-4 py-2 text-left text-slate-500 font-medium">Type</th>
                         <th className="px-4 py-2 text-right text-slate-500 font-medium">Down For</th>
                         <th className="px-4 py-2 text-right text-slate-500 font-medium">Was Up For</th>
+                        <th className="px-4 py-2 text-right text-slate-500 font-medium">Last hop</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#0f0f1c]">
                       {outageData.outages.map((o, i) => (
-                        <tr key={i} className={`hover:bg-white/[0.02] ${o.ongoing ? 'bg-red-950/20' : ''}`}>
+                        <tr key={i}
+                          onClick={() => setSelectedOutage(o)}
+                          className={`cursor-pointer hover:bg-red-950/30 transition-colors ${o.ongoing ? 'bg-red-950/20' : ''}`}>
                           <td className="px-4 py-2 text-slate-600 tabular-nums">{i + 1}</td>
                           <td className="px-4 py-2 text-red-300 tabular-nums whitespace-nowrap">{new Date(o.start).toLocaleString('en-GB')}</td>
                           <td className="px-4 py-2 tabular-nums whitespace-nowrap">
@@ -1040,6 +1950,16 @@ export default function Reports() {
                           <td className="px-4 py-2 text-right tabular-nums text-slate-400">
                             {o.uptimeBeforeMs != null ? fmtMs(o.uptimeBeforeMs) : <span className="text-slate-600">—</span>}
                           </td>
+                          <td className="px-4 py-2 text-right">
+                            {(() => {
+                              if (!o.diagnostics) return <span className="text-[10px] text-slate-700">—</span>
+                              const hops = parseMtrHops(o.diagnostics.traceroute)
+                              const last = hops ? [...hops].reverse().find(h => h.loss < 100 && h.host !== '???') : null
+                              return last
+                                ? <span className="text-[10px] font-mono text-emerald-500/70" title={`Last reached: ${last.host} (hop ${last.hop}, avg ${last.avg.toFixed(1)}ms)`}>→ {last.host}</span>
+                                : <span className="text-[10px] text-red-600/60" title="No hops responded">0 hops</span>
+                            })()}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1058,12 +1978,6 @@ export default function Reports() {
                       <span className="inline-block w-4 border-t-2 border-sky-400 rounded" />
                       Direct
                     </span>
-                    {chartData.internet.some(d => d.vpn_ms != null) && (
-                      <span className="flex items-center gap-1 text-[10px] text-slate-500">
-                        <span className="inline-block w-4 border-t-2 border-violet-400 rounded" />
-                        VPN
-                      </span>
-                    )}
                   </div>
                   {(() => {
                     const last = chartData.internet.at?.(-1)
@@ -1083,7 +1997,6 @@ export default function Reports() {
                     <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit="ms" />
                     <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                     <Line type="monotone" dataKey="ms" name="Direct Latency" stroke="#38bdf8" dot={false} strokeWidth={1.5} unit="ms" connectNulls={false} />
-                    <Line type="monotone" dataKey="vpn_ms" name="VPN Latency" stroke="#a78bfa" dot={false} strokeWidth={1.5} unit="ms" connectNulls={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -1098,6 +2011,7 @@ export default function Reports() {
               <p className="text-xs font-medium text-slate-400 mb-3">Recent Checks</p>
               {internetData?.checks?.length > 0 ? (() => {
                 const filtered = internetData.checks.filter(c => {
+                  if (c.vpn_up) return false
                   if (internetStatusFilter === 'online'  && !c.ok) return false
                   if (internetStatusFilter === 'offline' &&  c.ok) return false
                   if (internetSearch) {
@@ -1115,27 +2029,20 @@ export default function Reports() {
                         <th className="px-2 py-1.5 text-left text-slate-400">Time</th>
                         <th className="px-2 py-1.5 text-left text-sky-400/70">Direct Status</th>
                         <th className="px-2 py-1.5 text-left text-slate-400">Mode</th>
-                        <th className="px-2 py-1.5 text-right text-slate-400">
-                          Direct{ispConfig?.name ? <span className="text-slate-600 font-normal ml-1">({ispConfig.name})</span> : ''}
-                        </th>
-                        <th className="px-2 py-1.5 text-right text-violet-500/70">
-                          VPN{vpnExitIsp?.client_isp ? <span className="text-violet-700 font-normal ml-1">({vpnExitIsp.client_isp})</span> : ''}
-                        </th>
+                        <th className="px-2 py-1.5 text-right text-slate-400">Direct{ispConfig?.name ? <span className="text-slate-600 font-normal ml-1">({ispConfig.name})</span> : ''}</th>
                         <th className="px-2 py-1.5 text-right text-slate-400">Hosts</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filtered.map((check, i) => (
-                        <tr key={i} className="border-b border-[#1a1a30] hover:bg-[#15151f]">
+                        <tr key={i} className="border-b border-[#1a1a30] hover:bg-[#15151f] cursor-pointer" onClick={() => setSelectedCheck(check)}>
                           <td className="px-2 py-1.5 text-slate-400">{new Date(check.ts).toLocaleString('en-GB')}</td>
                           <td className="px-2 py-1.5">
                             <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${
                               check.ok
                                 ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
                                 : 'bg-red-500/15 text-red-400 border-red-500/20'
-                            }`}>
-                              {check.ok ? 'Online' : 'Offline'}
-                            </span>
+                            }`}>{check.ok ? 'Online' : 'Offline'}</span>
                           </td>
                           <td className="px-2 py-1.5">
                             {check.outage_mode
@@ -1147,23 +2054,13 @@ export default function Reports() {
                             }
                           </td>
                           <td className="px-2 py-1.5 text-right text-slate-400">{check.avgMs ?? '—'} ms</td>
-                          <td className="px-2 py-1.5 text-right">
-                            {check.vpn_up == null
-                              ? <span className="text-slate-700 text-[10px]">—</span>
-                              : check.vpn_ok === false
-                                ? <span className="text-red-400 text-[10px] font-bold">down</span>
-                                : check.vpnAvgMs != null
-                                  ? <span className="text-violet-400">{check.vpnAvgMs} ms</span>
-                                  : <span className="text-slate-600 text-[10px]">no data</span>
-                            }
-                          </td>
                           <td className="px-2 py-1.5 text-right text-slate-400">
                             <span className="text-emerald-400">{check.okCount}</span> / {check.hostCount}
                           </td>
                         </tr>
                       ))}
                       {filtered.length === 0 && (
-                        <tr><td colSpan={6} className="px-2 py-6 text-center text-slate-600 text-xs">No checks match the filter</td></tr>
+                        <tr><td colSpan={5} className="px-2 py-6 text-center text-slate-600 text-xs">No checks match the filter</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1176,25 +2073,220 @@ export default function Reports() {
           </>
         )}
 
+        {/* ── VPN ── */}
+        {tab === 'vpn' && (() => {
+          const checks = internetData?.checks ?? []
+          const vpnChecks = checks.filter(c => c.vpn_up != null)
+          const vpnOkChecks = vpnChecks.filter(c => c.vpn_ok !== false)
+          const vpnUptime = vpnChecks.length > 0 ? parseFloat(((vpnOkChecks.length / vpnChecks.length) * 100).toFixed(1)) : null
+          const vpnLatMs = vpnChecks.filter(c => c.vpnAvgMs != null)
+          const vpnAvgLat = vpnLatMs.length > 0 ? Math.round(vpnLatMs.reduce((s, c) => s + c.vpnAvgMs, 0) / vpnLatMs.length) : null
+          const vpnDownChecks = vpnChecks.filter(c => c.vpn_ok === false).length
+          if (vpnChecks.length === 0) return (
+            <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
+              <Shield className="w-8 h-8 text-violet-500/30" />
+              <p className="text-slate-400 font-medium">No VPN data in this period</p>
+              <p className="text-slate-600 text-sm">VPN stats appear here when the system detects an active VPN during internet checks.</p>
+            </div>
+          )
+          return (
+            <>
+              {/* VPN connection info */}
+              {(vpnExitIsp?.client_isp || networkConfig?.vpn_interface || networkConfig?.connectivity_hosts?.length > 0) && (
+                <div className="space-y-1.5">
+                  <div className="flex flex-wrap gap-2">
+                    {vpnExitIsp?.client_isp && (
+                      <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0a0a18] border border-violet-500/20 text-[11px] text-violet-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-400 inline-block flex-shrink-0" />
+                        <span className="text-violet-500">VPN exit</span>
+                        <span className="text-violet-700">·</span>
+                        <span className="text-violet-300 font-medium">{vpnExitIsp.client_isp}</span>
+                        {vpnExitIsp.client_city && <span className="text-violet-600">· {vpnExitIsp.client_city}{vpnExitIsp.client_country ? `, ${vpnExitIsp.client_country}` : ''}</span>}
+                        {networkConfig?.vpn_interface && <span className="font-mono text-violet-700 border-l border-violet-900 pl-1.5 text-[10px]">{networkConfig.vpn_interface}</span>}
+                      </span>
+                    )}
+                    {!vpnExitIsp?.client_isp && networkConfig?.vpn_interface && (
+                      <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0a0a18] border border-violet-500/20 text-[11px]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-violet-400 inline-block flex-shrink-0" />
+                        <span className="font-mono text-violet-600">{networkConfig.vpn_interface}</span>
+                      </span>
+                    )}
+                  </div>
+                  {networkConfig?.connectivity_hosts?.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                      <span className="text-slate-600 uppercase tracking-wide">Pinging via VPN</span>
+                      {networkConfig.connectivity_hosts.map(h => (
+                        <span key={h} className="font-mono text-slate-600 bg-[#0a0a18] border border-[#1a1a30] px-1.5 py-0.5 rounded">{h}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* VPN Tunnel stats */}
+              <div>
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-violet-500 inline-block" /> VPN Tunnel
+                  {vpnExitIsp?.client_isp && <span className="normal-case tracking-normal font-normal text-violet-500/70">· exit via {vpnExitIsp.client_isp}{vpnExitIsp.client_city ? `, ${vpnExitIsp.client_city}` : ''}</span>}
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${vpnUptime != null && vpnUptime < 99 ? 'border-red-500/30' : 'border-violet-500/20'}`}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Wifi className="w-3 h-3 text-violet-400" />
+                      <span className="text-[10px] text-slate-500 uppercase tracking-wide">VPN Uptime</span>
+                    </div>
+                    <p className={`text-xl font-bold tabular-nums ${vpnUptime != null && vpnUptime < 99 ? 'text-red-400' : 'text-violet-400'}`}>
+                      {vpnUptime != null ? `${vpnUptime}%` : '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl px-4 py-3 border border-violet-500/20 bg-[#0a0a18]">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Zap className="w-3 h-3 text-violet-400" />
+                      <span className="text-[10px] text-slate-500 uppercase tracking-wide">Avg Latency</span>
+                    </div>
+                    <p className="text-xl font-bold tabular-nums text-violet-400">{vpnAvgLat != null ? `${vpnAvgLat} ms` : '—'}</p>
+                  </div>
+                  <div className="rounded-xl px-4 py-3 border border-violet-500/20 bg-[#0a0a18]">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Clock className="w-3 h-3 text-violet-400" />
+                      <span className="text-[10px] text-slate-500 uppercase tracking-wide">Checks w/ VPN</span>
+                    </div>
+                    <p className="text-xl font-bold tabular-nums text-violet-400">{vpnChecks.length}</p>
+                  </div>
+                  <div className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${vpnDownChecks > 0 ? 'border-red-500/30' : 'border-violet-500/20'}`}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Activity className="w-3 h-3 text-violet-400" />
+                      <span className="text-[10px] text-slate-500 uppercase tracking-wide">VPN Drops</span>
+                    </div>
+                    <p className={`text-xl font-bold tabular-nums ${vpnDownChecks > 0 ? 'text-red-400' : 'text-violet-400'}`}>{vpnDownChecks}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* VPN Latency chart */}
+              {(chartData?.internet?.length ?? 0) > 0 && (
+                <div className="bg-[#0a0a18] border border-violet-500/20 rounded-xl p-4">
+                  <div className="flex items-center gap-3 mb-3">
+                    <p className="text-xs font-medium text-slate-400">VPN Latency Over Time</p>
+                    <span className="flex items-center gap-1 text-[10px] text-slate-500">
+                      <span className="inline-block w-4 border-t-2 border-violet-400 rounded" />
+                      VPN
+                    </span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={chartData.internet} margin={{ top: 2, right: 8, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
+                      <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
+                        tickFormatter={v => new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} />
+                      <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit="ms" />
+                      <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                      <Line type="monotone" dataKey="vpn_ms" name="VPN Latency" stroke="#a78bfa" dot={false} strokeWidth={1.5} unit="ms" connectNulls={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* VPN Checks table */}
+              <div className="bg-[#0a0a18] border border-violet-500/20 rounded-xl p-4">
+                <p className="text-xs font-medium text-violet-400/80 mb-3">VPN Checks</p>
+                <div className="overflow-x-auto max-h-96 overflow-y-auto text-[11px]">
+                  <table className="w-full">
+                    <thead className="sticky top-0 bg-[#0a0a18]">
+                      <tr className="border-b border-[#1a1a30]">
+                        <th className="px-2 py-1.5 text-left text-slate-400">Time</th>
+                        <th className="px-2 py-1.5 text-left text-violet-500/70">VPN Status</th>
+                        <th className="px-2 py-1.5 text-left text-slate-400">Mode</th>
+                        <th className="px-2 py-1.5 text-right text-violet-500/70">VPN Latency{vpnExitIsp?.client_isp ? <span className="text-violet-700 font-normal ml-1">({vpnExitIsp.client_isp})</span> : ''}</th>
+                        <th className="px-2 py-1.5 text-right text-slate-400">Hosts</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vpnChecks.map((check, i) => (
+                        <tr key={i} className="border-b border-[#1a1a30] hover:bg-[#15151f] cursor-pointer" onClick={() => setSelectedCheck(check)}>
+                          <td className="px-2 py-1.5 text-slate-400">{new Date(check.ts).toLocaleString('en-GB')}</td>
+                          <td className="px-2 py-1.5">
+                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${
+                              check.vpn_ok !== false
+                                ? 'bg-violet-500/10 text-violet-400 border-violet-500/20'
+                                : 'bg-red-500/15 text-red-400 border-red-500/20'
+                            }`}>{check.vpn_ok !== false ? 'Up' : 'Down'}</span>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {check.outage_mode
+                              ? <span title={`Fast-polling every ${check.interval_seconds}s (attempt ${check.attempt_count})`}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-400 cursor-default">
+                                  <Zap className="w-2.5 h-2.5" />{check.interval_seconds}s
+                                </span>
+                              : <span className="text-slate-700 text-[10px]">—</span>
+                            }
+                          </td>
+                          <td className="px-2 py-1.5 text-right">
+                            {check.vpn_ok === false
+                              ? <span className="text-red-400 text-[10px] font-bold">down</span>
+                              : check.vpnAvgMs != null
+                                ? <span className="text-violet-400">{check.vpnAvgMs} ms</span>
+                                : <span className="text-slate-600 text-[10px]">no data</span>
+                            }
+                          </td>
+                          <td className="px-2 py-1.5 text-right text-slate-400">
+                            <span className="text-emerald-400">{check.okCount}</span> / {check.hostCount}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )
+        })()}
+
         {/* ── SPEED TEST ── */}
-        {tab === 'speedtest' && (
+        {tab === 'speedtest' && (() => {
+          const allRows    = speedtestData?.results ?? []
+          const directRows = allRows.filter(r => (r.via ?? 'direct') === 'direct')
+          const vpnRows    = allRows.filter(r => r.via === 'vpn')
+          const lastDirectTs = directRows[0]?.ts ?? null
+          const lastVpnTs    = vpnRows[0]?.ts    ?? null
+          return (
           <>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-white">Speed Test History</p>
                 <p className="text-[11px] text-slate-500 mt-0.5">via Cloudflare — Download / Upload / Ping</p>
               </div>
-              <button onClick={handleRunSpeedtest} disabled={running}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30 rounded-lg transition-colors disabled:opacity-40">
-                <Zap className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} />
-                {running ? 'Running…' : 'Run Now'}
-              </button>
+              <div className="flex items-end gap-2">
+                {/* Direct button */}
+                <div className="flex flex-col items-end gap-0.5">
+                  {lastDirectTs && <span className="text-[10px] text-slate-500">last: {fmtDate(lastDirectTs)}</span>}
+                  <button onClick={handleRunSpeedtest} disabled={running || runningVpn}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30 rounded-lg transition-colors disabled:opacity-40">
+                    <Zap className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} />
+                    {running ? 'Running…' : 'Run Direct'}
+                  </button>
+                </div>
+                {/* VPN button */}
+                <div className="flex flex-col items-end gap-0.5">
+                  {lastVpnTs && <span className="text-[10px] text-slate-500">last: {fmtDate(lastVpnTs)}</span>}
+                  <button onClick={handleRunVpnSpeedtest} disabled={running || runningVpn}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-violet-600/20 border border-violet-500/40 text-violet-300 hover:bg-violet-600/30 rounded-lg transition-colors disabled:opacity-40">
+                    <Shield className={`w-3.5 h-3.5 ${runningVpn ? 'animate-spin' : ''}`} />
+                    {runningVpn ? 'Running…' : 'Run VPN'}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {running && (
               <div className="flex items-center gap-2 text-xs text-indigo-400 bg-indigo-500/5 border border-indigo-500/20 rounded-lg px-3 py-2">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              Speed test in progress — measuring direct &amp; VPN via Cloudflare (~60–90s)…
+                Direct speed test in progress — measuring ISP via Cloudflare (~30–60s)…
+              </div>
+            )}
+            {runningVpn && (
+              <div className="flex items-center gap-2 text-xs text-violet-400 bg-violet-500/5 border border-violet-500/20 rounded-lg px-3 py-2">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                VPN speed test in progress — measuring {networkConfig?.vpn_interface ?? 'VPN'} via Cloudflare (~30–60s)…
               </div>
             )}
 
@@ -1264,7 +2356,7 @@ export default function Reports() {
                     </div>
                   )}
 
-                  {/* VPN stat cards */}
+                  {/* VPN stat cards — only when VPN tests have been run */}
                   {latestVpn && (
                     <div>
                       <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
@@ -1279,6 +2371,15 @@ export default function Reports() {
                         <StatCard label="Latest Ping (VPN)" value={`${latestVpn.ping_ms} ms`} color="text-violet-400" border="border-violet-500/20" />
                         <StatCard label={`Avg VPN (${vpnRows.length})`} value={`↓${avgDownV} ↑${avgUpV}`} color="text-violet-300" border="border-violet-500/20" />
                       </div>
+                    </div>
+                  )}
+
+                  {/* Hint when VPN is configured but no tests have been run yet */}
+                  {!latestVpn && (
+                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-violet-500/15 bg-[#0a0a18] text-[11px]">
+                      <Shield className="w-4 h-4 text-violet-500/40 flex-shrink-0" />
+                      <span className="text-violet-400/60 font-medium">No VPN speed tests yet</span>
+                      <span className="text-slate-600">· click <span className="text-violet-400 font-medium">Run VPN</span> (top-right) to measure{networkConfig?.vpn_interface ? <> <span className="font-mono">{networkConfig.vpn_interface}</span></> : ' VPN'} throughput and compare with direct</span>
                     </div>
                   )}
 
@@ -1306,7 +2407,70 @@ export default function Reports() {
                     )
                   })()}
 
-                  {/* Trend chart */}
+                  {/* Trend charts — split Direct / VPN side by side when VPN data exists */}
+                  {vpnRows.length > 0 ? (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      {/* Direct chart */}
+                      <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <p className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Direct
+                          </p>
+                          <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+                            <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                              <span className="inline-block w-5 border-t-2 border-emerald-500 rounded" /> ↓
+                            </span>
+                            <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                              <span className="inline-block w-5 border-t-2 border-sky-400 rounded" /> ↑
+                            </span>
+                            {planDown > 0 && <span className="flex items-center gap-1.5 text-[10px] text-emerald-400/60"><span className="inline-block w-5 border-t-2 border-dashed border-emerald-500/60" /> {planDown}M</span>}
+                            {planUp   > 0 && <span className="flex items-center gap-1.5 text-[10px] text-sky-400/60"><span className="inline-block w-5 border-t-2 border-dashed border-sky-400/60" /> {planUp}M</span>}
+                          </div>
+                        </div>
+                        <ResponsiveContainer width="100%" height={180}>
+                          <LineChart data={chartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
+                            <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
+                              tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
+                            <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
+                            <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                            <Line type="monotone" dataKey="direct_down" name="Direct ↓" stroke="#10b981" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                            <Line type="monotone" dataKey="direct_up"   name="Direct ↑" stroke="#38bdf8" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                            {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown}`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
+                            {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planUp}`,   fill: '#38bdf8', fontSize: 9, opacity: 0.7 }} />}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                      {/* VPN chart */}
+                      <div className="bg-[#0a0a18] border border-violet-500/20 rounded-xl p-4">
+                        <div className="flex items-start justify-between mb-3">
+                          <p className="text-xs font-medium text-violet-400/80 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-violet-500 inline-block" /> VPN
+                            {latestVpn?.client_isp && <span className="text-violet-600 font-normal text-[10px]">via {latestVpn.client_isp}</span>}
+                          </p>
+                          <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+                            <span className="flex items-center gap-1.5 text-[10px] text-violet-400/80">
+                              <span className="inline-block w-5 border-t-2 border-violet-400" /> ↓
+                            </span>
+                            <span className="flex items-center gap-1.5 text-[10px] text-violet-300/70">
+                              <span className="inline-block w-5 border-t-2 border-violet-300/70" /> ↑
+                            </span>
+                          </div>
+                        </div>
+                        <ResponsiveContainer width="100%" height={180}>
+                          <LineChart data={chartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
+                            <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
+                              tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
+                            <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
+                            <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                            <Line type="monotone" dataKey="vpn_down" name="VPN ↓" stroke="#a78bfa" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                            <Line type="monotone" dataKey="vpn_up"   name="VPN ↑" stroke="#c4b5fd" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  ) : (
                   <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-4">
                     <div className="flex items-start justify-between mb-3">
                       <p className="text-xs font-medium text-slate-400">Download &amp; Upload Trend</p>
@@ -1317,14 +2481,6 @@ export default function Reports() {
                         <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
                           <span className="inline-block w-5 border-t-2 border-sky-400 rounded" /> Direct ↑
                         </span>
-                        {vpnRows.length > 0 && <>
-                          <span className="flex items-center gap-1.5 text-[10px] text-violet-400/80">
-                            <span className="inline-block w-5 border-t-2 border-dashed border-violet-400/80" /> VPN ↓
-                          </span>
-                          <span className="flex items-center gap-1.5 text-[10px] text-violet-300/70">
-                            <span className="inline-block w-5 border-t-2 border-dashed border-violet-300/70" /> VPN ↑
-                          </span>
-                        </>}
                         {planDown > 0 && (
                           <span className="flex items-center gap-1.5 text-[10px] text-emerald-400/60">
                             <span className="inline-block w-5 border-t-2 border-dashed border-emerald-500/60" />
@@ -1348,22 +2504,33 @@ export default function Reports() {
                         <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                         <Line type="monotone" dataKey="direct_down" name="Direct ↓" stroke="#10b981" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
                         <Line type="monotone" dataKey="direct_up"   name="Direct ↑" stroke="#38bdf8" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                        {vpnRows.length > 0 && <>
-                          <Line type="monotone" dataKey="vpn_down" name="VPN ↓" stroke="#a78bfa" strokeDasharray="5 3" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                          <Line type="monotone" dataKey="vpn_up"   name="VPN ↑" stroke="#c4b5fd" strokeDasharray="5 3" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                        </>}
                         {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown} Mbps`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
                         {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planUp} Mbps`,   fill: '#38bdf8', fontSize: 9, opacity: 0.7 }} />}
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
+                  )}
 
+                  {/* Direct Speed Test History */}
+                  {directRows.length > 0 && (
                   <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl overflow-hidden">
-                    <div className="overflow-x-auto max-h-96 overflow-y-auto text-[11px]">
-                      <table className="w-full min-w-[640px]">
+                    <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[#1a1a30]">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                      <p className="text-xs font-semibold text-slate-300">Direct Speed Test History</p>
+                      <span className="text-[10px] text-slate-500">{directRows.length} test{directRows.length !== 1 ? 's' : ''}</span>
+                      {(() => {
+                        const opts = [...new Set(directRows.map(r => String(r.server_name ?? r.server_host ?? '').replace(' [object Object]', '')).filter(Boolean))].map(s => ({ value: s, label: s }))
+                        return opts.length > 1 ? (
+                          <div className="ml-auto">
+                            <MultiSelectDropdown label="Server" options={opts} selected={speedtestServerFilter} onApply={setSpeedtestServerFilter} />
+                          </div>
+                        ) : null
+                      })()}
+                    </div>
+                    <div className="overflow-x-auto max-h-72 overflow-y-auto text-[11px]">
+                      <table className="w-full min-w-[560px]">
                         <thead className="sticky top-0 bg-[#0a0a18]">
                           <tr className="border-b border-[#1a1a30]">
-                            <th className="px-3 py-2 text-left text-slate-400">Via</th>
                             <th className="px-3 py-2 text-left text-slate-400">Time</th>
                             <th className="px-3 py-2 text-right text-slate-400">↓ Down</th>
                             <th className="px-3 py-2 text-right text-slate-400">↑ Up</th>
@@ -1374,13 +2541,16 @@ export default function Reports() {
                           </tr>
                         </thead>
                         <tbody>
-                          {rows.filter(r => {
+                          {directRows.filter(r => {
+                            if (speedtestServerFilter.length > 0) {
+                              const sk = String(r.server_name ?? r.server_host ?? '').replace(' [object Object]', '')
+                              if (!speedtestServerFilter.includes(sk)) return false
+                            }
                             if (speedtestBelowSla) {
                               const dFail = planDown > 0 && (r.download_mbps ?? 0) < planDown * sla
                               const uFail = planUp   > 0 && (r.upload_mbps   ?? 0) < planUp   * sla
                               if (!dFail && !uFail) return false
                             }
-                            if (speedtestViaFilter && (r.via ?? 'direct') !== speedtestViaFilter) return false
                             if (speedtestSearch) {
                               const s = speedtestSearch.toLowerCase()
                               return (r.server_name ?? r.server_host ?? '').toLowerCase().includes(s) ||
@@ -1393,21 +2563,14 @@ export default function Reports() {
                             const uFail = planUp   > 0 && (r.upload_mbps   ?? 0) < planUp   * sla
                             return (
                             <tr key={i} className={`border-b border-[#1a1a30] hover:bg-[#15151f] ${dFail || uFail ? 'bg-red-950/20' : ''}`}>
-                              <td className="px-3 py-1.5">
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                  (r.via ?? 'direct') === 'vpn'
-                                    ? 'bg-violet-500/15 text-violet-400'
-                                    : 'bg-slate-500/15 text-slate-400'
-                                }`}>{r.via ?? 'direct'}</span>
-                              </td>
                               <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{fmtDate(r.ts)}</td>
                               <td className={`px-3 py-1.5 text-right font-medium ${downColor(r.download_mbps ?? 0)}`}>
                                 {r.download_mbps ?? '—'} Mbps
-                                {planDown > 0 && r.download_mbps != null && (r.via ?? 'direct') !== 'vpn' && <span className="text-[9px] text-slate-600 ml-1">({Math.round((r.download_mbps / planDown) * 100)}%)</span>}
+                                {planDown > 0 && r.download_mbps != null && <span className="text-[9px] text-slate-600 ml-1">({Math.round((r.download_mbps / planDown) * 100)}%)</span>}
                               </td>
                               <td className={`px-3 py-1.5 text-right font-medium ${upColor(r.upload_mbps ?? 0)}`}>
                                 {r.upload_mbps ?? '—'} Mbps
-                                {planUp > 0 && r.upload_mbps != null && (r.via ?? 'direct') !== 'vpn' && <span className="text-[9px] text-slate-600 ml-1">({Math.round((r.upload_mbps / planUp) * 100)}%)</span>}
+                                {planUp > 0 && r.upload_mbps != null && <span className="text-[9px] text-slate-600 ml-1">({Math.round((r.upload_mbps / planUp) * 100)}%)</span>}
                               </td>
                               <td className="px-3 py-1.5 text-right text-violet-400">{r.ping_ms ?? '—'} ms</td>
                               <td className="px-3 py-1.5 text-slate-400 max-w-[140px] truncate">{r.client_isp ?? '—'}</td>
@@ -1420,21 +2583,70 @@ export default function Reports() {
                       </table>
                     </div>
                   </div>
+                  )}
+
+                  {/* VPN Speed Test History */}
+                  {vpnRows.length > 0 && (
+                  <div className="bg-[#0a0a18] border border-violet-500/20 rounded-xl overflow-hidden">
+                    <div className="flex items-center gap-2 px-4 py-2.5 border-b border-violet-500/15">
+                      <span className="w-2 h-2 rounded-full bg-violet-500 inline-block" />
+                      <p className="text-xs font-semibold text-violet-300">VPN Speed Test History</p>
+                      <span className="text-[10px] text-violet-600">{vpnRows.length} test{vpnRows.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="overflow-x-auto max-h-72 overflow-y-auto text-[11px]">
+                      <table className="w-full min-w-[560px]">
+                        <thead className="sticky top-0 bg-[#0a0a18]">
+                          <tr className="border-b border-violet-500/15">
+                            <th className="px-3 py-2 text-left text-slate-400">Time</th>
+                            <th className="px-3 py-2 text-right text-violet-400/70">↓ Down</th>
+                            <th className="px-3 py-2 text-right text-violet-400/70">↑ Up</th>
+                            <th className="px-3 py-2 text-right text-slate-400">Ping</th>
+                            <th className="px-3 py-2 text-left text-slate-400">Exit ISP</th>
+                            <th className="px-3 py-2 text-left text-slate-400">Client IP</th>
+                            <th className="px-3 py-2 text-left text-slate-400">Server</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {vpnRows.filter(r => {
+                            if (speedtestSearch) {
+                              const s = speedtestSearch.toLowerCase()
+                              return (r.server_name ?? r.server_host ?? '').toLowerCase().includes(s) ||
+                                     (r.client_isp ?? '').toLowerCase().includes(s) ||
+                                     (r.client_ip  ?? '').toLowerCase().includes(s)
+                            }
+                            return true
+                          }).map((r, i) => (
+                            <tr key={i} className="border-b border-[#1a1a30] hover:bg-violet-950/10">
+                              <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{fmtDate(r.ts)}</td>
+                              <td className="px-3 py-1.5 text-right font-medium text-emerald-400">{r.download_mbps ?? '—'} Mbps</td>
+                              <td className="px-3 py-1.5 text-right font-medium text-sky-400">{r.upload_mbps ?? '—'} Mbps</td>
+                              <td className="px-3 py-1.5 text-right text-violet-400">{r.ping_ms ?? '—'} ms</td>
+                              <td className="px-3 py-1.5 text-violet-400/70 max-w-[140px] truncate">{r.client_isp ?? '—'}</td>
+                              <td className="px-3 py-1.5 text-slate-500 font-mono">{r.client_ip ?? '—'}</td>
+                              <td className="px-3 py-1.5 text-slate-500 truncate max-w-[160px]">{String(r.server_name ?? r.server_host ?? '—').replace(' [object Object]', '')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  )}
                 </>
               )
             })() : (
               <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-12 flex flex-col items-center justify-center gap-3 text-slate-600">
                 <Zap className="w-8 h-8 opacity-30" />
                 <p className="text-sm">No speed tests in this range</p>
-                <button onClick={handleRunSpeedtest} disabled={running}
+                <button onClick={handleRunSpeedtest} disabled={running || runningVpn}
                   className="mt-1 flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30 rounded-lg transition-colors disabled:opacity-40">
                   <Zap className="w-3.5 h-3.5" />
-                  Run First Test
+                  Run Direct Test
                 </button>
               </div>
             )}
           </>
-        )}
+          )
+        })()}
 
         {/* ── ACTIVITY ── */}
         {tab === 'activity' && (

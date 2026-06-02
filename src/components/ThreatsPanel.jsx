@@ -195,7 +195,7 @@ const RISK_FILTERS = ['all', 'critical', 'high', 'medium', 'low', 'none']
 export default function ThreatsPanel({ networkScan, onRefreshThreats }) {
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
-  const devices = networkScan?.devices ?? []
+  const devices = useMemo(() => networkScan?.devices ?? [], [networkScan?.devices])
 
   const devicesWithPorts = useMemo(() => devices
     .map(d => {
@@ -214,7 +214,7 @@ export default function ThreatsPanel({ networkScan, onRefreshThreats }) {
     .sort((a, b) => {
       const diff = (RISK_ORDER[b._worst] ?? 0) - (RISK_ORDER[a._worst] ?? 0)
       return diff !== 0 ? diff : (a.label || a.hostname || a.ip || '').localeCompare(b.label || b.hostname || b.ip || '')
-    }), [devices, filter])
+    }), [devices, filter, search])
 
   const counts = useMemo(() => {
     const c = { all: devices.length }

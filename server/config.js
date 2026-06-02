@@ -34,7 +34,7 @@ export function loadConfig() {
     pi: { host: '', ssh_user: 'ubuntu' },
     services: [],
     threats: { check_cves: true, keywords: [], severity_threshold: 'medium' },
-    schedule: { check_interval_minutes: 5, internet_check_minutes: 5, threat_interval_hours: 6, ping_interval_minutes: 5, speedtest_interval_hours: 1 },
+    schedule: { check_interval_minutes: 5, internet_check_minutes: 5, threat_interval_hours: 6, ping_interval_minutes: 5, speedtest_interval_hours: 1, mtr_baseline_hours: 1, mtr_outage_repeat_minutes: 15 },
     isp: { name: '', connection_type: 'broadband', expected_uptime: 100, account_number: '', support_email: '' },
     ui: { theme: 'starfield' },
   }

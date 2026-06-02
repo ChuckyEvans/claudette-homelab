@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, ChevronDown, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader, Star, MoreHorizontal, Bug, Moon, Skull } from 'lucide-react'
+import { Network, Server, Monitor, Smartphone, Router, AlertCircle, AlertTriangle, Wifi, Search, RefreshCw, ChevronRight, ChevronDown, Globe, Cpu, Hash, Clock, Activity, X, Share2, Layers, LayoutList, Map, Calendar, Tag, Trash2, Pencil, Check, Loader, Star, MoreHorizontal, Bug, Moon, Skull, Flag, Lock } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { deviceThreatLevel } from '../lib/threatMatch.js'
 import { getUIPref, setUIPref } from '../lib/uiPrefs.js'
@@ -39,6 +39,53 @@ function inferDeviceType(d) {
   return null
 }
 
+function parseMtrHops(text) {
+  if (!text) return null
+  const hops = []
+  for (const line of text.split('\n')) {
+    const m = line.match(/^\s*(\d+)\.\|--\s+(\S+)\s+([\d.]+)%\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/)
+    if (m) hops.push({ hop: parseInt(m[1]), host: m[2], loss: parseFloat(m[3]), snt: parseInt(m[4]), avg: parseFloat(m[6]), best: parseFloat(m[7]), wrst: parseFloat(m[8]) })
+  }
+  return hops.length >= 1 ? hops : null
+}
+
+function MtrHopTable({ output }) {
+  const hops = parseMtrHops(output)
+  if (!hops) {
+    return (
+      <pre className="bg-[#080810] border border-[#1a1a30] rounded-xl px-4 py-3 text-[11px] font-mono text-slate-300 overflow-x-auto whitespace-pre leading-relaxed max-h-48 overflow-y-auto">{output}</pre>
+    )
+  }
+  return (
+    <div className="rounded-xl overflow-hidden border border-[#1a1a30]">
+      <table className="w-full text-[11px] font-mono">
+        <thead>
+          <tr className="border-b border-[#1a1a30] bg-[#0a0a1a]">
+            <th className="px-3 py-1.5 text-left text-slate-500 font-medium">#</th>
+            <th className="px-3 py-1.5 text-left text-slate-500 font-medium">IP / Host</th>
+            <th className="px-3 py-1.5 text-right text-slate-500 font-medium">Loss</th>
+            <th className="px-3 py-1.5 text-right text-slate-500 font-medium">Avg ms</th>
+            <th className="px-3 py-1.5 text-right text-slate-500 font-medium">Best</th>
+            <th className="px-3 py-1.5 text-right text-slate-500 font-medium">Worst</th>
+          </tr>
+        </thead>
+        <tbody>
+          {hops.map((h, i) => (
+            <tr key={h.hop} className="border-b border-[#1a1a30] last:border-0 bg-[#080810] hover:bg-[#0d0d20] transition-colors">
+              <td className="px-3 py-1.5 text-slate-600">{h.hop}</td>
+              <td className={`px-3 py-1.5 ${i === hops.length - 1 ? 'text-emerald-400 font-semibold' : 'text-slate-300'}`}>{h.host}</td>
+              <td className={`px-3 py-1.5 text-right ${h.loss > 0 ? 'text-red-400' : 'text-slate-500'}`}>{h.loss.toFixed(1)}%</td>
+              <td className="px-3 py-1.5 text-right text-sky-300">{h.avg.toFixed(1)}</td>
+              <td className="px-3 py-1.5 text-right text-emerald-400">{h.best.toFixed(1)}</td>
+              <td className="px-3 py-1.5 text-right text-amber-400">{h.wrst.toFixed(1)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function guessIcon(device) {
   const v = (device.vendor ?? '').toLowerCase()
   const h = (device.hostname ?? '').toLowerCase()
@@ -68,7 +115,11 @@ function sortDevices(arr) {
     const favA = a.favorited ? 0 : 1
     const favB = b.favorited ? 0 : 1
     if (favA !== favB) return favA - favB
-    // 2. Dormant last (within non-favorites)
+    // 2. Pests (flagged) near the top — after favorites, before everything else
+    const pestA = a.flagged ? 0 : 1
+    const pestB = b.flagged ? 0 : 1
+    if (pestA !== pestB) return pestA - pestB
+    // 3. Dormant last (within non-favorites)
     const dorA = a.dormant ? 1 : 0
     const dorB = b.dormant ? 1 : 0
     if (dorA !== dorB) return dorA - dorB
@@ -97,17 +148,67 @@ function offlineBadge(d, dormantAfterDays, skullAfterDays) {
   return null
 }
 
+// ── Device filter multi-select dropdown ───────────────────────────────────────
+function DeviceFilterDropdown({ options, selected, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  function toggle(v) {
+    const s = new Set(selected)
+    s.has(v) ? s.delete(v) : s.add(v)
+    onChange([...s])
+  }
+  const count = selected.length
+  const label = count === 0 ? 'All devices' : options.filter(o => selected.includes(o.value)).map(o => o.short ?? o.label).join(', ')
+  return (
+    <div ref={ref} className="relative w-full">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={`w-full flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+          count > 0
+            ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300'
+            : 'bg-[#0f0f20] border-[#1a1a30] text-slate-300 hover:text-slate-100'
+        }`}
+      >
+        <span className="truncate">{label}</span>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {count > 0 && <span className="bg-indigo-500/40 text-indigo-200 rounded px-1 text-[10px]">{count}</span>}
+          {count > 0 && <button onClick={e => { e.stopPropagation(); onChange([]) }} className="text-indigo-400 hover:text-indigo-200"><X className="w-3 h-3" /></button>}
+          <ChevronDown className="w-3 h-3 opacity-60" />
+        </div>
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-50 bg-[#0d0d20] border border-[#1a1a35] rounded-xl shadow-2xl w-full min-w-[200px]">
+          <div className="p-2 space-y-0.5">
+            {options.map(opt => (
+              <label key={opt.value} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer">
+                <input type="checkbox" checked={selected.includes(opt.value)} onChange={() => toggle(opt.value)} className="w-3.5 h-3.5 accent-indigo-500" />
+                <span className="text-xs text-slate-300 truncate">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Device Tree (left sidebar) ────────────────────────────────────────────────
-function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = {}, subnets = [], threatMap = {}, myIp = null, forcedFilter = null, onDeviceUpdated, dormantAfterDays = 3, skullAfterDays = 7 }) {
+function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = {}, subnets = [], threatMap = {}, myIp = null, forcedFilter = null, onDeviceUpdated, dormantAfterDays = 3, skullAfterDays = 7, allFlags = [] }) {
   const [filter, setFilter] = useState('')
   const [collapsed, setCollapsed] = useState({})
-  const [activeSubnet, setActiveSubnet] = useState(null)
+  const [activeFilters, setActiveFilters] = useState([])
   const [menuIp, setMenuIp] = useState(null)
   const [, setTick] = useState(0)
 
   // Sync forced filter from parent (rescan scope dropdown)
   useEffect(() => {
-    if (forcedFilter !== undefined) setActiveSubnet(forcedFilter)
+    if (forcedFilter !== undefined) setActiveFilters(forcedFilter ? [forcedFilter] : [])
   }, [forcedFilter])
 
   useEffect(() => {
@@ -124,18 +225,17 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
 
   const useGroups = subnets.length > 1
 
-  // When a specific subnet is selected, filter to just that subnet (flat list)
-  const displayDevices = activeSubnet === 'favorites'
-    ? visible.filter(d => d.favorited)
-    : activeSubnet === 'flagged'
-      ? visible.filter(d => d.flagged)
-      : activeSubnet === 'dormant'
-        ? visible.filter(d => d.dormant)
-      : activeSubnet
-        ? visible.filter(d => ipInSubnet(d.ip, activeSubnet))
-        : visible
+  // Multi-filter: device matches if it satisfies ANY selected filter (OR logic)
+  const displayDevices = activeFilters.length === 0
+    ? visible
+    : visible.filter(d => activeFilters.some(f =>
+        f === 'favorites' ? d.favorited
+        : f === 'flagged'   ? d.flagged
+        : f === 'dormant'   ? d.dormant
+        : ipInSubnet(d.ip, f)
+      ))
 
-  const groups = useGroups && !activeSubnet ? (() => {
+  const groups = useGroups && activeFilters.length === 0 ? (() => {
     const assigned = new Set()
     const result = subnets.map(subnet => {
       const devs = visible.filter(d => ipInSubnet(d.ip, subnet))
@@ -163,6 +263,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
       d.mac ? `MAC: ${d.mac}` : null,
       d.vendor ? `Vendor: ${d.vendor}` : null,
       d.type ? `Type: ${d.type}` : null,
+      d.flagged ? 'Flagged as pest' : null,
       openPorts.length > 0 ? `Open ports: ${openPorts.length}` : null,
       d.lastSeen ? `Last seen: ${relTime(d.lastSeen)}` : null,
     ].filter(Boolean).join(' · ')
@@ -177,12 +278,15 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
         >
           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${d.status === 'online' ? 'bg-emerald-400' : d.status === 'filtered' ? 'bg-orange-400' : badge === 'skull' ? 'bg-red-900/60' : badge === 'moon' ? 'bg-slate-700' : 'bg-slate-600'}`}
             title={d.status === 'online' ? 'Online' : d.status === 'filtered' ? 'Filtered — ping blocked but ports respond' : badge === 'skull' ? 'Unreachable for an extended period' : badge === 'moon' ? 'Dormant' : 'Offline'} />
-          <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-indigo-400' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} />
+          <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-indigo-400' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} title={inferDeviceType(d) ?? 'Unknown device type'} />
           <div className="flex-1 min-w-0">
             <p className={`text-xs font-medium font-mono truncate flex items-center gap-1 ${isSelected ? 'text-slate-100' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-300'}`}>
-              {d.favorited && <Star  className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" title="Favorited — pinned to top of device list" />}
+              {(d.flags ?? []).map(fk => {
+                const fl = allFlags.find(f => f.key === fk)
+                return fl ? <span key={fk} className="text-[11px] flex-shrink-0" title={fl.label}>{fl.icon || '🏷️'}</span> : null
+              })}
               {badge === 'skull' && <Skull className="w-3 h-3 text-red-500/60 flex-shrink-0" title="Unreachable for an extended period" />}
-              {badge === 'moon'  && <Moon  className="w-3 h-3 text-blue-400/70 flex-shrink-0" fill="currentColor" title="Dormant" />}
+              {badge === 'moon'  && <Moon  className="w-3 h-3 text-blue-400/70 flex-shrink-0" fill="currentColor" title="Dormant — will resume tracking on next ping response" />}
               {d.label ? <span className="font-sans text-indigo-300">{d.label}</span> : d.ip}
               {portScanProgress[d.ip] != null && <Loader className="w-2.5 h-2.5 flex-shrink-0 text-indigo-400 animate-spin" title="Port scan in progress" />}
             </p>
@@ -228,56 +332,33 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
         {/* Inline quick actions */}
         {menuIp === d.ip && (
           <div className="flex flex-wrap items-center gap-1 px-2.5 pb-2 pt-0.5 bg-[#0b0b1e] border-b border-[#1a1a30]">
-            {d.mac && (
-              <button
-                onClick={() => {
-                  api.network.toggleFavorite(d.mac)
-                    .then(({ favorited }) => onDeviceUpdated?.({ ...d, favorited }))
-                    .catch(console.error)
-                  setMenuIp(null)
-                }}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border border-amber-500/20 text-amber-400 hover:bg-amber-500/10 transition-colors"
-              >
-                <Star className="w-3 h-3" fill={d.favorited ? 'currentColor' : 'none'} />
-                {d.favorited ? 'Unfav' : 'Fav'}
-              </button>
-            )}
-            {d.mac && (
-              <button
-                onClick={() => {
-                  api.network.toggleFlagged(d.mac)
-                    .then(({ flagged }) => onDeviceUpdated?.({ ...d, flagged }))
-                    .catch(console.error)
-                  setMenuIp(null)
-                }}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
-                  d.flagged
-                    ? 'border-red-500/40 text-red-400 bg-red-500/10 hover:bg-red-500/20'
-                    : 'border-red-500/20 text-red-400 hover:bg-red-500/10'
-                }`}
-              >
-                <Bug className="w-3 h-3" />
-                {d.flagged ? 'Unflag' : 'Flag pest'}
-              </button>
-            )}
-            {d.mac && (
-              <button
-                onClick={() => {
-                  api.network.toggleDormant(d.mac)
-                    .then(({ dormant }) => onDeviceUpdated?.({ ...d, dormant }))
-                    .catch(console.error)
-                  setMenuIp(null)
-                }}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
-                  d.dormant
-                    ? 'border-blue-500/40 text-blue-400 bg-blue-500/10 hover:bg-blue-500/20'
-                    : 'border-blue-500/20 text-blue-400/70 hover:bg-blue-500/10'
-                }`}
-              >
-                <Moon className="w-3 h-3" fill={d.dormant ? 'currentColor' : 'none'} />
-                {d.dormant ? 'Wake device' : 'Mark dormant'}
-              </button>
-            )}
+            {d.mac && allFlags.map(f => {
+                const active = (d.flags ?? []).includes(f.key)
+                return (
+                  <button
+                    key={f.key}
+                    onClick={() => {
+                      api.network.toggleFlag(d.mac, f.key)
+                        .then(({ active: a }) => {
+                          const newFlags = a ? [...(d.flags ?? []), f.key] : (d.flags ?? []).filter(k => k !== f.key)
+                          onDeviceUpdated?.({ ...d, flags: newFlags,
+                            favorited: newFlags.includes('favorite'),
+                            flagged: newFlags.includes('pest'),
+                            dormant: newFlags.includes('dormant') })
+                        })
+                        .catch(console.error)
+                      setMenuIp(null)
+                    }}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
+                      active ? 'border-indigo-500/40 text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20'
+                             : 'border-slate-600/30 text-slate-400 hover:bg-white/5'
+                    }`}
+                  >
+                    {f.icon && <span className="text-[11px]">{f.icon}</span>}
+                    {active ? `Remove ${f.label}` : f.label}
+                  </button>
+                )
+              })}
             <button
               onClick={() => {
                 const key = d.mac || d.ip
@@ -333,28 +414,24 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
         </p>
       </div>
 
-      {/* Subnet / Favorites filter dropdown */}
+      {/* Device filter multi-select dropdown */}
       {(useGroups || visible.some(d => d.favorited) || visible.some(d => d.flagged) || visible.some(d => d.dormant)) && (
         <div className="px-3 pb-2.5 border-b border-[#1a1a30]">
-          <select
-            value={activeSubnet ?? ''}
-            onChange={e => setActiveSubnet(e.target.value || null)}
-            className="w-full bg-[#0f0f20] border border-[#1a1a30] rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500/50 cursor-pointer"
-          >
-            <option value="">All ({visible.length})</option>
-            <option value="favorites">★ Favorites ({visible.filter(d => d.favorited).length})</option>
-            {visible.some(d => d.flagged)  && <option value="flagged">🐞 Pests ({visible.filter(d => d.flagged).length})</option>}
-            {visible.some(d => d.dormant)  && <option value="dormant">🌙 Dormant ({visible.filter(d => d.dormant).length})</option>}
-            {subnets.map(s => {
-              const count = visible.filter(d => ipInSubnet(d.ip, s)).length
-              return <option key={s} value={s}>{s}  ({count} devices)</option>
-            })}
-          </select>
+          <DeviceFilterDropdown
+            selected={activeFilters}
+            onChange={setActiveFilters}
+            options={[
+              { value: 'favorites', label: `★ Favorites (${visible.filter(d => d.favorited).length})`, short: '★ Favs' },
+              ...(visible.some(d => d.flagged)  ? [{ value: 'flagged', label: `🐞 Pests (${visible.filter(d => d.flagged).length})`,   short: '🐞 Pests'   }] : []),
+              ...(visible.some(d => d.dormant)  ? [{ value: 'dormant', label: `🌙 Dormant (${visible.filter(d => d.dormant).length})`, short: '🌙 Dormant' }] : []),
+              ...subnets.map(s => ({ value: s, label: `${s} (${visible.filter(d => ipInSubnet(d.ip, s)).length})`, short: s })),
+            ]}
+          />
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto py-1">
-        {useGroups && !activeSubnet ? (
+        {useGroups && activeFilters.length === 0 ? (
           groups.map(({ subnet, devices: groupDevices }) => {
             if (groupDevices.length === 0) return null
             const isCollapsed = !!collapsed[subnet]
@@ -363,11 +440,11 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
               <div key={subnet}>
                 <button
                   onClick={() => setCollapsed(p => ({ ...p, [subnet]: !p[subnet] }))}
-                  className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left hover:bg-white/[0.02] border-b border-t border-[#1a1a30] bg-[#0a0a18]"
+                  className="w-full flex items-center gap-1.5 px-3 py-2 text-left hover:bg-white/5 border-b border-t border-indigo-500/20 bg-[#0e0e20]"
                 >
-                  <ChevronRight className={`w-3 h-3 text-slate-500 transition-transform flex-shrink-0 ${!isCollapsed ? 'rotate-90' : ''}`} />
-                  <span className="text-[10px] font-mono text-indigo-400/70 flex-1 truncate">{subnet}</span>
-                  <span className="text-[10px] text-slate-400">{online}/{groupDevices.length}</span>
+                  <ChevronRight className={`w-3.5 h-3.5 text-indigo-400/70 transition-transform flex-shrink-0 ${!isCollapsed ? 'rotate-90' : ''}`} />
+                  <span className="text-xs font-bold font-mono text-indigo-300 flex-1 truncate">{subnet}</span>
+                  <span className="text-[11px] font-semibold text-slate-400">{online}/{groupDevices.length}</span>
                 </button>
                 {!isCollapsed && sortDevices(groupDevices).map(renderDevice)}
               </div>
@@ -428,7 +505,7 @@ function StatusPill({ icon: Icon, colorClass, label, desc }) {
   )
 }
 
-function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress = {}, dormantAfterDays = 3, skullAfterDays = 7 }) {
+function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress = {}, dormantAfterDays = 3, skullAfterDays = 7, allFlags = [] }) {
   const [scanData, setScanData]     = useState(null)
   const [scanning, setScanning]     = useState(false)
   const [scanError, setScanError]   = useState(null)
@@ -436,6 +513,9 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
   const [labelEdit, setLabelEdit]   = useState(false)
   const [labelValue, setLabelValue] = useState(device.label ?? '')
   const [portSearch, setPortSearch] = useState('')
+  const [mtrOutput, setMtrOutput]   = useState(null)
+  const [mtrRunning, setMtrRunning] = useState(false)
+  const [mtrError, setMtrError]     = useState(null)
   const [, setTick] = useState(0)
   const labelRef = useRef(null)
 
@@ -459,7 +539,7 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
   const livePercent = portScanProgress[device.ip] ?? null
 
   // Sync label value when device prop changes (e.g. different device selected)
-  useEffect(() => { setLabelValue(device.label ?? ''); setLabelEdit(false) }, [device.mac])
+  useEffect(() => { setLabelValue(device.label ?? ''); setLabelEdit(false); setMtrOutput(null); setMtrError(null) }, [device.mac, device.label])
 
   useEffect(() => { if (labelEdit && labelRef.current) labelRef.current.focus() }, [labelEdit])
 
@@ -484,6 +564,18 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
       if (!err.message?.includes('cancel')) setScanError(err.message)
     } finally {
       setScanning(false)
+    }
+  }
+
+  const handleTraceroute = async () => {
+    setMtrRunning(true); setMtrError(null); setMtrOutput(null)
+    try {
+      const data = await api.network.traceroute(device.ip)
+      setMtrOutput(data.output)
+    } catch (e) {
+      setMtrError(e.message || 'Traceroute failed')
+    } finally {
+      setMtrRunning(false)
     }
   }
 
@@ -534,42 +626,7 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
           <p className="text-2xl font-bold text-indigo-400">{openPorts.length}</p>
           <p className="text-xs text-slate-400">open ports</p>
         </div>
-        <button
-          onClick={async () => {
-            if (!device.mac) return
-            try {
-              const { favorited } = await api.network.toggleFavorite(device.mac)
-              onDeviceUpdated?.({ ...device, favorited })
-            } catch (err) { console.error('Failed to toggle favorite', err) }
-          }}
-          disabled={!device.mac}
-          title={device.favorited ? 'Remove from favorites' : 'Add to favorites'}
-          className={`p-2 border rounded-lg transition-colors flex-shrink-0 ${
-            device.favorited
-              ? 'bg-amber-500/15 border-amber-500/40 text-amber-400 hover:bg-amber-500/25'
-              : 'bg-[#0f0f1e] border-[#1a1a30] hover:border-amber-500/30 text-slate-500 hover:text-amber-400'
-          }`}
-        >
-          <Star className="w-4 h-4" fill={device.favorited ? 'currentColor' : 'none'} />
-        </button>
-        <button
-          onClick={async () => {
-            if (!device.mac) return
-            try {
-              const { flagged } = await api.network.toggleFlagged(device.mac)
-              onDeviceUpdated?.({ ...device, flagged })
-            } catch (err) { console.error('Failed to toggle pest flag', err) }
-          }}
-          disabled={!device.mac}
-          title={device.flagged ? 'Remove pest flag' : 'Flag as pest'}
-          className={`p-2 border rounded-lg transition-colors flex-shrink-0 ${
-            device.flagged
-              ? 'bg-red-500/15 border-red-500/40 text-red-400 hover:bg-red-500/25'
-              : 'bg-[#0f0f1e] border-[#1a1a30] hover:border-red-500/30 text-slate-500 hover:text-red-400'
-          }`}
-        >
-          <Bug className="w-4 h-4" />
-        </button>
+
         <button
           onClick={() => {
             const key = device.mac || device.ip
@@ -642,12 +699,12 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
         else
           pills.push(<StatusPill key="offline" icon={Activity}       colorClass="bg-slate-700/20 border-slate-600/20 text-slate-500"        label="Offline"     desc="Did not respond to the last ping — may be powered off or temporarily unreachable" />)
         // User-applied flags
-        if (device.favorited)
-          pills.push(<StatusPill key="fav"     icon={Star}           colorClass="bg-amber-500/10 border-amber-500/20 text-amber-400"        label="Favorited"   desc="Pinned to the top of the device list for quick access" />)
-        if (device.flagged)
-          pills.push(<StatusPill key="pest"    icon={Bug}            colorClass="bg-red-500/10 border-red-500/20 text-red-400"              label="Pest flagged" desc="Marked as suspicious or unwanted — review this device's traffic and open ports" />)
-        if (device.dormant && badge !== 'skull')
-          pills.push(<StatusPill key="dorm"    icon={Moon}           colorClass="bg-blue-500/10 border-blue-500/20 text-blue-400"           label="Dormant"     desc="Manually marked as dormant — will resume normal status when next seen online" />)
+        ;(device.flags ?? []).forEach(fk => {
+          const fl = allFlags.find(f => f.key === fk)
+          if (!fl) return
+          if (fl.key === 'dormant' && badge === 'skull') return
+          pills.push(<StatusPill key={fk} icon={Flag} colorClass="bg-indigo-500/10 border-indigo-500/20 text-indigo-300" label={`${fl.icon ?? ''} ${fl.label}`.trim()} desc={fl.description || `Device is flagged as ${fl.label}`} />)
+        })
         if (isMe)
           pills.push(<StatusPill key="me"      icon={Monitor}        colorClass="bg-cyan-500/10 border-cyan-500/20 text-cyan-400"           label="My device"   desc="Marked as your machine — highlighted in cyan in the device list" />)
         if (device.hostnameStale && device.hostname)
@@ -698,6 +755,45 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
         </div>
       )}
 
+      {/* Flags */}
+      {device.mac && allFlags.length > 0 && (
+        <div className="px-6 py-3 border-t border-[#1a1a30]">
+          <div className="flex items-center gap-2 mb-2">
+            <Flag className="w-3.5 h-3.5 text-slate-500" />
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Flags</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {allFlags.map(f => {
+              const active = (device.flags ?? []).includes(f.key)
+              return (
+                <button
+                  key={f.key}
+                  onClick={async () => {
+                    try {
+                      const { active: a } = await api.network.toggleFlag(device.mac, f.key)
+                      const newFlags = a ? [...(device.flags ?? []), f.key] : (device.flags ?? []).filter(k => k !== f.key)
+                      onDeviceUpdated?.({ ...device, flags: newFlags,
+                        favorited: newFlags.includes('favorite'),
+                        flagged:   newFlags.includes('pest'),
+                        dormant:   newFlags.includes('dormant') })
+                    } catch (err) { console.error('toggleFlag failed', err) }
+                  }}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-colors ${
+                    active
+                      ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/25'
+                      : 'bg-[#0f0f1e] border-[#1a1a30] text-slate-500 hover:border-indigo-500/30 hover:text-slate-300'
+                  }`}
+                >
+                  {f.icon && <span className="text-sm">{f.icon}</span>}
+                  <span>{f.label}</span>
+                  {f.isSystem && <Lock className="w-2.5 h-2.5 opacity-40" />}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Network Path */}
       {d.traceroute?.length > 0 && (
         <div className="px-6 py-3 border-t border-[#1a1a30]">
@@ -716,6 +812,32 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
           </div>
         </div>
       )}
+
+      {/* Traceroute */}
+      <div className="px-6 py-3 border-t border-[#1a1a30]">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Share2 className="w-3.5 h-3.5 text-slate-500" />
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Traceroute to {device.ip}</span>
+          </div>
+          <button
+            onClick={handleTraceroute}
+            disabled={mtrRunning}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 text-sky-400 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-wait"
+          >
+            <Loader className={`w-3 h-3 ${mtrRunning ? 'animate-spin' : 'hidden'}`} />
+            <Activity className={`w-3 h-3 ${mtrRunning ? 'hidden' : ''}`} />
+            {mtrRunning ? 'Running…' : 'Run Traceroute'}
+          </button>
+        </div>
+        {mtrError && (
+          <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{mtrError}</p>
+        )}
+        {mtrOutput && <MtrHopTable output={mtrOutput} />}
+        {!mtrOutput && !mtrError && !mtrRunning && (
+          <p className="text-xs text-slate-600 italic">Click &ldquo;Run Traceroute&rdquo; to probe the network path from the Pi to this device</p>
+        )}
+      </div>
 
       {/* Ports */}
       <div className="flex-1 mt-2">
@@ -1179,6 +1301,7 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
   const [configSubnets, setConfigSubnets] = useState([])
   const [dormantAfterDays, setDormantAfterDays] = useState(3)
   const [skullAfterDays,   setSkullAfterDays]   = useState(7)
+  const [allFlags,         setAllFlags]         = useState([])
   const [myIp, setMyIp] = useState(null)
   const [scanDropdownOpen, setScanDropdownOpen] = useState(false)
   const [scanScopeHint, setScanScopeHint] = useState(null)
@@ -1263,6 +1386,7 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
       setDormantAfterDays(cfg?.network?.dormant_after_days ?? 3)
       setSkullAfterDays(cfg?.network?.skull_after_days   ?? 7)
     }).catch(() => {})
+    api.network.flags.getAll().then(setAllFlags).catch(() => {})
   }, [])
 
   // Use scan-time subnets when available (most accurate), fall back to config
@@ -1288,7 +1412,7 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
     }
     // Auto-select first device when none is selected
     if (!selected && devices.length > 0) setSelected(devices[0])
-  }, [preSelectedIp, devices])
+  }, [preSelectedIp, devices, selected])
 
   // Keep selected in sync if devices refresh
   const selectedDevice = selected ? (devices.find(d => d.ip === selected.ip) ?? selected) : null
@@ -1510,6 +1634,7 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
               onDeviceUpdated={onDeviceUpdated}
               dormantAfterDays={dormantAfterDays}
               skullAfterDays={skullAfterDays}
+              allFlags={allFlags}
             />
           )}
           {/* Drag handle */}
@@ -1523,7 +1648,7 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
         {/* Right detail */}
         <div className="flex-1 overflow-hidden border-l border-[#1a1a30]">
           {selectedDevice
-            ? <DeviceDetail key={selectedDevice.ip} device={selectedDevice} knownDevices={devices} onDeviceUpdated={onDeviceUpdated} portScanProgress={portScanProgress} dormantAfterDays={dormantAfterDays} skullAfterDays={skullAfterDays} />
+            ? <DeviceDetail key={selectedDevice.ip} device={selectedDevice} knownDevices={devices} onDeviceUpdated={onDeviceUpdated} portScanProgress={portScanProgress} dormantAfterDays={dormantAfterDays} skullAfterDays={skullAfterDays} allFlags={allFlags} />
             : <EmptyDetail />
           }
         </div>

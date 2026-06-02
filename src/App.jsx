@@ -3,7 +3,7 @@ import Layout from './components/Layout.jsx'
 import AuthModal from './components/AuthModal.jsx'
 import TopProgressBar from './components/TopProgressBar.jsx'
 import { createEventSource, api } from './lib/api.js'
-import { applyTheme } from './lib/themes.js'
+import { applyTheme, loadBgDim, loadTheme } from './lib/themes.js'
 
 // Page-level components loaded on-demand to keep the initial bundle small
 const Dashboard    = lazy(() => import('./components/Dashboard.jsx'))
@@ -17,10 +17,11 @@ const Settings      = lazy(() => import('./components/Settings.jsx'))
 const AboutPage     = lazy(() => import('./components/AboutPage.jsx'))
 const Reports       = lazy(() => import('./components/Reports.jsx'))
 
-// Apply stored theme immediately — before any React render — to avoid flash
+// Apply stored theme + bg brightness immediately — before any React render — to avoid flash
 ;(function () {
-  const t = localStorage.getItem('claudette:theme')
+  const t = loadTheme()
   if (t) applyTheme(t)
+  loadBgDim()
 })()
 
 // Pop-up corner toasts — only shows notifications that are still "visible" (faded out after 5 s)
@@ -300,7 +301,7 @@ export default function App() {
       }
     })
     return () => es.close()
-  }, [auth.authenticated])
+  }, [auth.authenticated, addToast])
 
   // Hourglass cursor site-wide while scanning
   useEffect(() => {
@@ -359,13 +360,19 @@ export default function App() {
   const Page = pages[page] || Dashboard
 
   const [pageLoading, setPageLoading] = useState(false)
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  const [pendingPageNav, setPendingPageNav] = useState(null)  // page string to navigate to
   const navigateTo = useCallback((newPage) => {
     if (newPage === page) return
+    if (page === 'settings' && settingsDirty) {
+      setPendingPageNav(newPage)
+      return
+    }
     setPageLoading(true)
     setPage(newPage)
     // One frame is enough for the new component to mount and take over
     requestAnimationFrame(() => setTimeout(() => setPageLoading(false), 120))
-  }, [page])
+  }, [page, settingsDirty])
 
   return (
     <>
@@ -456,6 +463,7 @@ export default function App() {
             onCheckUpdates={checkForUpdates}
             checkingUpdate={checkingUpdate}
             configStatus={configStatus}
+            onDirtyChange={setSettingsDirty}
           />
         </Suspense>
       </Layout>
@@ -478,6 +486,24 @@ export default function App() {
             >
               Dismiss
             </button>
+          </div>
+        </div>
+      )}
+      {pendingPageNav && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#0d0d1e] border border-[#1a1a30] rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <h2 className="text-base font-semibold text-white mb-1.5">Unsaved Changes</h2>
+            <p className="text-sm text-slate-400 mb-6">You have unsaved changes in Settings. Leave without saving?</p>
+            <div className="flex items-center gap-2 justify-end">
+              <button onClick={() => setPendingPageNav(null)}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 border border-[#1a1a30] hover:border-[#2a2a45] rounded-lg transition-colors">
+                Stay in Settings
+              </button>
+              <button onClick={() => { setSettingsDirty(false); const p = pendingPageNav; setPendingPageNav(null); navigateTo(p) }}
+                className="px-4 py-1.5 text-xs bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/25 rounded-lg transition-colors">
+                Leave without saving
+              </button>
+            </div>
           </div>
         </div>
       )}

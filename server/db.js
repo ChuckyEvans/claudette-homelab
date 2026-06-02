@@ -54,6 +54,11 @@ export function getDb() {
       label      TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id         TEXT PRIMARY KEY,
+      applied_at INTEGER NOT NULL
+    );
   `)
 
   // ── Devices table: MAC is the primary key ────────────────────────────────
@@ -154,6 +159,73 @@ export function getDb() {
     }
   }
 
+  // ── Flags catalogue + device-flag junction table ────────────────────────────
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS flags (
+      key        TEXT PRIMARY KEY,
+      label      TEXT    NOT NULL,
+      emoji      TEXT,
+      description TEXT,
+      type       TEXT    NOT NULL DEFAULT 'custom',
+      is_system  INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+
+    INSERT OR IGNORE INTO flags (key, label, emoji, type, is_system, sort_order) VALUES
+      ('favorite', 'Favorite', '★',  'system', 1, 20),
+      ('pest',     'Pest',     '🐞', 'system', 1, 10),
+      ('dormant',  'Dormant',  '🌙', 'system', 1, 30);
+
+    CREATE TABLE IF NOT EXISTS device_flags (
+      mac      TEXT    NOT NULL,
+      flag_key TEXT    NOT NULL REFERENCES flags(key) ON DELETE CASCADE,
+      set_at   INTEGER NOT NULL,
+      PRIMARY KEY (mac, flag_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_device_flags_mac  ON device_flags (mac);
+    CREATE INDEX IF NOT EXISTS idx_device_flags_flag ON device_flags (flag_key);
+  `)
+
+  // Column migrations for flags table (existing installs without type/is_system)
+  const flagsCols = _db.all('PRAGMA table_info(flags)').map(c => c.name)
+  if (!flagsCols.includes('type')) {
+    _db.exec(`ALTER TABLE flags ADD COLUMN type TEXT NOT NULL DEFAULT 'custom'`)
+    _db.exec(`UPDATE flags SET type = 'system' WHERE key IN ('favorite','pest','dormant')`)
+    console.log('[db] Added type column to flags.')
+  }
+  if (!flagsCols.includes('is_system')) {
+    _db.exec(`ALTER TABLE flags ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0`)
+    _db.exec(`UPDATE flags SET is_system = 1 WHERE key IN ('favorite','pest','dormant')`)
+    console.log('[db] Added is_system column to flags.')
+  }
+
+  // One-time migration: correct pest/favorite sort_order so pest ranks first
+  const soMigrated = _db.get("SELECT id FROM schema_migrations WHERE id = 'swap_pest_favorite_sort_order'")
+  if (!soMigrated) {
+    _db.exec(`UPDATE flags SET sort_order = 10 WHERE key = 'pest' AND sort_order < 15`)
+    _db.exec(`UPDATE flags SET sort_order = 20 WHERE key = 'favorite' AND sort_order <= 10`)
+    const now2 = Date.now()
+    _db.run("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)", ['swap_pest_favorite_sort_order', now2])
+    console.log('[db] Updated pest/favorite sort_order.')
+  }
+
+  // One-time migration: copy boolean flag columns → device_flags
+  const dfMigrated = _db.get("SELECT id FROM schema_migrations WHERE id = 'boolean_flags_to_device_flags'")
+  if (!dfMigrated) {
+    const now = Date.now()
+    _db.exec(`
+      INSERT OR IGNORE INTO device_flags (mac, flag_key, set_at)
+        SELECT mac, 'favorite', ${now} FROM devices WHERE favorited = 1;
+      INSERT OR IGNORE INTO device_flags (mac, flag_key, set_at)
+        SELECT mac, 'pest', ${now} FROM devices WHERE flagged = 1;
+      INSERT OR IGNORE INTO device_flags (mac, flag_key, set_at)
+        SELECT mac, 'dormant', ${now} FROM devices WHERE dormant = 1;
+    `)
+    _db.run("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)", ['boolean_flags_to_device_flags', now])
+    const migrated = _db.get("SELECT COUNT(*) as c FROM device_flags").c
+    if (migrated > 0) console.log(`[db] Migrated ${migrated} device flag(s) to device_flags table.`)
+  }
+
   // Device lifecycle events (online/offline/new device/port discovery)
   _db.exec(`
     CREATE TABLE IF NOT EXISTS device_events (
@@ -201,6 +273,46 @@ export function getDb() {
     console.log('[db] Added via column to speedtest_results.')
   }
 
+  // Outage diagnostics — traceroute + ping detail captured at the moment of internet.down
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS outage_diagnostics (
+      outage_ts   INTEGER PRIMARY KEY,
+      traceroute  TEXT,
+      ping_detail TEXT,
+      gateway     TEXT,
+      outage_type TEXT,
+      captured_at INTEGER NOT NULL
+    );
+  `)
+
+  // VPN exit-node metadata — single row, upserted whenever VPN info is detected
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS vpn_state (
+      id             INTEGER PRIMARY KEY DEFAULT 1,
+      iface          TEXT,
+      client_ip      TEXT,
+      client_isp     TEXT,
+      client_city    TEXT,
+      client_country TEXT,
+      client_lat     REAL,
+      client_lon     REAL,
+      updated_at     INTEGER NOT NULL
+    );
+  `)
+
+  // mtr snapshots — scheduled baselines and outage-repeat traces
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS mtr_snapshots (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts         INTEGER NOT NULL,
+      type       TEXT    NOT NULL DEFAULT 'baseline',
+      outage_ts  INTEGER,
+      output     TEXT,
+      captured_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_mtr_ts ON mtr_snapshots (ts DESC);
+  `)
+
   console.log(`[db] SQLite ready at ${DB_PATH}`)
   return _db
 }
@@ -232,6 +344,27 @@ export function auditDevice(event, mac, ip, hostname, payload = {}) {
     )
   } catch (err) {
     console.error('[auditDevice] write failed:', err.message)
+  }
+}
+
+/** Return the persisted VPN exit-node metadata, or null if never recorded. */
+export function getVpnState() {
+  try { return getDb().get('SELECT * FROM vpn_state WHERE id = 1') ?? null } catch { return null }
+}
+
+/** Persist VPN exit-node metadata (upsert, single row). */
+export function setVpnState(data) {
+  try {
+    getDb().run(
+      `INSERT OR REPLACE INTO vpn_state
+         (id, iface, client_ip, client_isp, client_city, client_country, client_lat, client_lon, updated_at)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [data.iface ?? null, data.client_ip ?? null, data.client_isp ?? null,
+       data.client_city ?? null, data.client_country ?? null,
+       data.client_lat ?? null, data.client_lon ?? null, Date.now()]
+    )
+  } catch (err) {
+    console.error('[vpn_state] write failed:', err.message)
   }
 }
 
@@ -355,28 +488,76 @@ export function touchDeviceStatus(mac, status, latency) {
   }
 }
 
+export function getAllFlags() {
+  return getDb().all('SELECT key, label, emoji, description, type, is_system, sort_order FROM flags ORDER BY sort_order, key')
+    .map(r => ({ key: r.key, label: r.label, icon: r.emoji ?? null, description: r.description, type: r.type, sort_order: r.sort_order, isSystem: r.is_system === 1 }))
+}
+
+export function createFlag({ key, label, icon = null, description = null, sortOrder = 100 }) {
+  if (!key || !/^[a-z0-9_-]{1,32}$/.test(key)) throw new Error('Invalid flag key')
+  getDb().run(
+    `INSERT INTO flags (key, label, emoji, description, type, is_system, sort_order)
+     VALUES (?, ?, ?, ?, 'custom', 0, ?)`,
+    [key, label, icon, description, sortOrder]
+  )
+  const r = getDb().get('SELECT * FROM flags WHERE key = ?', [key])
+  return { key: r.key, label: r.label, icon: r.emoji ?? null, description: r.description, type: r.type, sort_order: r.sort_order, isSystem: r.is_system === 1 }
+}
+
+export function updateFlag(key, { label, icon, description, sortOrder }) {
+  const flag = getDb().get('SELECT is_system FROM flags WHERE key = ?', [key])
+  if (!flag) throw new Error('Flag not found')
+  if (flag.is_system) throw new Error('System flags cannot be modified')
+  const sets = []
+  const vals = []
+  if (label       !== undefined) { sets.push('label = ?');       vals.push(label) }
+  if (icon        !== undefined) { sets.push('emoji = ?');        vals.push(icon) }
+  if (description !== undefined) { sets.push('description = ?'); vals.push(description) }
+  if (sortOrder   !== undefined) { sets.push('sort_order = ?');  vals.push(sortOrder) }
+  if (sets.length === 0) throw new Error('Nothing to update')
+  vals.push(key)
+  getDb().run(`UPDATE flags SET ${sets.join(', ')} WHERE key = ?`, vals)
+  const r = getDb().get('SELECT * FROM flags WHERE key = ?', [key])
+  return { key: r.key, label: r.label, icon: r.emoji ?? null, description: r.description, type: r.type, sort_order: r.sort_order, isSystem: r.is_system === 1 }
+}
+
+export function deleteFlag(key) {
+  const flag = getDb().get('SELECT is_system FROM flags WHERE key = ?', [key])
+  if (!flag) throw new Error('Flag not found')
+  if (flag.is_system) throw new Error('System flags cannot be deleted')
+  // device_flags rows cascade-delete via FK
+  getDb().run('DELETE FROM flags WHERE key = ?', [key])
+}
+
 export function getAllDevices() {
   return getDb().all(`
-    SELECT d.*, dl.label
+    SELECT d.*, dl.label,
+           GROUP_CONCAT(df.flag_key) AS flag_keys
     FROM devices d
     LEFT JOIN device_labels dl ON dl.mac = d.mac
+    LEFT JOIN device_flags  df ON df.mac = d.mac
+    GROUP BY d.mac
     ORDER BY d.ip
-  `).map(r => ({
-    ip: r.ip,
-    mac: r.mac?.startsWith('noMAC:') ? null : r.mac,
-    vendor: r.vendor, hostname: r.hostname, hostnameStale: r.hostname_stale === 1,
-    label: r.label ?? null,
-    status: r.status, firstSeen: r.first_seen, lastSeen: r.last_seen,
-    lastOnline: r.last_online ?? null,
-    updatedAt: r.updated_at ?? null,
-    favorited: r.favorited === 1,
-    flagged:   r.flagged   === 1,
-    dormant:   r.dormant   === 1,
-    latency: r.latency, os: r.os,
-    ports: JSON.parse(r.ports || '[]'),
-    hostScripts: JSON.parse(r.host_scripts || '[]'),
-    traceroute: JSON.parse(r.traceroute || '[]'),
-  }))
+  `).map(r => {
+    const flags = r.flag_keys ? r.flag_keys.split(',') : []
+    return {
+      ip: r.ip,
+      mac: r.mac?.startsWith('noMAC:') ? null : r.mac,
+      vendor: r.vendor, hostname: r.hostname, hostnameStale: r.hostname_stale === 1,
+      label: r.label ?? null,
+      status: r.status, firstSeen: r.first_seen, lastSeen: r.last_seen,
+      lastOnline: r.last_online ?? null,
+      updatedAt: r.updated_at ?? null,
+      flags,
+      favorited: flags.includes('favorite'),
+      flagged:   flags.includes('pest'),
+      dormant:   flags.includes('dormant'),
+      latency: r.latency, os: r.os,
+      ports: JSON.parse(r.ports || '[]'),
+      hostScripts: JSON.parse(r.host_scripts || '[]'),
+      traceroute: JSON.parse(r.traceroute || '[]'),
+    }
+  })
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -413,29 +594,21 @@ export function getDeviceLabel(mac) {
   return getDb().get('SELECT label FROM device_labels WHERE mac = ?', [mac])?.label ?? null
 }
 
-export function toggleFavorite(mac) {
-  getDb().run(
-    'UPDATE devices SET favorited = CASE WHEN favorited = 1 THEN 0 ELSE 1 END WHERE mac = ?',
-    [mac]
-  )
-  return getDb().get('SELECT favorited FROM devices WHERE mac = ?', [mac])?.favorited === 1
+export function toggleDeviceFlag(mac, flagKey) {
+  const db = getDb()
+  const exists = db.get('SELECT 1 FROM device_flags WHERE mac = ? AND flag_key = ?', [mac, flagKey])
+  if (exists) {
+    db.run('DELETE FROM device_flags WHERE mac = ? AND flag_key = ?', [mac, flagKey])
+    return false
+  } else {
+    db.run('INSERT INTO device_flags (mac, flag_key, set_at) VALUES (?, ?, ?)', [mac, flagKey, Date.now()])
+    return true
+  }
 }
 
-export function toggleFlagged(mac) {
-  getDb().run(
-    'UPDATE devices SET flagged = CASE WHEN flagged = 1 THEN 0 ELSE 1 END WHERE mac = ?',
-    [mac]
-  )
-  return getDb().get('SELECT flagged FROM devices WHERE mac = ?', [mac])?.flagged === 1
-}
-
-export function toggleDormant(mac) {
-  getDb().run(
-    'UPDATE devices SET dormant = CASE WHEN dormant = 1 THEN 0 ELSE 1 END WHERE mac = ?',
-    [mac]
-  )
-  return getDb().get('SELECT dormant FROM devices WHERE mac = ?', [mac])?.dormant === 1
-}
+export function toggleFavorite(mac) { return toggleDeviceFlag(mac, 'favorite') }
+export function toggleFlagged(mac)  { return toggleDeviceFlag(mac, 'pest') }
+export function toggleDormant(mac)  { return toggleDeviceFlag(mac, 'dormant') }
 
 /**
  * Auto-dormant devices that have been offline for >= `days` days.
@@ -444,12 +617,15 @@ export function toggleDormant(mac) {
  */
 export function autoDormantStale(days = 3) {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+  const now = Date.now()
   const result = getDb().run(
-    `UPDATE devices SET dormant = 1
-     WHERE dormant = 0
+    `INSERT OR IGNORE INTO device_flags (mac, flag_key, set_at)
+     SELECT mac, 'dormant', ?
+     FROM devices
+     WHERE mac NOT IN (SELECT mac FROM device_flags WHERE flag_key = 'dormant')
        AND status = 'offline'
        AND (last_online IS NOT NULL AND last_online < ? OR last_online IS NULL AND first_seen < ?)`,
-    [cutoff, cutoff]
+    [now, cutoff, cutoff]
   )
   return result.changes ?? 0
 }

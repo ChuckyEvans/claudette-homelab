@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Zap, ChevronRight, Network, Server, Check, X, Info, FileEdit, Lock, Eye, EyeOff, Plus, Clock, Palette, Wifi } from 'lucide-react'
 import { api } from '../lib/api.js'
 import { THEMES, applyTheme } from '../lib/themes.js'
-const claudetteLogo = '/favicon.svg'
+import ClaudetteLogo from './ClaudetteLogo.jsx'
 
 const _STEPS = [
   { label: 'Network' },
@@ -218,7 +218,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
         {/* Header */}
         <div className="px-8 pt-8 pb-0 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2.5">
-            <img src={claudetteLogo} alt="Claudette" className="w-8 h-8" />
+            <ClaudetteLogo className="w-8 h-8" />
             <span className="text-white font-bold tracking-widest text-sm uppercase">Claudette</span>
           </div>
           {step === 0 && (

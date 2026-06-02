@@ -2,7 +2,8 @@ import { Router } from 'express'
 import { execSync, exec } from 'child_process'
 import { NodeSSH } from 'node-ssh'
 import { loadConfig } from '../config.js'
-import { audit } from '../db.js'
+import { audit, getDb, getVpnState, setVpnState } from '../db.js'
+import { getClientMetaVia } from '../utils/speedtest.js'
 
 const router = Router()
 
@@ -136,6 +137,9 @@ let _internetResults   = []
 let _vpnUp             = false
 let _vpnOk             = null
 let _vpnResults        = []
+let _vpnMeta           = null   // cached VPN exit-node metadata
+let _vpnMetaTs         = 0      // timestamp of last successful meta fetch
+const VPN_META_TTL_MS  = 30 * 60 * 1000  // re-fetch at most every 30 min
 
 // Outage-mode: switch to faster polling while internet is down, restore on recovery
 let _outageMode         = false
@@ -143,18 +147,48 @@ let _outagePollId       = null
 let _outageAttemptCount = 0
 let _outageCheckSecs    = 10   // overridden by setOutageCheckSeconds() on startup/config-save
 let _outageBroadcast    = null
+let _outageRepeatMtrId  = null // interval for repeated mtr during an outage
+let _outageTs           = null // timestamp the current outage started
 
 export function setOutageCheckSeconds(n) {
   _outageCheckSecs = Math.max(5, Math.min(300, Number.isFinite(n) ? n : 10))
 }
 
+/** Run a single mtr snapshot and store it in mtr_snapshots. type = 'baseline' | 'outage_repeat' */
+export function runMtrSnapshot(type, outageTsValue = null) {
+  const ts = Date.now()
+  exec('mtr --report --no-dns --report-cycles 5 8.8.8.8 2>&1', { timeout: 120000 }, (err, stdout) => {
+    try {
+      getDb().run(
+        `INSERT INTO mtr_snapshots (ts, type, outage_ts, output, captured_at) VALUES (?, ?, ?, ?, ?)`,
+        [ts, type, outageTsValue, stdout || (err?.message ?? 'mtr unavailable'), Date.now()]
+      )
+      console.log(`[mtr] Snapshot stored (type=${type})`)
+    } catch (e) {
+      console.error('[mtr] store failed:', e.message)
+    }
+  })
+}
+
 function _startOutagePoll() {
   if (_outagePollId) return
   _outageAttemptCount = 0
+  _outageTs = Date.now()
   console.log(`[internet] Outage mode — polling every ${_outageCheckSecs}s until restored`)
   _outagePollId = setInterval(() => {
     checkConnectivity(_outageBroadcast).catch(() => {})
   }, _outageCheckSecs * 1000)
+
+  // Start repeat-mtr if configured
+  const cfg = loadConfig()
+  const repeatMin = cfg?.schedule?.mtr_outage_repeat_minutes ?? 15
+  if (repeatMin > 0) {
+    const repeatMs = repeatMin * 60 * 1000
+    console.log(`[mtr] Outage repeat — running every ${repeatMin}min while down`)
+    _outageRepeatMtrId = setInterval(() => {
+      runMtrSnapshot('outage_repeat', _outageTs)
+    }, repeatMs)
+  }
 }
 
 function _stopOutagePoll() {
@@ -163,8 +197,13 @@ function _stopOutagePoll() {
     _outagePollId = null
     console.log(`[internet] Restored — outage poll stopped after ${_outageAttemptCount} fast attempts`)
   }
+  if (_outageRepeatMtrId) {
+    clearInterval(_outageRepeatMtrId)
+    _outageRepeatMtrId = null
+  }
   _outageMode         = false
   _outageAttemptCount = 0
+  _outageTs           = null
 }
 
 function pingHost(host) {
@@ -248,6 +287,21 @@ async function checkHttpHead(url) {
   }
 }
 
+/** HTTP HEAD check bound to a specific network interface (Linux only, via curl) */
+function checkHttpHeadVia(url, iface) {
+  const start = Date.now()
+  return new Promise(resolve => {
+    exec(
+      `curl --interface ${iface} -s -o /dev/null -w "%{http_code}" --max-time 5 -X HEAD "${url}"`,
+      { timeout: 8000 },
+      (err, stdout) => {
+        const status = parseInt(stdout?.trim())
+        resolve({ host: url, ok: !err && status > 0 && status < 500, ms: Date.now() - start, ts: Date.now() })
+      }
+    )
+  })
+}
+
 export async function checkConnectivity(broadcast) {
   // Keep a broadcast ref so the outage poll can broadcast without an argument
   if (broadcast) _outageBroadcast = broadcast
@@ -268,7 +322,9 @@ export async function checkConnectivity(broadcast) {
   const pingResults = await Promise.all(
     pingHosts.map(h => physIface ? pingHostVia(h, physIface) : pingHost(h))
   )
-  const httpResult  = await checkHttpHead('http://connectivity-check.ubuntu.com')
+  const httpResult  = physIface
+    ? await checkHttpHeadVia('http://connectivity-check.ubuntu.com', physIface)
+    : await checkHttpHead('http://connectivity-check.ubuntu.com')
   _internetResults  = [...pingResults, httpResult]
 
   const ok = _internetResults.some(r => r.ok)
@@ -276,9 +332,26 @@ export async function checkConnectivity(broadcast) {
   if (_vpnUp) {
     _vpnResults = await Promise.all(pingHosts.map(h => pingHostVia(h, VPN_IFACE)))
     _vpnOk = _vpnResults.some(r => r.ok)
+
+    // Fetch VPN exit-node metadata (ISP, exit IP, city) — rate-limited to once per 30 min
+    const now = Date.now()
+    if (!_vpnMeta || (now - _vpnMetaTs) > VPN_META_TTL_MS) {
+      try {
+        const meta = await getClientMetaVia(VPN_IFACE)
+        if (meta?.client_ip) {
+          _vpnMeta = { iface: VPN_IFACE, ...meta, updated_at: now }
+          _vpnMetaTs = now
+          setVpnState(_vpnMeta)
+        }
+      } catch (e) {
+        console.warn('[internet] VPN meta fetch failed:', e.message)
+      }
+    }
   } else {
     _vpnResults = []
     _vpnOk = null
+    // If VPN just went down, keep last known meta but clear in-memory so next up triggers a fresh fetch
+    _vpnMetaTs = 0
   }
 
   // Gateway check for infra vs ISP failure classification
@@ -298,11 +371,31 @@ export async function checkConnectivity(broadcast) {
   const justCameUp   = ok === true  && _outageMode
 
   if (_prevInternetOk !== null && _prevInternetOk !== ok) {
+    const nowTs = Date.now()
     audit(ok ? 'internet.up' : 'internet.down', {
       results:     _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
       outage_type: ok ? null : outageType,
       gateway_ok:  ok ? null : gatewayOk,
     })
+    // Capture diagnostics in the background when going down (traceroute takes time)
+    if (!ok) {
+      const outageTsCapture = nowTs
+      const pingDetail      = _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))
+      const gatewayCapture  = gateway ?? null
+      const typeCapture     = outageType
+      exec('mtr --report --no-dns --report-cycles 5 8.8.8.8 2>&1', { timeout: 120000 }, (err, stdout) => {
+        try {
+          getDb().run(
+            `INSERT OR REPLACE INTO outage_diagnostics (outage_ts, traceroute, ping_detail, gateway, outage_type, captured_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [outageTsCapture, stdout || (err?.message ?? 'traceroute unavailable'),
+             JSON.stringify(pingDetail), gatewayCapture, typeCapture, Date.now()]
+          )
+        } catch (e) {
+          console.error('[outage-diag] store failed:', e.message)
+        }
+      })
+    }
   }
 
   audit('internet.check', {
@@ -310,6 +403,7 @@ export async function checkConnectivity(broadcast) {
     results:          _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
     outage_type:      ok ? null : outageType,
     gateway_ok:       ok ? null : gatewayOk,
+    gateway:          gateway ?? null,
     outage_mode:      _outageMode,
     interval_seconds: _outageMode ? _outageCheckSecs : null,
     attempt_count:    _outageMode ? _outageAttemptCount : null,
@@ -328,22 +422,30 @@ export async function checkConnectivity(broadcast) {
     _stopOutagePoll()
   }
 
-  if (broadcast) broadcast('internet', { results: _internetResults, ok, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults, ts: Date.now() })
+  if (broadcast) broadcast('internet', { results: _internetResults, ok, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults, vpn_meta: _vpnMeta, ts: Date.now() })
   if (broadcast) broadcast('job_done', { job: 'internet', ts: Date.now() })
   return _internetResults
 }
 
 export function getInternetStatus() {
-  return { results: _internetResults, ok: _internetResults.length ? _internetResults.some(r => r.ok) : null, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults }
+  return { results: _internetResults, ok: _internetResults.length ? _internetResults.some(r => r.ok) : null, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults, vpn_meta: _vpnMeta }
 }
 
 router.get('/internet', async (req, res) => {
   try {
     const results = await checkConnectivity(null)
-    res.json({ results, ok: results.some(r => r.ok), ts: Date.now() })
+    res.json({ results, ok: results.some(r => r.ok), vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_meta: _vpnMeta, ts: Date.now() })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+router.get('/vpn-meta', (req, res) => {
+  // Return in-memory cache; if not populated yet, try the DB (e.g. after a server restart)
+  if (!_vpnMeta) {
+    _vpnMeta = getVpnState()
+  }
+  res.json(_vpnMeta ?? null)
 })
 
 router.post('/run', (req, res) => {

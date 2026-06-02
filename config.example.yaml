@@ -45,6 +45,19 @@ isp:
   plan_upload_mbps: 250       # Advertised upload speed (Mbps)
   account_number: ""          # Optional account / contract number for ISP correspondence
   support_email: ""           # Optional ISP support contact
+  sla_url: ""                 # URL to your ISP's SLA document (shown in reports)
+  sla_notes: ""               # Free-text SLA notes (shown in reports)
+
+infra:
+  name: ""                    # Your physical line/loop provider name (e.g. Openreach, Chorus)
+  connection_type: fibre      # Line type: fibre / dsl / cable / lte / satellite / leased-line / other
+  sla_pct: 0                  # Infra uptime target % — used for SLA comparison in reports (0 = disabled)
+  plan_download_mbps: 0       # Link capacity down (Mbps)
+  plan_upload_mbps: 0         # Link capacity up (Mbps)
+  account_number: ""          # Optional contract / asset number
+  support_email: ""           # Optional support contact
+  sla_url: ""                 # URL to SLA or warranty document
+  sla_notes: ""               # Free-text notes
 
   keywords:
     - docker

@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink } from 'lucide-react'
 import { getUIPref, setUIPref } from '../lib/uiPrefs.js'
-const claudetteLogo = '/favicon.svg'
+import ClaudetteLogo from './ClaudetteLogo.jsx'
 
 const NAV = [
   { id: 'network',   label: 'Network',   icon: Network,         hint: 'Scan & map all devices on your LAN' },
@@ -95,7 +95,7 @@ export default function Layout({ page, setPage, services, _threats, username, on
         <div className={`border-b border-[#1a1a30] flex items-center ${collapsed ? 'flex-col gap-2 py-3 px-2' : 'px-4 py-4 gap-2'}`}>
           {!collapsed && (
             <>
-              <img src={claudetteLogo} alt="Claudette" className="w-7 h-7 flex-shrink-0" />
+              <ClaudetteLogo className="w-7 h-7 flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="text-white font-bold tracking-widest text-sm uppercase">Claudette</div>
                 <div className="text-slate-500 text-[10px]">Homelab Monitor</div>
@@ -103,7 +103,7 @@ export default function Layout({ page, setPage, services, _threats, username, on
             </>
           )}
           {collapsed && (
-            <img src={claudetteLogo} alt="Claudette" className="w-7 h-7" />
+            <ClaudetteLogo className="w-7 h-7" />
           )}
 
           {/* Bell with unread badge */}
@@ -226,7 +226,7 @@ export default function Layout({ page, setPage, services, _threats, username, on
           <div className="fixed inset-0 z-40" onClick={closeNotif} />
 
           {/* Panel */}
-          <div className="fixed top-0 right-0 h-screen w-80 z-50 bg-[#080812] border-l border-[#1a1a30] flex flex-col shadow-2xl">
+          <div className="fixed top-0 right-0 h-screen w-80 z-50 bg-[#080812]/80 backdrop-blur-md border-l border-[#1a1a30] flex flex-col shadow-2xl">
 
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-[#1a1a30] flex-shrink-0">

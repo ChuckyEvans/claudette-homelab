@@ -49,8 +49,8 @@ describe('THEMES array', () => {
 // ── DEFAULT_THEME ─────────────────────────────────────────────────────────────
 
 describe('DEFAULT_THEME', () => {
-  it('equals "starfield"', () => {
-    expect(DEFAULT_THEME).toBe('starfield')
+  it('equals "dark"', () => {
+    expect(DEFAULT_THEME).toBe('dark')
   })
 
   it('is present in THEMES', () => {

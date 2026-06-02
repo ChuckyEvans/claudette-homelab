@@ -14,7 +14,7 @@ FROM node:22-alpine
 
 # nmap is required for network scanning; tcpdump for passive ARP gateway detection
 # curl is required for interface-bound speed tests (VPN/direct comparison)
-RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && apk add --no-cache nmap nmap-scripts tcpdump curl
+RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && apk add --no-cache nmap nmap-scripts tcpdump curl traceroute mtr
 
 WORKDIR /app
 
@@ -23,6 +23,9 @@ COPY package*.json ./
 RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && npm ci --omit=dev
 
 # Copy server source and built frontend
+# ARG CACHEBUST forces cache invalidation on every build so the
+# legacy Docker builder never reuses a stale COPY --from=builder layer.
+ARG CACHEBUST=1
 COPY server/ ./server/
 COPY --from=builder /app/dist ./dist/
 

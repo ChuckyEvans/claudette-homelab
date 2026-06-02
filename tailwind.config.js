@@ -16,7 +16,16 @@ export default {
           sub:     '#2a2a45',   // subtle inset borders
           focus:   '#6366f1',   // indigo-500 — focused inputs
         },
-      }
+      },
+      keyframes: {
+        shimmer: {
+          '0%':   { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(400%)' },
+        },
+      },
+      animation: {
+        shimmer: 'shimmer 1.5s infinite',
+      },
     }
   },
   plugins: []

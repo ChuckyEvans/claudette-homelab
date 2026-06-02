@@ -5,9 +5,10 @@ import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import cron from 'node-cron'
 import path from 'path'
+import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { loadConfig } from './config.js'
-import servicesRouter, { runChecks, checkConnectivity, setOutageCheckSeconds } from './routes/services.js'
+import servicesRouter, { runChecks, checkConnectivity, setOutageCheckSeconds, runMtrSnapshot } from './routes/services.js'
 import { runSpeedTest } from './utils/speedtest.js'
 import threatsRouter, { refreshThreats } from './routes/threats.js'
 import networkRouter, { setBroadcast, runPingSweep, runScheduledDeepScan, startBackgroundArpSniffer, startMdnsSniffer } from './routes/network.js'
@@ -17,7 +18,8 @@ import configRouter from './routes/config.js'
 import auditRouter from './routes/audit.js'
 import reportsRouter from './routes/reports.js'
 import authRouter from './routes/auth.js'
-import { pruneOldData } from './db.js'
+import themesRouter from './routes/themes.js'
+import { pruneOldData, getDataDir } from './db.js'
 import { requireAuth } from './middleware/auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -113,12 +115,25 @@ app.use('/api/system', systemRouter)
 app.use('/api/config', configRouter)
 app.use('/api/audit', auditRouter)
 app.use('/api/reports', reportsRouter)
+app.use('/api/themes', themesRouter)
 
 // ── Static (production) ───────────────────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
   const distPath = path.join(__dirname, '..', 'dist')
-  app.use(express.static(distPath))
-  app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')))
+  // Theme photos: serve from data volume first (refreshed copies), fall back to bundled defaults
+  app.use('/themes', (req, res, next) => {
+    const file = path.basename(req.path) // strip any path traversal
+    if (!file || file.includes('..')) return next()
+    const dataFile = path.join(getDataDir(), 'themes', file)
+    if (fs.existsSync(dataFile)) return res.sendFile(dataFile)
+    next()
+  })
+  // Assets are content-hashed — cache them aggressively; never cache index.html itself
+  app.use(express.static(distPath, { index: false }))
+  app.get('*', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store')
+    res.sendFile(path.join(distPath, 'index.html'))
+  })
 }
 
 // ── Background jobs ───────────────────────────────────────────────────────────
@@ -186,6 +201,15 @@ function scheduleJobs() {
   _tasks.push(cron.schedule(minutesToCron(pingMin),     () => enqueue('ping',      () => runPingSweep(broadcast))))
   _tasks.push(cron.schedule(hoursToCron(speedtestHr),   () => enqueue('speedtest', () => runSpeedTest(broadcast))))
   _tasks.push(cron.schedule(hoursToCron(threatHr),      () => enqueue('threats',   () => refreshThreats(broadcast))))
+
+  // Baseline mtr — runs on a configurable schedule when internet is healthy
+  const mtrBaselineHrs = cfg?.schedule?.mtr_baseline_hours ?? 1
+  if (mtrBaselineHrs > 0) {
+    console.log(`[jobs] Baseline mtr every ${mtrBaselineHrs}h`)
+    _tasks.push(cron.schedule(hoursToCron(mtrBaselineHrs), () => {
+      runMtrSnapshot('baseline')
+    }))
+  }
 
   _tasks.push(cron.schedule(`0 ${deepHour} * * *`, () => {
     console.log(`[jobs] Starting scheduled deep scan (hour=${deepHour})...`)

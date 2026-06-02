@@ -239,6 +239,17 @@ isp:
   expected_uptime: 100          # % for SLA reports
   plan_download_mbps: 250
   plan_upload_mbps: 250
+  sla_url: ""                   # URL to ISP SLA document
+  sla_notes: ""                 # Free-text SLA notes
+
+infra:
+  name: ""                      # Local device name (router, firewall, etc.)
+  connection_type: router       # router / firewall / switch / wireless-ap / vpn / server / other
+  sla_pct: 0                    # Infra uptime target % (0 = disabled)
+  plan_download_mbps: 0
+  plan_upload_mbps: 0
+  sla_url: ""                   # URL to SLA or warranty document
+  sla_notes: ""
 
 threats:
   keywords:                     # CVEs matching these keywords will be shown

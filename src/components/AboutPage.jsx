@@ -1,4 +1,5 @@
 import { Wand2, RefreshCw, CheckCircle, XCircle, ExternalLink, Shield, Network, Activity, Cpu, ClipboardList, Tv } from 'lucide-react'
+import ClaudetteLogo from './ClaudetteLogo.jsx'
 
 const FEATURES = [
   { icon: Network,      label: 'Network Scanner',     desc: 'Discovers devices on your subnet via nmap. Tracks online/offline status and persists to SQLite.' },
@@ -25,7 +26,7 @@ export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates, ch
 
       {/* Hero */}
       <div className="flex items-center gap-4">
-        <img src="/favicon.svg" alt="Claudette" className="w-14 h-14 flex-shrink-0" />
+        <ClaudetteLogo className="w-14 h-14 flex-shrink-0" />
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Claudette</h1>
           <p className="text-slate-500 text-sm mt-0.5">

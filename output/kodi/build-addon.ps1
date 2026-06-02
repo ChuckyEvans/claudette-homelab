@@ -4,6 +4,7 @@
 # Usage:
 #   .\build-addon.ps1                                  # build zip only
 #   .\build-addon.ps1 -KodiHost 192.168.8.250          # build + deploy via Pi hop
+#   .\build-addon.ps1 -KodiHost 192.168.8.250 -Quick   # skip zip — rsync files directly (~5s)
 #   .\build-addon.ps1 -KodiHost 192.168.8.250 -PiHost 192.168.8.10
 #
 param(
@@ -11,7 +12,8 @@ param(
     [string]$KodiUser  = 'root',
     [string]$SshKey    = '',
     [string]$PiHost    = '192.168.8.10',
-    [string]$PiUser    = 'ubuntu'
+    [string]$PiUser    = 'ubuntu',
+    [switch]$Quick                 # Skip zip build — copy files directly via SCP (no Kodi restart needed for Python changes)
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +30,29 @@ $xml     = [xml](Get-Content $AddonXml -Raw)
 $version = $xml.addon.version
 $zipName = "plugin.program.claudette-${version}.zip"
 $zipPath = Join-Path $PSScriptRoot $zipName
+
+$SshArgs = @('-o', 'StrictHostKeyChecking=no')
+if ($SshKey) { $SshArgs += @('-i', $SshKey) }
+
+# ── Quick mode: skip zip, SCP files directly ─────────────────────────────────
+if ($Quick) {
+    if (-not $KodiHost) { Write-Error "-Quick requires -KodiHost"; exit 1 }
+    Write-Host "Quick-deploying addon files to ${KodiUser}@${KodiHost} via Pi hop..." -ForegroundColor Cyan
+
+    # Stage files on Pi then push to LibreELEC
+    $dest = '/storage/.kodi/addons/plugin.program.claudette'
+    scp @SshArgs -r "$AddonDir" "${PiUser}@${PiHost}:/tmp/plugin.program.claudette"
+    if ($LASTEXITCODE -ne 0) { Write-Warning "scp to Pi failed."; exit 1 }
+
+    $remote = "sshpass -p libreelec scp -o StrictHostKeyChecking=no -r /tmp/plugin.program.claudette ${KodiUser}@${KodiHost}:/storage/.kodi/addons/ && " +
+              "rm -rf /tmp/plugin.program.claudette"
+    ssh @SshArgs "${PiUser}@${PiHost}" $remote
+    if ($LASTEXITCODE -ne 0) { Write-Warning "SCP to LibreELEC failed."; exit 1 }
+
+    Write-Host "  Files updated. Kodi will pick up Python changes on next addon launch." -ForegroundColor Green
+    Write-Host "`nDone." -ForegroundColor Green
+    exit 0
+}
 
 Write-Host "Building Claudette Kodi addon v${version}..." -ForegroundColor Cyan
 
@@ -68,8 +93,6 @@ Write-Host "  Built: $zipName ($size KB)" -ForegroundColor Green
 # Optional: deploy to Kodi host — hops via Pi using sshpass (LibreELEC default creds)
 if ($KodiHost) {
     Write-Host "`nDeploying to ${KodiUser}@${KodiHost} via Pi hop..." -ForegroundColor Cyan
-    $SshArgs = @('-o', 'StrictHostKeyChecking=no')
-    if ($SshKey) { $SshArgs += @('-i', $SshKey) }
 
     # 1. Stage zip on Pi
     scp @SshArgs $zipPath "${PiUser}@${PiHost}:/tmp/"

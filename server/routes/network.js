@@ -1,11 +1,11 @@
 import { Router } from 'express'
-import { spawn, execSync } from 'child_process'
+import { spawn, exec, execSync } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
 import { createSocket } from 'dgram'
 import { promises as dnsPromises } from 'dns'
 import { loadConfig } from '../config.js'
 import { isPrivateIP, isPrivateCIDR, ipInCIDR, getCIDRHosts } from '../utils/ip.js'
-import { audit, auditDevice, upsertDevice, markOffline, getAllDevices, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleFavorite, toggleFlagged, toggleDormant, autoDormantStale } from '../db.js'
+import { audit, auditDevice, upsertDevice, markOffline, getAllDevices, getAllFlags, createFlag, updateFlag, deleteFlag, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleDeviceFlag, toggleFavorite, toggleFlagged, toggleDormant, autoDormantStale } from '../db.js'
 
 const router = Router()
 
@@ -628,9 +628,10 @@ export async function performScan(broadcast) {
         vendor:      d.vendor ?? db.vendor,
         hostname:    d.hostname ?? db.hostname,
         label:       db.label ?? null,
-        favorited:   db.favorited ?? 0,
-        flagged:     db.flagged   ?? 0,
-        dormant:     db.dormant   ?? 0,
+        favorited:   db.favorited ?? false,
+        flagged:     db.flagged   ?? false,
+        dormant:     db.dormant   ?? false,
+        flags:       db.flags     ?? [],
         lastOnline:  db.lastOnline ?? null,
       }
     })
@@ -675,7 +676,7 @@ export async function runPingSweep(broadcast) {
   if (!subnets.length) return []
   try {
     const allOutputs = await Promise.all(subnets.map(subnet =>
-      runNmap(['-sn', '--host-timeout', '3s', '--min-rate', '1000', subnet]).catch(() => '')))
+      runNmap(['-sn', '-PE', '-PP', '-PS22,80,443,8080,3000,8123,9091,5000,1883', '--host-timeout', '3s', '--min-rate', '500', subnet]).catch(() => '')))
     // Keep full parsed data — nmap -sn returns MAC+vendor via ARP for LAN hosts
     const parsed = allOutputs.flatMap(output => parseNmapOutput(output).map(d => ({
       ...d,
@@ -762,6 +763,81 @@ router.get('/myip', (req, res) => {
   res.json({ ip })
 })
 
+// Returns the caller's LAN IP as seen by the server — used by the UI to
+// highlight the user's own device in the network scan list.
+router.get('/myip', (req, res) => {
+  // Strip IPv6-mapped IPv4 prefix (::ffff:192.168.x.x) if present
+  const ip = (req.socket.remoteAddress ?? '').replace(/^::ffff:/, '') || null
+  res.json({ ip })
+})
+
+// ── Available flags catalogue ──────────────────────────────────────────────────
+
+router.get('/flags', (_req, res) => {
+  res.json(getAllFlags())
+})
+
+router.post('/flags', (req, res) => {
+  const { key, label, icon, description, sortOrder } = req.body ?? {}
+  if (!key || !label) return res.status(400).json({ error: 'key and label are required' })
+  try {
+    const flag = createFlag({ key, label, icon, description, sortOrder })
+    res.status(201).json(flag)
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+router.put('/flags/:key', (req, res) => {
+  const { key } = req.params
+  const { label, icon, description, sortOrder } = req.body ?? {}
+  try {
+    const flag = updateFlag(key, { label, icon, description, sortOrder })
+    res.json(flag)
+  } catch (err) {
+    const status = err.message === 'Flag not found' ? 404 : err.message.includes('System') ? 403 : 400
+    res.status(status).json({ error: err.message })
+  }
+})
+
+router.delete('/flags/:key', (req, res) => {
+  const { key } = req.params
+  try {
+    deleteFlag(key)
+    res.json({ ok: true, key })
+  } catch (err) {
+    const status = err.message === 'Flag not found' ? 404 : err.message.includes('System') ? 403 : 400
+    res.status(status).json({ error: err.message })
+  }
+})
+
+// ── Toggle any flag on a device (generic endpoint) ────────────────────────────
+
+router.post('/device/:mac/flag/:flagKey', (req, res) => {
+  const { mac, flagKey } = req.params
+  if (!/^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(mac)) {
+    return res.status(400).json({ error: 'Invalid MAC address' })
+  }
+  if (!/^[a-z0-9_-]{1,32}$/.test(flagKey)) {
+    return res.status(400).json({ error: 'Invalid flag key' })
+  }
+  const active = toggleDeviceFlag(mac, flagKey)
+  const idx = _scanResults.findIndex(d => d.mac === mac)
+  if (idx !== -1) {
+    const flags = active
+      ? [...new Set([...((_scanResults[idx].flags) ?? []), flagKey])]
+      : ((_scanResults[idx].flags) ?? []).filter(f => f !== flagKey)
+    _scanResults[idx] = {
+      ..._scanResults[idx],
+      flags,
+      favorited: flags.includes('favorite'),
+      flagged:   flags.includes('pest'),
+      dormant:   flags.includes('dormant'),
+    }
+  }
+  res.json({ ok: true, mac, flagKey, active })
+})
+
 router.get('/ping', async (req, res) => {
   const subnets = getSubnets()
   const badSubnet = subnets.find(s => !isPrivateCIDR(s))
@@ -793,6 +869,20 @@ router.get('/ping-host', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+// POST /api/network/traceroute/:ip — run mtr to a specific LAN device
+router.post('/traceroute/:ip', (req, res) => {
+  const { ip } = req.params
+  if (!ip || !/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+    return res.status(400).json({ error: 'Invalid IP address' })
+  }
+  if (!isPrivateIP(ip)) {
+    return res.status(400).json({ error: `'${ip}' is not a private LAN address` })
+  }
+  exec(`mtr --report --no-dns --report-cycles 3 ${ip} 2>&1`, { timeout: 60000 }, (err, stdout) => {
+    res.json({ output: stdout || (err?.message ?? 'mtr unavailable') })
+  })
 })
 
 // Cancel a running scan
