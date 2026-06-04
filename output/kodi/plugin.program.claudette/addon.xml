@@ -13,7 +13,9 @@
   </extension>
 
   <extension point="xbmc.addon.metadata">
-    <icon>icon.png</icon>
+    <assets>
+      <icon>icon.png</icon>
+    </assets>
     <summary lang="en_GB">Claudette Homelab Monitor</summary>
     <description lang="en_GB">
       Monitor your homelab from Kodi. View network devices, service health,
