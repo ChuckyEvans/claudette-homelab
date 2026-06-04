@@ -121,7 +121,7 @@ async function nav(page, label) {
   // Apply dark theme before the page loads (read by app's IIFE on startup)
   const baseUrl = new URL(BASE)
   await context.addCookies([{
-    name:    'claudette_ui_theme',
+    name:    'claudette_theme',
     value:   'dark',
     domain:  baseUrl.hostname,
     path:    '/',
