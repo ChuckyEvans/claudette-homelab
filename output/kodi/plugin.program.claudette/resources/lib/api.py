@@ -143,6 +143,15 @@ class ClaudetteAPI:
         """GET /api/reports → {events, summary, total, from, to}"""
         return self._get('/reports?limit={0}&offset={1}'.format(limit, offset))
 
+    # ── Logs ──────────────────────────────────────────────────────────────────
+
+    def get_logs(self, limit=100, level=None):
+        """GET /api/logs?limit=<n>[&level=<level>] → {logs: [{ts, level, msg, ...}]}"""
+        path = '/logs?limit={0}'.format(limit)
+        if level and level != 'debug':
+            path += '&level={0}'.format(level)
+        return self._get(path)
+
     # ── Audit log ─────────────────────────────────────────────────────────────
 
     def get_audit(self, limit=50, offset=0):

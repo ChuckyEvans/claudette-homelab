@@ -406,6 +406,9 @@ def main_menu():
     add_item(warn('>') + '  ' + muted('Refresh Threats'),
              url(action='refresh_threats_action'),
              info={'title': 'Refresh Threats', 'plot': 'Fetch the latest vulnerability feed.'})
+    add_item(muted('=') + '  ' + muted('Server Logs'),
+             url(action='logs'), is_folder=True,
+             info={'title': 'Server Logs', 'plot': 'Live rolling log buffer from the Claudette server process.'})
     add_item(muted('=') + '  ' + muted('Audit Log'),
              url(action='audit'), is_folder=True,
              info={'title': 'Audit Log', 'plot': 'Full timestamped record of all system events.'})
@@ -1069,6 +1072,59 @@ def show_system():
     end_dir()
 
 
+# -- Server Logs --------------------------------------------------------------
+
+LOG_LEVEL_COLOR = {'error': 'FF4444', 'warn': 'FFCC00', 'info': '44AAFF', 'debug': '666666'}
+LOG_LEVEL_RANK  = {'debug': 0, 'info': 1, 'warn': 2, 'error': 3}
+
+
+def show_logs():
+    api   = get_api()
+    if api is None: return
+    limit    = int(ADDON.getSetting('log_limit') or 100)
+    min_lvl  = ADDON.getSetting('log_min_level') or 'info'
+    data     = api.get_logs(limit=limit, level=min_lvl)
+    if data is None:
+        err_dialog('Logs', 'Could not reach server.'); return
+
+    logs     = data.get('logs', [])
+    min_rank = LOG_LEVEL_RANK.get(min_lvl, 1)
+
+    # Summary counts
+    counts = {}
+    for lvl in ('error', 'warn', 'info', 'debug'):
+        n = sum(1 for e in logs if e.get('level') == lvl)
+        if n: counts[lvl] = n
+    hdr = '  '.join(c(LOG_LEVEL_COLOR[lvl], '{0} {1}'.format(n, lvl))
+                    for lvl, n in counts.items()) if counts else dim('no entries')
+    add_item(
+        head('Server Logs') + dim('  ') + hdr,
+        info={'title': 'Server Logs',
+              'plot': '{0} entries shown (min level: {1})\n\n{2}'.format(
+                  len(logs), min_lvl,
+                  '\n'.join('{0}: {1}'.format(lvl, n) for lvl, n in counts.items()))})
+
+    if not logs:
+        add_item(dim('No log entries at {0} level or above'.format(min_lvl)))
+        end_dir(); return
+
+    for e in logs:
+        lvl   = e.get('level', 'info')
+        if LOG_LEVEL_RANK.get(lvl, 1) < min_rank:
+            continue
+        ts    = fmt_ts_long(e.get('ts'))
+        msg   = e.get('msg') or e.get('message') or ''
+        color = LOG_LEVEL_COLOR.get(lvl, '888888')
+
+        row  = dim(ts[:16]) + '  ' + c(color, '{0:<5}'.format(lvl.upper())) + '  ' + head(msg[:100])
+        plot = '[{0}] {1}\nTime: {2}'.format(lvl.upper(), msg, ts)
+        if e.get('source'): plot += '\nSource: ' + e['source']
+
+        add_item(row, info={'title': '[{0}] {1}'.format(lvl.upper(), msg[:60]), 'plot': plot})
+
+    end_dir()
+
+
 # -- Audit Log -----------------------------------------------------------------
 
 def show_audit():
@@ -1388,6 +1444,7 @@ ROUTES = {
     'internet_outages':         show_internet_outages,
     'speedtest':                show_speedtest,
     'system':                   show_system,
+    'logs':                     show_logs,
     'audit':                    show_audit,
     'reports':                  show_reports,
     'ddns':                     show_ddns,
