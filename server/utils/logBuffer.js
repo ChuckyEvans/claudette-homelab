@@ -28,6 +28,21 @@ export function initLogBuffer() {
 }
 
 /**
+ * Count log entries by level since a given timestamp.
+ * @param {number} since - Unix milliseconds; only entries with ts > since are counted.
+ * @returns {{ info: number, warn: number, error: number, debug: number }}
+ */
+export function getLogCounts(since = 0) {
+  const counts = { info: 0, warn: 0, error: 0, debug: 0 }
+  for (const entry of _buffer) {
+    if (entry.ts > since && counts[entry.level] !== undefined) {
+      counts[entry.level]++
+    }
+  }
+  return counts
+}
+
+/**
  * Query the log buffer.
  * @param {{ levels?: string[], search?: string, page?: number, pageSize?: number, order?: 'asc'|'desc' }} opts
  * @returns {{ logs: object[], total: number, page: number, pageSize: number, totalPages: number }}

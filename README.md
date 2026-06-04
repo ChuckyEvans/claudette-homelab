@@ -23,6 +23,40 @@ A self-hosted home network monitoring dashboard. Runs in Docker on a Raspberry P
 
 ---
 
+## Screenshots
+
+### Network — device list with detail panel
+![Network scan showing 38 devices, device detail with MAC, vendor, OS, ports, traceroute](docs/screenshots/network.png)
+
+### Dashboard — live status overview
+![Dashboard showing service health, threat count, CPU/memory/disk/uptime tiles and recent CVE feed](docs/screenshots/dashboard.png)
+
+### Exposure — open port risk assessment
+![Exposure page showing per-device port risk scoring](docs/screenshots/exposure.png)
+
+### System — host hardware stats
+![System page showing CPU per-core load, memory usage, disk and network I/O](docs/screenshots/system.png)
+
+### Reports — internet outage history
+![Reports internet tab showing outage timeline, downtime totals and ISP SLA tracking](docs/screenshots/reports-internet.png)
+
+### Reports — speed test history
+![Reports speed test tab showing download/upload/ping charts over time](docs/screenshots/reports-speed.png)
+
+### Reports — overview
+![Reports overview tab](docs/screenshots/reports-overview.png)
+
+### Audit log — full event history
+![Audit log showing timestamped events for scans, device changes and user actions](docs/screenshots/audit-log.png)
+
+### Logs — live server console
+![Logs page showing server output with level filtering and search](docs/screenshots/logs.png)
+
+### Settings — configuration editor
+![Settings page with tabs for host, network, schedule, DDNS, services, appearance and data](docs/screenshots/settings.png)
+
+---
+
 ## Requirements
 
 ### Running locally

@@ -216,6 +216,7 @@ export const api = {
       if (params.order)           q.set('order',    params.order)
       return request(`/logs?${q}`)
     },
+    counts: (since = 0) => request(`/logs/counts?since=${since}`),
   },
 }
 

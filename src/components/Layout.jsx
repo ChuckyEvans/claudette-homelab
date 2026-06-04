@@ -30,7 +30,7 @@ const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 400
 const SIDEBAR_DEFAULT = 208
 
-export default function Layout({ page, setPage, services, _threats, username, onLogout, _updateInfo, notifications = [], unreadCount = 0, onDismissNotification, onClearNotifications, onMarkAllRead, children }) {
+export default function Layout({ page, setPage, services, _threats, username, onLogout, _updateInfo, notifications = [], unreadCount = 0, onDismissNotification, onClearNotifications, onMarkAllRead, logsBadge = {}, children }) {
   const failCount = services?.results?.filter(r => !r.ok).length ?? 0
   const allOk     = failCount === 0
 
@@ -134,8 +134,13 @@ export default function Layout({ page, setPage, services, _threats, username, on
 
         {/* Nav */}
         <nav className={`flex-1 ${collapsed ? 'px-1.5' : 'px-3'} py-4 overflow-y-auto space-y-0.5`}>
-          {NAV.map(({ id, label, icon: Icon, hint }) => {
+        {NAV.map(({ id, label, icon: Icon, hint }) => {
             const active = page === id
+            const isLogs  = id === 'logs'
+            const errCt   = isLogs ? (logsBadge?.error ?? 0) : 0
+            const warnCt  = isLogs ? (logsBadge?.warn  ?? 0) : 0
+            const infoCt  = isLogs ? (logsBadge?.info  ?? 0) : 0
+            const hasBadge = isLogs && (errCt > 0 || warnCt > 0 || infoCt > 0)
             return (
               <div key={id} className="relative group">
                 <button
@@ -148,8 +153,20 @@ export default function Layout({ page, setPage, services, _threats, username, on
                 >
                   <Icon className="w-4 h-4 flex-shrink-0" />
                   {!collapsed && <span className="flex-1 text-left">{label}</span>}
-
+                  {!collapsed && hasBadge && (
+                    <span className="flex items-center gap-1">
+                      {errCt  > 0 && <span className="min-w-[18px] h-[18px] px-1 bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold rounded-full flex items-center justify-center leading-none">{errCt  > 99 ? '99+' : errCt}</span>}
+                      {warnCt > 0 && <span className="min-w-[18px] h-[18px] px-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-bold rounded-full flex items-center justify-center leading-none">{warnCt > 99 ? '99+' : warnCt}</span>}
+                      {infoCt > 0 && <span className="min-w-[18px] h-[18px] px-1 bg-sky-500/20 border border-sky-500/40 text-sky-300 text-[10px] font-bold rounded-full flex items-center justify-center leading-none">{infoCt > 99 ? '99+' : infoCt}</span>}
+                    </span>
+                  )}
                 </button>
+                {/* Collapsed badge — single severity dot */}
+                {collapsed && hasBadge && (
+                  <span className={`absolute top-1 right-1 w-2 h-2 rounded-full pointer-events-none ${
+                    errCt > 0 ? 'bg-red-500' : warnCt > 0 ? 'bg-amber-500' : 'bg-sky-500'
+                  }`} />
+                )}
                 <Tooltip text={collapsed ? (hint ?? label) : hint} />
               </div>
             )

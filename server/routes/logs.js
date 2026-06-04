@@ -1,7 +1,13 @@
 import { Router } from 'express'
-import { getLogs } from '../utils/logBuffer.js'
+import { getLogs, getLogCounts } from '../utils/logBuffer.js'
 
 const router = Router()
+
+// GET /api/logs/counts?since=<ms>  — count new entries per level since a timestamp
+router.get('/counts', (req, res) => {
+  const since = parseInt(req.query.since) || 0
+  res.json(getLogCounts(since))
+})
 
 // GET /api/logs?levels=info,warn,error&search=text&page=1&pageSize=100&order=asc
 router.get('/', (req, res) => {

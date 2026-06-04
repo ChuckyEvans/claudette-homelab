@@ -4,6 +4,7 @@ import AuthModal from './components/AuthModal.jsx'
 import TopProgressBar from './components/TopProgressBar.jsx'
 import { createEventSource, api } from './lib/api.js'
 import { applyTheme, loadBgDim, loadTheme, loadApplyAccent } from './lib/themes.js'
+import { getUIPref, setUIPref } from './lib/uiPrefs.js'
 
 // Page-level components loaded on-demand to keep the initial bundle small
 const Dashboard    = lazy(() => import('./components/Dashboard.jsx'))
@@ -78,6 +79,10 @@ export default function App() {
   const [showWizard, setShowWizard] = useState(false)
   const [configStatus, setConfigStatus] = useState({ exists: false, valid: false, outdated: false })
   const [dbErrors, setDbErrors] = useState([])
+
+  // ── Logs badge — counts of new log entries since user last viewed the Logs page ─
+  const [logsBadge,   setLogsBadge]   = useState({ info: 0, warn: 0, error: 0, debug: 0 })
+  const logsLastSeen = useRef(parseInt(getUIPref('logs_last_seen') ?? '0') || 0)
 
   const [deepScan, setDeepScan] = useState({ running: false, done: 0, total: 0, currentIp: null })
   const [lastScanDurationMs,      setLastScanDurationMs]      = useState(() => { const v = localStorage.getItem('claudette:lastScanMs'); return v ? Number(v) : null })
@@ -219,6 +224,15 @@ export default function App() {
     const id = setInterval(() => {
       api.system.stats().then(setSystemStats).catch(console.error)
     }, 5000)
+    return () => clearInterval(id)
+  }, [auth.authenticated])
+
+  // Logs badge — poll every 30 s for new entries since last view
+  useEffect(() => {
+    if (!auth.authenticated) return
+    const poll = () => api.logs.counts(logsLastSeen.current).then(setLogsBadge).catch(() => {})
+    poll()
+    const id = setInterval(poll, 30_000)
     return () => clearInterval(id)
   }, [auth.authenticated])
 
@@ -379,6 +393,12 @@ export default function App() {
       setPendingPageNav(newPage)
       return
     }
+    if (newPage === 'logs') {
+      const now = Date.now()
+      logsLastSeen.current = now
+      setUIPref('logs_last_seen', String(now))
+      setLogsBadge({ info: 0, warn: 0, error: 0, debug: 0 })
+    }
     setPageLoading(true)
     setPage(newPage)
     // One frame is enough for the new component to mount and take over
@@ -440,6 +460,7 @@ export default function App() {
         onDismissNotification={dismissNotification}
         onClearNotifications={clearAllNotifications}
         onMarkAllRead={markAllRead}
+        logsBadge={logsBadge}
       >
         {pageLoading && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#080812]/60 backdrop-blur-[2px] pointer-events-none">
