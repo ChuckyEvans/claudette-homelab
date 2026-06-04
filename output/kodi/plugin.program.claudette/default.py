@@ -657,9 +657,10 @@ def show_threats():
         err_dialog('Threats', 'Could not reach server.'); return
 
     raw_sev = ADDON.getSetting('threat_min_severity') or '1'
-    if raw_sev.lstrip('-').isdigit():
-        min_sev_str = ['low', 'medium', 'high', 'critical'][min(int(raw_sev), 3)]
-    else:
+    # getSetting returns the enum index as a string (0=Low,1=Medium,2=High,3=Critical)
+    try:
+        min_sev_str = ['low', 'medium', 'high', 'critical'][int(raw_sev)]
+    except (ValueError, IndexError):
         min_sev_str = raw_sev.lower() if raw_sev.lower() in SEV_RANK else 'medium'
     min_level   = SEV_RANK[min_sev_str]
     all_threats = data.get('threats', [])
@@ -1082,7 +1083,12 @@ def show_logs():
     api   = get_api()
     if api is None: return
     limit    = int(ADDON.getSetting('log_limit') or 100)
-    min_lvl  = ADDON.getSetting('log_min_level') or 'info'
+    raw_lvl  = ADDON.getSetting('log_min_level') or '1'
+    # getSetting returns enum index (0=Debug,1=Info,2=Warn,3=Error)
+    try:
+        min_lvl = ['debug', 'info', 'warn', 'error'][int(raw_lvl)]
+    except (ValueError, IndexError):
+        min_lvl = 'info'
     data     = api.get_logs(limit=limit, level=min_lvl)
     if data is None:
         err_dialog('Logs', 'Could not reach server.'); return

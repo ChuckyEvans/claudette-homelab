@@ -1,7 +1,180 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<settings version="2">
+<settings>
 
-  <!-- ── Connection ──────────────────────────────────────────────────────── -->
+  <setting type="sep" label="Connection" />
+  <setting id="server_url"   type="text"   label="Server URL"                  default="http://192.168.8.10:7654" />
+  <setting id="username"     type="text"   label="Username"                    default="" />
+  <setting id="password"     type="text"   label="Password"                    default="" option="hidden" />
+  <setting id="timeout"      type="slider" label="Request timeout (seconds)"   default="10" range="3,1,30" option="int" />
+
+  <setting type="sep" label="Devices" />
+  <setting id="show_offline_devices" type="bool"   label="Show offline devices" default="true" />
+
+  <setting type="sep" label="Threats" />
+  <setting id="threat_min_severity"  type="enum"   label="Minimum severity to show" default="1" values="Low|Medium|High|Critical" />
+
+  <setting type="sep" label="Logs" />
+  <setting id="log_limit"     type="slider" label="Log entries to show"        default="100" range="25,25,500" option="int" />
+  <setting id="log_min_level" type="enum"   label="Minimum log level"          default="1"   values="Debug|Info|Warn|Error" />
+
+  <setting type="sep" label="Speed Tests" />
+  <setting id="speedtest_limit" type="slider" label="Results to show"          default="10" range="5,5,30" option="int" />
+  <setting id="isp_plan_dl"     type="text"   label="ISP plan download Mbps (0=off)" default="0" />
+  <setting id="isp_plan_ul"     type="text"   label="ISP plan upload Mbps (0=off)"   default="0" />
+
+  <setting type="sep" label="Audit and Reports" />
+  <setting id="audit_limit"     type="slider" label="Events per page"          default="50" range="10,10,100" option="int" />
+
+  <setting type="sep" label="DDNS" />
+  <setting id="ddns_history_limit" type="slider" label="History entries to show" default="15" range="5,5,30" option="int" />
+
+</settings>
+
+
+  <category id="connection" label="Connection">
+    <group id="1" label="Server">
+      <setting id="server_url" type="string">
+        <level>0</level>
+        <label>Server URL</label>
+        <default>http://192.168.8.10:7654</default>
+        <control type="edit" format="string" />
+      </setting>
+      <setting id="username" type="string">
+        <level>0</level>
+        <label>Username</label>
+        <default></default>
+        <control type="edit" format="string" />
+      </setting>
+      <setting id="password" type="string">
+        <level>0</level>
+        <label>Password</label>
+        <default></default>
+        <control type="edit" format="string" />
+      </setting>
+      <setting id="timeout" type="integer">
+        <level>0</level>
+        <label>Request timeout (seconds)</label>
+        <default>10</default>
+        <constraints>
+          <minimum>3</minimum>
+          <step>1</step>
+          <maximum>30</maximum>
+        </constraints>
+        <control type="slider" format="integer" />
+      </setting>
+    </group>
+  </category>
+
+  <category id="display" label="Display">
+    <group id="2" label="Devices">
+      <setting id="show_offline_devices" type="bool">
+        <level>0</level>
+        <label>Show offline devices</label>
+        <default>true</default>
+        <control type="toggle" />
+      </setting>
+    </group>
+    <group id="3" label="Threats">
+      <setting id="threat_min_severity" type="string">
+        <level>0</level>
+        <label>Minimum severity to show</label>
+        <default>medium</default>
+        <constraints>
+          <options>
+            <option label="Low (all)">low</option>
+            <option label="Medium">medium</option>
+            <option label="High">high</option>
+            <option label="Critical only">critical</option>
+          </options>
+        </constraints>
+        <control type="spinner" format="string" />
+      </setting>
+    </group>
+    <group id="4" label="Logs">
+      <setting id="log_limit" type="integer">
+        <level>0</level>
+        <label>Log entries to show</label>
+        <default>100</default>
+        <constraints>
+          <minimum>25</minimum>
+          <step>25</step>
+          <maximum>500</maximum>
+        </constraints>
+        <control type="slider" format="integer" />
+      </setting>
+      <setting id="log_min_level" type="string">
+        <level>0</level>
+        <label>Minimum log level</label>
+        <default>info</default>
+        <constraints>
+          <options>
+            <option label="Debug (all)">debug</option>
+            <option label="Info">info</option>
+            <option label="Warn">warn</option>
+            <option label="Error only">error</option>
+          </options>
+        </constraints>
+        <control type="spinner" format="string" />
+      </setting>
+    </group>
+  </category>
+
+  <category id="limits" label="Limits">
+    <group id="5" label="Speed Tests">
+      <setting id="speedtest_limit" type="integer">
+        <level>0</level>
+        <label>Results to show</label>
+        <default>10</default>
+        <constraints>
+          <minimum>5</minimum>
+          <step>5</step>
+          <maximum>30</maximum>
+        </constraints>
+        <control type="slider" format="integer" />
+      </setting>
+      <setting id="isp_plan_dl" type="string">
+        <level>0</level>
+        <label>ISP plan download Mbps (0 = off)</label>
+        <default>0</default>
+        <control type="edit" format="string" />
+      </setting>
+      <setting id="isp_plan_ul" type="string">
+        <level>0</level>
+        <label>ISP plan upload Mbps (0 = off)</label>
+        <default>0</default>
+        <control type="edit" format="string" />
+      </setting>
+    </group>
+    <group id="6" label="Audit and Reports">
+      <setting id="audit_limit" type="integer">
+        <level>0</level>
+        <label>Events per page</label>
+        <default>50</default>
+        <constraints>
+          <minimum>10</minimum>
+          <step>10</step>
+          <maximum>100</maximum>
+        </constraints>
+        <control type="slider" format="integer" />
+      </setting>
+    </group>
+    <group id="7" label="DDNS">
+      <setting id="ddns_history_limit" type="integer">
+        <level>0</level>
+        <label>History entries to show</label>
+        <default>15</default>
+        <constraints>
+          <minimum>5</minimum>
+          <step>5</step>
+          <maximum>30</maximum>
+        </constraints>
+        <control type="slider" format="integer" />
+      </setting>
+    </group>
+  </category>
+
+</settings>
+
   <category id="connection" label="Connection">
     <group id="1" label="Server">
       <setting id="server_url" type="string">
