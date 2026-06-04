@@ -66,6 +66,7 @@ let _arpSnifferProc = null
 
 export function startBackgroundArpSniffer() {
   if (_arpSnifferProc) return
+  if (process.platform === 'win32') return  // tcpdump not available on Windows
   try {
     _arpSnifferProc = spawn('tcpdump', ['-i', 'any', '-n', '-l', 'arp'], {
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -103,6 +104,7 @@ function getDetectedGateway(deviceIp, knownGwIps) {
 
 /** Read default gateway IPs from the OS routing table (Linux: `ip route show default`). */
 function getDefaultGateway() {
+  if (process.platform === 'win32') return null
   try {
     const out = execSync('ip route show default', { timeout: 3000 }).toString()
     const matches = [...out.matchAll(/via (\d+\.\d+\.\d+\.\d+)/g)]

@@ -261,7 +261,8 @@ export function getDb() {
       download_mbps    REAL,
       upload_mbps      REAL,
       error            TEXT,
-      via              TEXT NOT NULL DEFAULT 'direct'
+      via              TEXT NOT NULL DEFAULT 'direct',
+      provider         TEXT NOT NULL DEFAULT 'cloudflare'
     );
     CREATE INDEX IF NOT EXISTS idx_speedtest_ts ON speedtest_results (ts DESC);
   `)
@@ -271,6 +272,10 @@ export function getDb() {
   if (!stCols.includes('via')) {
     _db.exec("ALTER TABLE speedtest_results ADD COLUMN via TEXT NOT NULL DEFAULT 'direct'")
     console.log('[db] Added via column to speedtest_results.')
+  }
+  if (!stCols.includes('provider')) {
+    _db.exec("ALTER TABLE speedtest_results ADD COLUMN provider TEXT NOT NULL DEFAULT 'cloudflare'")
+    console.log('[db] Added provider column to speedtest_results.')
   }
 
   // Outage diagnostics — traceroute + ping detail captured at the moment of internet.down

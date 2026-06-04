@@ -57,12 +57,15 @@ router.post('/', (req, res) => {
       threat_interval_hours:    Math.max(1, (n => Number.isFinite(n) ? n : 6)(parseInt(body.schedule?.threat_interval_hours))),
       ping_interval_minutes:    Math.max(1, (n => Number.isFinite(n) ? n : 5)(parseInt(body.schedule?.ping_interval_minutes))),
       deep_scan_hour:           Math.min(23, Math.max(0, (n => Number.isFinite(n) ? n : 4)(parseInt(body.schedule?.deep_scan_hour)))),
-      speedtest_interval_hours: Math.max(1, (n => Number.isFinite(n) ? n : 1)(parseInt(body.schedule?.speedtest_interval_hours))),
+      speedtest_interval_hours:     Math.max(1, (n => Number.isFinite(n) ? n : 4)(parseInt(body.schedule?.speedtest_interval_hours))),
+      vpn_speedtest_interval_hours: Math.max(0, (n => Number.isFinite(n) ? n : 4)(parseInt(body.schedule?.vpn_speedtest_interval_hours))),
       backup_interval_days:     Math.max(0, (n => Number.isFinite(n) ? n : 0)(parseInt(body.schedule?.backup_interval_days))),
       backup_keep_days:              Math.min(365, Math.max(1, (n => Number.isFinite(n) ? n : 7)(parseInt(body.schedule?.backup_keep_days)))),
       internet_outage_check_seconds: Math.max(5, Math.min(300, (n => Number.isFinite(n) ? n : 10)(parseInt(body.schedule?.internet_outage_check_seconds)))),
       mtr_baseline_hours:       Math.max(0, Math.min(24, (n => Number.isFinite(n) ? n : 1)(parseInt(body.schedule?.mtr_baseline_hours)))),
       mtr_outage_repeat_minutes: Math.max(0, Math.min(60, (n => Number.isFinite(n) ? n : 15)(parseInt(body.schedule?.mtr_outage_repeat_minutes)))),
+      speedtest_provider: ['cloudflare', 'ookla'].includes(body.schedule?.speedtest_provider)
+        ? body.schedule.speedtest_provider : 'cloudflare',
     },
   }
   const existingNetwork = loadConfig()?.network ?? {}

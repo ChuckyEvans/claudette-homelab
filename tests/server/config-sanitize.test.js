@@ -23,8 +23,11 @@ function buildSchedule(body) {
     threat_interval_hours:        Math.max(1, intOrDef(body.schedule?.threat_interval_hours,  6)),
     ping_interval_minutes:        Math.max(1, intOrDef(body.schedule?.ping_interval_minutes,  5)),
     deep_scan_hour:               Math.min(23, Math.max(0, intOrDef(body.schedule?.deep_scan_hour, 4))),
-    speedtest_interval_hours:     Math.max(1, intOrDef(body.schedule?.speedtest_interval_hours, 1)),
+    speedtest_interval_hours:     Math.max(1, intOrDef(body.schedule?.speedtest_interval_hours, 4)),
+    vpn_speedtest_interval_hours: Math.max(0, intOrDef(body.schedule?.vpn_speedtest_interval_hours, 4)),
     internet_outage_check_seconds: Math.max(5, Math.min(300, intOrDef(body.schedule?.internet_outage_check_seconds, 10))),
+    speedtest_provider: ['cloudflare', 'ookla'].includes(body.schedule?.speedtest_provider)
+      ? body.schedule.speedtest_provider : 'cloudflare',
   }
 }
 
@@ -114,7 +117,9 @@ describe('buildSchedule()', () => {
     expect(s.threat_interval_hours).toBe(6)
     expect(s.ping_interval_minutes).toBe(5)
     expect(s.deep_scan_hour).toBe(4)
-    expect(s.speedtest_interval_hours).toBe(1)
+    expect(s.speedtest_interval_hours).toBe(4)
+    expect(s.vpn_speedtest_interval_hours).toBe(4)
+    expect(s.speedtest_provider).toBe('cloudflare')
   })
 
   it('accepts valid values', () => {
@@ -149,7 +154,9 @@ describe('buildSchedule()', () => {
 
   it('falls back to default when value is NaN', () => {
     expect(buildSchedule({ schedule: { check_interval_minutes: 'abc' } }).check_interval_minutes).toBe(5)
-    expect(buildSchedule({ schedule: { speedtest_interval_hours: null } }).speedtest_interval_hours).toBe(1)
+    expect(buildSchedule({ schedule: { speedtest_interval_hours: null } }).speedtest_interval_hours).toBe(4)
+    expect(buildSchedule({ schedule: { vpn_speedtest_interval_hours: null } }).vpn_speedtest_interval_hours).toBe(4)
+    expect(buildSchedule({ schedule: { vpn_speedtest_interval_hours: 0 } }).vpn_speedtest_interval_hours).toBe(0)
   })
 
   it('internet_outage_check_seconds defaults to 10', () => {
@@ -171,6 +178,21 @@ describe('buildSchedule()', () => {
 
   it('internet_outage_check_seconds accepts valid in-range value', () => {
     expect(buildSchedule({ schedule: { internet_outage_check_seconds: 30 } }).internet_outage_check_seconds).toBe(30)
+  })
+
+  it('speedtest_provider defaults to cloudflare when missing', () => {
+    expect(buildSchedule({}).speedtest_provider).toBe('cloudflare')
+    expect(buildSchedule({ schedule: {} }).speedtest_provider).toBe('cloudflare')
+  })
+
+  it('speedtest_provider accepts ookla', () => {
+    expect(buildSchedule({ schedule: { speedtest_provider: 'ookla' } }).speedtest_provider).toBe('ookla')
+  })
+
+  it('speedtest_provider rejects unknown values and falls back to cloudflare', () => {
+    expect(buildSchedule({ schedule: { speedtest_provider: 'fast.com' } }).speedtest_provider).toBe('cloudflare')
+    expect(buildSchedule({ schedule: { speedtest_provider: null } }).speedtest_provider).toBe('cloudflare')
+    expect(buildSchedule({ schedule: { speedtest_provider: '<script>' } }).speedtest_provider).toBe('cloudflare')
   })
 })
 

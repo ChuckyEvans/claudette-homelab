@@ -56,20 +56,26 @@ The app runs well on a Raspberry Pi 4 (2 GB+) or any x86-64 Linux host.
 
 ```bash
 # 1. Copy and edit the example config
-cp config.example.yaml config.yaml
+cp config.example.yaml config.yaml   # Linux / macOS
+# Windows: copy config.example.yaml config.yaml
 # Edit config.yaml with your subnet, services, ISP details, etc.
 
-# 2. Build and run locally (Windows)
-.\scripts\windows\deploy-win.ps1
-
-# 2. Build and run locally (Linux / macOS)
-./scripts/linux/restart.sh
+# 2. Build and run
+.\scripts\windows\deploy-win.ps1     # Windows
+./scripts/linux/restart.sh           # Linux / macOS
 
 # 3. Open in browser
-open http://localhost:7654
+http://localhost:7654
 ```
 
 On first launch the setup wizard runs — create an admin account and confirm your config.
+
+> **Windows note:** Docker Desktop on Windows runs containers inside a WSL2 VM,
+> which means two things behave differently from a native Linux install:
+> - **Speedtest results** will read roughly 40–60% of your actual line speed due to VM networking overhead.
+> - **Device vendor/hostname info** from nmap is limited — ARP scanning only reaches the VM's virtual NIC, not your physical LAN.
+>
+> Neither of these affect internet connectivity monitoring, outage detection, or service health checks — those all work fully. For accurate speed and device data, running on a Raspberry Pi or Linux machine is recommended.
 
 ---
 

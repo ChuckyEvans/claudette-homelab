@@ -76,12 +76,12 @@ function portLabel(port) {
 }
 
 function rangeMs(key) {
-  if (key === 'today') { const s = new Date(); s.setHours(0, 0, 0, 0); return Date.now() - s.getTime() }
-  return { '7d': 7, '30d': 30, '90d': 90 }[key] * 86_400_000
+  const map = { '1h': 3_600_000, '3h': 10_800_000, '1d': 86_400_000, '7d': 7*86_400_000, '30d': 30*86_400_000, '90d': 90*86_400_000, '1y': 365*86_400_000 }
+  return map[key] ?? 86_400_000
 }
 
-const RANGE_OPTS   = ['today', '7d', '30d', '90d']
-const RANGE_LABELS = { today: 'Today', '7d': '7d', '30d': '30d', '90d': '90d' }
+const RANGE_OPTS   = ['1h', '3h', '1d', '7d', '30d', '90d', '1y', 'custom']
+const RANGE_LABELS = { '1h': '1h', '3h': '3h', '1d': '1d', '7d': '7d', '30d': '30d', '90d': '90d', '1y': '1y', custom: 'Custom' }
 
 const EV_FILTERS = [
   { label: 'All',      value: '' },
@@ -792,7 +792,7 @@ function CheckDetailModal({ check, onClose, onTraceStart, onTraceEnd }) {
   )
 }
 
-const TABS = [
+const ALL_TABS = [
   { id: 'overview',  label: 'Overview',   Icon: BarChart2 },
   { id: 'internet',  label: 'Internet',   Icon: Wifi      },
   { id: 'vpn',       label: 'VPN',        Icon: Shield    },
@@ -825,24 +825,31 @@ export default function Reports() {
   const [outageData,    setOutageData]    = useState(null)
   const [copiedIsp,     setCopiedIsp]     = useState(false)
   const [networkConfig, setNetworkConfig] = useState({})
+  const [speedtestProvider, setSpeedtestProvider] = useState('cloudflare')
   const [vpnMeta,       setVpnMeta]       = useState(null)
   const [internetStatusFilter, setInternetStatusFilter] = useState('') // '' | 'online' | 'offline' | 'isp' | 'infra'
   const [internetSearch,       setInternetSearch]       = useState('')
   const [speedtestSearch,      setSpeedtestSearch]      = useState('')
   const [speedtestBelowSla,    setSpeedtestBelowSla]    = useState(false)
   const [speedtestServerFilter, setSpeedtestServerFilter] = useState([])
+  const [speedChartType,       setSpeedChartType]       = useState('line')
+  const [customRange,          setCustomRange]          = useState(null) // { from, to } ms — applied custom range
+  const [customPickerOpen,     setCustomPickerOpen]     = useState(false)
+  const [inputFrom,            setInputFrom]            = useState('')
+  const [inputTo,              setInputTo]              = useState('')
   const [selectedCheck,        setSelectedCheck]        = useState(null)
   const [selectedOutage,       setSelectedOutage]       = useState(null) // outage object with optional .diagnostics
   const [traceActive,          setTraceActive]          = useState(false) // drives top progress bar
   const [ddnsData,             setDdnsData]             = useState(null)  // { status, history }
+  const [ddnsChecking,         setDdnsChecking]         = useState(false)
 
   function clearOutage() { setSelectedOutage(null) }
   const { toasts, add: addToast } = useToast()
   const tableRef = useRef(null)
 
   const loadData = useCallback(async () => {
-    const to   = drillDay?.to   ?? Date.now()
-    const from = drillDay?.from ?? (to - rangeMs(range))
+    const to   = drillDay?.to   ?? customRange?.to   ?? Date.now()
+    const from = drillDay?.from ?? customRange?.from ?? (to - rangeMs(range))
     setLoading(true)
     try {
       const res = await api.reports.get({
@@ -859,47 +866,47 @@ export default function Reports() {
     } finally {
       setLoading(false)
     }
-  }, [range, drillDay, eventFilter, macFilter, subnetFilter, page])
+  }, [range, customRange, drillDay, eventFilter, macFilter, subnetFilter, page])
 
   const loadCharts = useCallback(async () => {
-    const to   = Date.now()
-    const from = to - rangeMs(range)
+    const to   = customRange?.to   ?? Date.now()
+    const from = customRange?.from ?? (to - rangeMs(range))
     try {
       setChartData(await api.reports.chart({ from, to }))
     } catch (e) {
       console.error('[Reports/chart]', e)
     }
-  }, [range])
+  }, [range, customRange])
 
   const loadInternet = useCallback(async () => {
-    const to   = Date.now()
-    const from = to - rangeMs(range)
+    const to   = customRange?.to   ?? Date.now()
+    const from = customRange?.from ?? (to - rangeMs(range))
     try {
       setInternetData(await api.reports.internet({ from, to, limit: 100 }))
     } catch (e) {
       console.error('[Reports/internet]', e)
     }
-  }, [range])
+  }, [range, customRange])
 
   const loadSpeedtest = useCallback(async () => {
-    const to   = Date.now()
-    const from = to - rangeMs(range)
+    const to   = customRange?.to   ?? Date.now()
+    const from = customRange?.from ?? (to - rangeMs(range))
     try {
       setSpeedtestData(await api.reports.speedtest({ from, to, limit: 200 }))
     } catch (e) {
       console.error('[Reports/speedtest]', e)
     }
-  }, [range])
+  }, [range, customRange])
 
   const loadOutages = useCallback(async () => {
-    const to   = Date.now()
-    const from = to - rangeMs(range)
+    const to   = customRange?.to   ?? Date.now()
+    const from = customRange?.from ?? (to - rangeMs(range))
     try {
       setOutageData(await api.reports.outages({ from, to }))
     } catch (e) {
       console.error('[Reports/outages]', e)
     }
-  }, [range])
+  }, [range, customRange])
 
   const loadDdns = useCallback(async () => {
     try {
@@ -909,6 +916,32 @@ export default function Reports() {
       console.error('[Reports/ddns]', e)
     }
   }, [])
+
+  const handleForceDdnsCheck = useCallback(async () => {
+    setDdnsChecking(true)
+    try {
+      await api.ddns.update()
+      await loadDdns()
+    } catch (e) {
+      console.error('[Reports/ddns/force]', e)
+    } finally {
+      setDdnsChecking(false)
+    }
+  }, [loadDdns])
+
+  // Hide DDNS tab if provider has never been configured
+  // Hide VPN tab if no vpn_interface is configured AND no VPN records exist in the loaded data
+  const hasVpnConfig = !!networkConfig?.vpn_interface
+  const hasVpnData   = internetData?.checks?.some(c => c.vpn_up) ?? false
+  const TABS = ALL_TABS.filter(t => {
+    if (t.id === 'ddns') return (ddnsData?.status?.provider ?? null) !== null
+    if (t.id === 'vpn')  return hasVpnConfig || hasVpnData
+    return true
+  })
+  // If the active tab was hidden (e.g. VPN tab with no config), fall back to overview
+  useEffect(() => {
+    if (!TABS.some(t => t.id === tab)) setTab('overview')
+  }, [TABS, tab])
 
   useEffect(() => { loadData()    }, [loadData])
   useEffect(() => { loadCharts()  }, [loadCharts])
@@ -925,11 +958,28 @@ export default function Reports() {
       setIspConfig(cfg?.isp ?? {})
       setInfraConfig(cfg?.infra ?? {})
       setNetworkConfig({ connectivity_hosts: cfg?.network?.connectivity_hosts ?? [], vpn_interface: cfg?.network?.vpn_interface ?? null })
+      setSpeedtestProvider(cfg?.schedule?.speedtest_provider ?? 'cloudflare')
+      if (cfg?.network?.vpn_interface) {
+        api.services.vpnMeta().then(m => { if (m) setVpnMeta(m) }).catch(() => {})
+      }
     }).catch(() => {})
-    api.services.vpnMeta().then(m => { if (m) setVpnMeta(m) }).catch(() => {})
   }, [])
 
-  function changeRange(r) { setRange(r); setDrillDay(null); setPage(0) }
+  function changeRange(r) {
+    if (r === 'custom') {
+      const now = new Date().toISOString().slice(0, 16)
+      setInputFrom(now)
+      setInputTo(now)
+      setCustomPickerOpen(true)
+      setRange('custom')
+      return
+    }
+    setRange(r)
+    setCustomRange(null)
+    setCustomPickerOpen(false)
+    setDrillDay(null)
+    setPage(0)
+  }
   function changeEvFilter(v) { setEventFilter(v); setPage(0) }
 
   function handleBarClick(barData, seriesKey) {
@@ -954,7 +1004,11 @@ export default function Reports() {
 
   const dateStamp = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
   const fmtLocalTs = ts => { const d = new Date(ts); const p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` }
-  const rangeLabel = drillDay ? drillDay.label : RANGE_LABELS[range]
+  const rangeLabel = drillDay
+    ? drillDay.label
+    : range === 'custom' && customRange
+      ? `${new Date(customRange.from).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} – ${new Date(customRange.to).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`
+      : RANGE_LABELS[range]
 
   // VPN exit metadata: prefer the persisted state (updated on every connectivity check),
   // fall back to the most recent VPN speedtest row in the current range.
@@ -963,8 +1017,8 @@ export default function Reports() {
   async function handleExportCsv() {
     try {
       setExporting('csv')
-      const to   = drillDay?.to   ?? Date.now()
-      const from = drillDay?.from ?? (to - rangeMs(range))
+      const to   = drillDay?.to   ?? customRange?.to   ?? Date.now()
+      const from = drillDay?.from ?? customRange?.from ?? (to - rangeMs(range))
       const [inetData, speedData, evData, outData] = await Promise.all([
         api.reports.internet({ from, to, limit: 10000 }),
         api.reports.speedtest({ from, to, limit: 10000 }),
@@ -1099,6 +1153,7 @@ export default function Reports() {
           server_name:      r.server_name     ?? '',
           server_host:      r.server_host     ?? '',
           server_location:  r.server_location ?? '',
+          provider:         r.provider        ?? 'cloudflare',
           client_ip:        r.client_ip       ?? '',
           client_isp:       r.client_isp      ?? '',
           client_city:      r.client_city     ?? '',
@@ -1130,8 +1185,8 @@ export default function Reports() {
   async function handleExportPdf() {
     try {
       setExporting('pdf')
-      const to   = drillDay?.to   ?? Date.now()
-      const from = drillDay?.from ?? (to - rangeMs(range))
+      const to   = drillDay?.to   ?? customRange?.to   ?? Date.now()
+      const from = drillDay?.from ?? customRange?.from ?? (to - rangeMs(range))
       const [speedData, evData] = await Promise.all([
         api.reports.speedtest({ from, to, limit: 200 }),
         api.reports.get({ from, to, limit: 200, offset: 0 }),
@@ -1140,6 +1195,7 @@ export default function Reports() {
         rangeLabel,
         summary:       data?.summary,
         internetStats: chartData?.internetStats,
+        internet:      chartData?.internet ?? [],
         outages:       outageData,
         ispConfig,
         daily:         chartData?.daily,
@@ -1170,8 +1226,22 @@ export default function Reports() {
     try {
       setRunningVpn(true)
       await api.reports.runVpnSpeedtest()
-      // VPN test is one direction at a time, ~35s
-      setTimeout(() => { loadSpeedtest(); setRunningVpn(false) }, 35000)
+      // Listen for SSE completion — clear spinner immediately when the result arrives
+      const onDone = (e) => {
+        if (e.detail?.via === 'vpn') {
+          window.removeEventListener('claudette:speedtest', onDone)
+          clearTimeout(fallbackTimer)
+          loadSpeedtest()
+          setRunningVpn(false)
+        }
+      }
+      window.addEventListener('claudette:speedtest', onDone)
+      // Fallback: Ookla can take up to 90s; clear spinner even if SSE is missed
+      const fallbackTimer = setTimeout(() => {
+        window.removeEventListener('claudette:speedtest', onDone)
+        loadSpeedtest()
+        setRunningVpn(false)
+      }, 90000)
     } catch (e) {
       console.error('VPN speed test failed:', e)
       addToast(e.message || 'VPN speed test failed', 'error')
@@ -1446,7 +1516,7 @@ export default function Reports() {
         <div className="flex gap-0.5 p-0.5 bg-[#0a0a18] rounded-lg border border-[#1a1a30]">
           {RANGE_OPTS.map(r => (
             <button key={r} onClick={() => changeRange(r)}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
                 range === r && !drillDay ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -1455,6 +1525,70 @@ export default function Reports() {
           ))}
         </div>
       </div>
+
+      {/* Custom date/time range picker */}
+      {customPickerOpen && (
+        <div className="flex flex-wrap items-end gap-4 px-6 py-3 border-b border-[#1a1a30] bg-[#06060f]">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] text-slate-500 uppercase tracking-wider">From</label>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="datetime-local"
+                value={inputFrom}
+                onChange={e => setInputFrom(e.target.value)}
+                className="bg-[#0a0a18] border border-[#1a1a30] rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500/60 [color-scheme:dark]"
+              />
+              <button
+                title="Set to start of day (00:00:00)"
+                onClick={() => setInputFrom(v => v ? v.slice(0, 11) + '00:00' : v)}
+                className="px-2 py-1.5 bg-[#0a0a18] border border-[#1a1a30] hover:border-slate-500/40 text-slate-500 hover:text-slate-300 text-[10px] rounded-lg transition-colors whitespace-nowrap"
+              >00:00</button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] text-slate-500 uppercase tracking-wider">To</label>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="datetime-local"
+                value={inputTo}
+                onChange={e => setInputTo(e.target.value)}
+                className="bg-[#0a0a18] border border-[#1a1a30] rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500/60 [color-scheme:dark]"
+              />
+              <button
+                title="Set to end of day (23:59)"
+                onClick={() => setInputTo(v => v ? v.slice(0, 11) + '23:59' : v)}
+                className="px-2 py-1.5 bg-[#0a0a18] border border-[#1a1a30] hover:border-slate-500/40 text-slate-500 hover:text-slate-300 text-[10px] rounded-lg transition-colors whitespace-nowrap"
+              >23:59</button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={!inputFrom || !inputTo}
+              onClick={() => {
+                const from = new Date(inputFrom).getTime()
+                const to   = new Date(inputTo).getTime()
+                setCustomRange({ from, to })
+                setCustomPickerOpen(false)
+                setDrillDay(null)
+                setPage(0)
+              }}
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium rounded-lg transition-colors"
+            >Apply</button>
+            <button
+              onClick={() => {
+                setCustomPickerOpen(false)
+                if (!customRange) { setRange('30d'); setCustomRange(null) }
+              }}
+              className="px-3.5 py-1.5 bg-[#0a0a18] border border-[#1a1a30] hover:border-slate-500/40 text-slate-400 hover:text-slate-300 text-xs font-medium rounded-lg transition-colors"
+            >Cancel</button>
+          </div>
+          {customRange && (
+            <span className="text-[10px] text-slate-500 self-center">
+              Applied: {new Date(customRange.from).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} → {new Date(customRange.to).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ── Persistent filter bar (shown whenever the current tab has filterable data) ── */}
       {(tab === 'activity' || tab === 'internet' || tab === 'speedtest') && (
@@ -1811,7 +1945,9 @@ export default function Reports() {
               {chartData?.internetStats ? (() => {
                 const stats    = chartData.internetStats
                 const uptime   = Number(stats.uptime)
-                const periodMs = drillDay ? (drillDay.to - drillDay.from) : rangeMs(range)
+                const periodMs = drillDay ? (drillDay.to - drillDay.from)
+                  : customRange ? (customRange.to - customRange.from)
+                  : rangeMs(range)
                 const uptimeMs = Math.round(periodMs * (uptime / 100))
                 const downMs   = outageData?.totalDowntimeMs ?? 0
                 return (
@@ -2266,7 +2402,7 @@ export default function Reports() {
                 </div>
               </div>
 
-              {/* VPN Latency chart */}
+              {/* VPN Latency chart — always show when internet data exists; empty message when VPN is down */}
               {(chartData?.internet?.length ?? 0) > 0 && (
                 <div className="bg-[#0a0a18] border border-violet-500/20 rounded-xl p-4">
                   <div className="flex items-center gap-3 mb-3">
@@ -2276,16 +2412,23 @@ export default function Reports() {
                       VPN
                     </span>
                   </div>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={chartData.internet} margin={{ top: 2, right: 8, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
-                      <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
-                        tickFormatter={v => new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} />
-                      <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit="ms" />
-                      <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
-                      <Line type="monotone" dataKey="vpn_ms" name="VPN Latency" stroke="#a78bfa" dot={false} strokeWidth={1.5} unit="ms" connectNulls={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  {chartData.internet.some(r => r.vpn_ms != null) ? (
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={chartData.internet} margin={{ top: 2, right: 8, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
+                        <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
+                          tickFormatter={v => new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} />
+                        <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit="ms" />
+                        <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                        <Line type="monotone" dataKey="vpn_ms" name="VPN Latency" stroke="#a78bfa" dot={false} strokeWidth={1.5} unit="ms" connectNulls={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-[200px] flex flex-col items-center justify-center gap-2">
+                      <p className="text-sm text-slate-400">No VPN latency data in this period</p>
+                      <p className="text-[11px] text-slate-500">Ensure the VPN interface ({networkConfig?.vpn_interface ?? 'tun0'}) is connected</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2356,7 +2499,7 @@ export default function Reports() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-white">Speed Test History</p>
-                <p className="text-[11px] text-slate-500 mt-0.5">via Cloudflare — Download / Upload / Ping</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">via {speedtestProvider === 'ookla' ? 'Ookla' : 'Cloudflare'} — Download / Upload / Ping</p>
               </div>
               <div className="flex items-end gap-2">
                 {/* Direct button */}
@@ -2383,13 +2526,13 @@ export default function Reports() {
             {running && (
               <div className="flex items-center gap-2 text-xs text-indigo-400 bg-indigo-500/5 border border-indigo-500/20 rounded-lg px-3 py-2">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                Direct speed test in progress — measuring ISP via Cloudflare (~30–60s)…
+                Direct speed test in progress — measuring ISP via {speedtestProvider === 'ookla' ? 'Ookla' : 'Cloudflare'} (~30–60s)…
               </div>
             )}
             {runningVpn && (
               <div className="flex items-center gap-2 text-xs text-violet-400 bg-violet-500/5 border border-violet-500/20 rounded-lg px-3 py-2">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                VPN speed test in progress — measuring {networkConfig?.vpn_interface ?? 'VPN'} via Cloudflare (~30–60s)…
+                VPN speed test in progress — measuring {networkConfig?.vpn_interface ?? 'VPN'} via {speedtestProvider === 'ookla' ? 'Ookla' : 'Cloudflare'} (~30–60s)…
               </div>
             )}
 
@@ -2413,19 +2556,18 @@ export default function Reports() {
               const avgDownPct = planDown > 0 && avgDown  ? Math.round((parseFloat(avgDown)  / planDown) * 100) : null
               const avgUpPct   = planUp   > 0 && avgUp    ? Math.round((parseFloat(avgUp)    / planUp)   * 100) : null
 
-              // Build merged chart data: align direct and vpn rows by nearest-timestamp bucket
-              const chartRows = (() => {
-                const allTs = [...new Set([...directRows.map(r => r.ts), ...vpnRows.map(r => r.ts)])].sort((a, b) => a - b)
-                const dMap = new Map(directRows.map(r => [r.ts, r]))
-                const vMap = new Map(vpnRows.map(r => [r.ts, r]))
-                return allTs.map(ts => ({
-                  ts,
-                  direct_down: dMap.get(ts)?.download_mbps ?? null,
-                  direct_up:   dMap.get(ts)?.upload_mbps   ?? null,
-                  vpn_down:    vMap.get(ts)?.download_mbps ?? null,
-                  vpn_up:      vMap.get(ts)?.upload_mbps   ?? null,
-                }))
-              })()
+              // Separate chart data for each series so each chart's X-axis only spans its own tests.
+              // Reverse so charts render oldest → newest (left to right).
+              const directChartRows = [...directRows].reverse().map(r => ({
+                ts: r.ts,
+                direct_down: r.download_mbps ?? null,
+                direct_up:   r.upload_mbps   ?? null,
+              }))
+              const vpnChartRows = [...vpnRows].reverse().map(r => ({
+                ts: r.ts,
+                vpn_down: r.download_mbps ?? null,
+                vpn_up:   r.upload_mbps   ?? null,
+              }))
 
               const StatCard = ({ label, value, color, border }) => (
                 <div className={`rounded-xl px-4 py-3 border bg-[#0a0a18] ${border}`}>
@@ -2510,6 +2652,21 @@ export default function Reports() {
                     )
                   })()}
 
+                  {/* Chart type pill selector */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-slate-600 mr-0.5">Chart</span>
+                    {[{ id: 'line', label: 'Line' }, { id: 'bar', label: 'Bar' }].map(ct => (
+                      <button key={ct.id} onClick={() => setSpeedChartType(ct.id)}
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors border ${
+                          speedChartType === ct.id
+                            ? 'bg-indigo-600/30 border-indigo-500/50 text-indigo-300'
+                            : 'bg-transparent border-[#1a1a30] text-slate-500 hover:text-slate-300 hover:border-slate-500/40'
+                        }`}>
+                        {ct.label}
+                      </button>
+                    ))}
+                  </div>
+
                   {/* Trend charts — split Direct / VPN side by side when VPN data exists */}
                   {vpnRows.length > 0 ? (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -2531,17 +2688,31 @@ export default function Reports() {
                           </div>
                         </div>
                         <ResponsiveContainer width="100%" height={180}>
-                          <LineChart data={chartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
-                            <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
-                              tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
-                            <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
-                            <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
-                            <Line type="monotone" dataKey="direct_down" name="Direct ↓" stroke="#10b981" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                            <Line type="monotone" dataKey="direct_up"   name="Direct ↑" stroke="#38bdf8" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                            {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown}`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
-                            {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planUp}`,   fill: '#38bdf8', fontSize: 9, opacity: 0.7 }} />}
-                          </LineChart>
+                          {speedChartType === 'bar' ? (
+                            <BarChart data={directChartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
+                              <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
+                                tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
+                              <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
+                              <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                              <Bar dataKey="direct_down" name="Direct ↓" fill="#10b981" unit=" Mbps" radius={[2,2,0,0]} />
+                              <Bar dataKey="direct_up"   name="Direct ↑" fill="#38bdf8" unit=" Mbps" radius={[2,2,0,0]} />
+                              {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown}`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
+                              {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planUp}`,   fill: '#38bdf8', fontSize: 9, opacity: 0.7 }} />}
+                            </BarChart>
+                          ) : (
+                            <LineChart data={directChartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
+                              <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
+                                tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
+                              <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
+                              <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                              <Line type="monotone" dataKey="direct_down" name="Direct ↓" stroke="#10b981" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                              <Line type="monotone" dataKey="direct_up"   name="Direct ↑" stroke="#38bdf8" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                              {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown}`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
+                              {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planUp}`,   fill: '#38bdf8', fontSize: 9, opacity: 0.7 }} />}
+                            </LineChart>
+                          )}
                         </ResponsiveContainer>
                       </div>
                       {/* VPN chart */}
@@ -2555,21 +2726,33 @@ export default function Reports() {
                             <span className="flex items-center gap-1.5 text-[10px] text-violet-400/80">
                               <span className="inline-block w-5 border-t-2 border-violet-400" /> ↓
                             </span>
-                            <span className="flex items-center gap-1.5 text-[10px] text-violet-300/70">
-                              <span className="inline-block w-5 border-t-2 border-violet-300/70" /> ↑
+                            <span className="flex items-center gap-1.5 text-[10px] text-orange-400/80">
+                              <span className="inline-block w-5 border-t-2 border-orange-400" /> ↑
                             </span>
                           </div>
                         </div>
                         <ResponsiveContainer width="100%" height={180}>
-                          <LineChart data={chartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
-                            <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
-                              tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
-                            <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
-                            <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
-                            <Line type="monotone" dataKey="vpn_down" name="VPN ↓" stroke="#a78bfa" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                            <Line type="monotone" dataKey="vpn_up"   name="VPN ↑" stroke="#c4b5fd" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                          </LineChart>
+                          {speedChartType === 'bar' ? (
+                            <BarChart data={vpnChartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
+                              <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
+                                tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
+                              <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
+                              <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                              <Bar dataKey="vpn_down" name="VPN ↓" fill="#a78bfa" unit=" Mbps" radius={[2,2,0,0]} />
+                              <Bar dataKey="vpn_up"   name="VPN ↑" fill="#fb923c" unit=" Mbps" radius={[2,2,0,0]} />
+                            </BarChart>
+                          ) : (
+                            <LineChart data={vpnChartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
+                              <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
+                                tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
+                              <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
+                              <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                              <Line type="monotone" dataKey="vpn_down" name="VPN ↓" stroke="#a78bfa" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                              <Line type="monotone" dataKey="vpn_up"   name="VPN ↑" stroke="#fb923c" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                            </LineChart>
+                          )}
                         </ResponsiveContainer>
                       </div>
                     </div>
@@ -2599,17 +2782,31 @@ export default function Reports() {
                       </div>
                     </div>
                     <ResponsiveContainer width="100%" height={200}>
-                      <LineChart data={chartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
-                        <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
-                          tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
-                        <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
-                        <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
-                        <Line type="monotone" dataKey="direct_down" name="Direct ↓" stroke="#10b981" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                        <Line type="monotone" dataKey="direct_up"   name="Direct ↑" stroke="#38bdf8" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
-                        {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown} Mbps`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
-                        {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planUp} Mbps`,   fill: '#38bdf8', fontSize: 9, opacity: 0.7 }} />}
-                      </LineChart>
+                      {speedChartType === 'bar' ? (
+                        <BarChart data={directChartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
+                          <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
+                            tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
+                          <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
+                          <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                          <Bar dataKey="direct_down" name="Direct ↓" fill="#10b981" unit=" Mbps" radius={[2,2,0,0]} />
+                          <Bar dataKey="direct_up"   name="Direct ↑" fill="#38bdf8" unit=" Mbps" radius={[2,2,0,0]} />
+                          {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown} Mbps`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
+                          {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planUp} Mbps`,   fill: '#38bdf8', fontSize: 9, opacity: 0.7 }} />}
+                        </BarChart>
+                      ) : (
+                        <LineChart data={directChartRows} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
+                          <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
+                            tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
+                          <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
+                          <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                          <Line type="monotone" dataKey="direct_down" name="Direct ↓" stroke="#10b981" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                          <Line type="monotone" dataKey="direct_up"   name="Direct ↑" stroke="#38bdf8" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
+                          {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown} Mbps`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
+                          {planUp   > 0 && <ReferenceLine y={planUp}   stroke="#38bdf8" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planUp} Mbps`,   fill: '#38bdf8', fontSize: 9, opacity: 0.7 }} />}
+                        </LineChart>
+                      )}
                     </ResponsiveContainer>
                   </div>
                   )}
@@ -2678,7 +2875,10 @@ export default function Reports() {
                               <td className="px-3 py-1.5 text-right text-violet-400">{r.ping_ms ?? '—'} ms</td>
                               <td className="px-3 py-1.5 text-slate-400 max-w-[140px] truncate">{r.client_isp ?? '—'}</td>
                               <td className="px-3 py-1.5 text-slate-500 font-mono">{r.client_ip ?? '—'}</td>
-                              <td className="px-3 py-1.5 text-slate-500 truncate max-w-[160px]">{String(r.server_name ?? r.server_host ?? '—').replace(' [object Object]', '')}</td>
+                              <td className="px-3 py-1.5 text-slate-500 truncate max-w-[160px]">
+                                {String(r.server_name ?? r.server_host ?? '—').replace(' [object Object]', '')}
+                                {r.provider === 'ookla' && <span className="ml-1.5 text-[9px] font-semibold text-amber-500/70 uppercase tracking-wide">Ookla</span>}
+                              </td>
                             </tr>
                             )
                           })}
@@ -2763,65 +2963,87 @@ export default function Reports() {
             dyndns: 'DynDNS', afraid: 'Afraid.org', cloudflare: 'Cloudflare',
           }
 
-          const notConfigured = !ds?.provider
+          // How long the current IP has been stable (since most recent ip_changed event)
+          // eslint-disable-next-line react-hooks/purity
+          const now        = Date.now()
+          const lastChange = ipChanges[0]?.ts ?? ds?.last_updated ?? null
+          const stableMs   = lastChange ? now - lastChange : null
+          function fmtDur(ms) {
+            if (ms == null) return '—'
+            const s = Math.floor(ms / 1000)
+            if (s < 120)       return `${s}s`
+            const m = Math.floor(s / 60)
+            if (m < 120)       return `${m}m`
+            const h = Math.floor(m / 60)
+            if (h < 48)        return `${h}h`
+            return `${Math.floor(h / 24)}d`
+          }
+
+          // Check health: warn if last_check is older than 2.5× the configured interval
+          const intervalMs   = (ds?.interval ?? 15) * 60 * 1000
+          const checkAge     = ds?.last_check ? now - ds.last_check : null
+          const checkStale   = checkAge != null && checkAge > intervalMs * 2.5
 
           return (
             <div className="space-y-5">
 
-              {/* ── Hero config banner ─────────────────────────────────── */}
+              {/* ── Hero banner ───────────────────────────────────────── */}
               <div className={`rounded-xl border px-5 py-4 flex flex-col md:flex-row md:items-center gap-4 ${
-                notConfigured
-                  ? 'bg-[#0a0a18] border-[#1a1a30]'
-                  : ds?.enabled
-                    ? 'bg-emerald-950/20 border-emerald-500/20'
-                    : 'bg-[#0a0a18] border-amber-500/20'
+                ds?.enabled ? 'bg-emerald-950/20 border-emerald-500/20' : 'bg-[#0a0a18] border-amber-500/20'
               }`}>
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                    notConfigured ? 'bg-slate-500/10' : ds?.enabled ? 'bg-emerald-500/15' : 'bg-amber-500/10'
-                  }`}>
-                    <Globe className={`w-5 h-5 ${notConfigured ? 'text-slate-600' : ds?.enabled ? 'text-emerald-400' : 'text-amber-400'}`} />
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${ds?.enabled ? 'bg-emerald-500/15' : 'bg-amber-500/10'}`}>
+                    <Globe className={`w-5 h-5 ${ds?.enabled ? 'text-emerald-400' : 'text-amber-400'}`} />
                   </div>
                   <div className="min-w-0">
-                    {notConfigured ? (
-                      <>
-                        <p className="text-sm font-semibold text-slate-400">DDNS Not Configured</p>
-                        <p className="text-[11px] text-slate-600">Go to Settings → DDNS to set up your provider and hostname.</p>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-base font-bold text-white font-mono truncate">{ds.hostname ?? '(hostname not set)'}</span>
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                            ds.enabled
-                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                              : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                          }`}>{ds.enabled ? 'Active' : 'Disabled'}</span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          {providerLabel[ds.provider] ?? ds.provider}
-                          {' · '}checked every {ds.interval} min
-                        </p>
-                      </>
-                    )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-base font-bold text-white font-mono truncate">{ds?.hostname ?? '(hostname not set)'}</span>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                        ds?.enabled
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                          : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                      }`}>{ds?.enabled ? 'Active' : 'Disabled'}</span>
+                      {checkStale && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-amber-500/10 border-amber-500/30 text-amber-400 flex items-center gap-1">
+                          <AlertTriangle className="w-2.5 h-2.5" /> Checks stale
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {providerLabel[ds?.provider] ?? ds?.provider} · checked every {ds?.interval ?? '?'} min
+                      {ds?.last_check && (
+                        <> · last check <span className={checkStale ? 'text-amber-400' : 'text-slate-400'}>{fmtDate(ds.last_check)}</span></>
+                      )}
+                    </p>
                   </div>
                 </div>
-                {!notConfigured && (
-                  <div className="flex gap-6 flex-shrink-0 text-center">
+                <div className="flex items-center gap-4 flex-shrink-0">
+                  <div className="flex gap-6 text-center">
                     <div>
                       <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Current IP</p>
-                      <p className={`text-sm font-mono font-bold ${ds.last_ip ? 'text-emerald-300' : 'text-slate-600'}`}>{ds.last_ip ?? '—'}</p>
+                      <p className={`text-sm font-mono font-bold ${ds?.last_ip ? 'text-emerald-300' : 'text-slate-600'}`}>{ds?.last_ip ?? '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">IP Stable For</p>
+                      <p className="text-sm font-mono font-bold text-sky-300">{fmtDur(stableMs)}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Last Updated</p>
-                      <p className="text-sm text-slate-300">{ds.last_updated ? new Date(ds.last_updated).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-0.5">Last Checked</p>
-                      <p className="text-sm text-slate-300">{ds.last_check ? new Date(ds.last_check).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</p>
+                      <p className="text-sm text-slate-300">{ds?.last_updated ? new Date(ds.last_updated).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</p>
                     </div>
                   </div>
-                )}
+                  <button
+                    onClick={handleForceDdnsCheck}
+                    disabled={ddnsChecking || !ds?.enabled}
+                    title="Force IP check now"
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {ddnsChecking
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking…</>
+                      : <><RefreshCw className="w-3.5 h-3.5" /> Check Now</>
+                    }
+                  </button>
+                </div>
               </div>
 
               {/* Last error banner */}
@@ -2836,21 +3058,21 @@ export default function Reports() {
               )}
 
               {/* ── Stat cards ─────────────────────────────────────────── */}
-              {!notConfigured && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[
-                    { label: 'Provider',       value: providerLabel[ds?.provider] ?? ds?.provider ?? '—', color: 'text-sky-300' },
-                    { label: 'Dynamic Host',   value: ds?.hostname ?? '—',  color: ds?.hostname ? 'text-indigo-300' : 'text-slate-600', mono: true, small: true },
-                    { label: 'IP Changes',     value: ipChanges.length,     color: 'text-emerald-300' },
-                    { label: 'Failed Updates', value: failures.length,      color: failures.length > 0 ? 'text-red-400' : 'text-slate-500' },
-                  ].map(({ label, value, color, mono, small }) => (
-                    <div key={label} className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl px-4 py-3">
-                      <p className="text-[11px] text-slate-500 mb-1">{label}</p>
-                      <p className={`font-bold tabular-nums truncate ${color} ${mono ? 'font-mono' : ''} ${small ? 'text-sm' : 'text-lg'}`}>{value}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                {[
+                  { label: 'Provider',       value: providerLabel[ds?.provider] ?? ds?.provider ?? '—', color: 'text-sky-300' },
+                  { label: 'Dynamic Host',   value: ds?.hostname ?? '—', color: ds?.hostname ? 'text-indigo-300' : 'text-slate-600', mono: true, small: true },
+                  { label: 'Current IP',     value: ds?.last_ip ?? '—', color: ds?.last_ip ? 'text-emerald-300' : 'text-slate-600', mono: true },
+                  { label: 'IP Stable For',  value: fmtDur(stableMs), color: 'text-sky-300', mono: true },
+                  { label: 'IP Changes',     value: ipChanges.length, color: 'text-violet-300' },
+                  { label: 'Failed Updates', value: failures.length,  color: failures.length > 0 ? 'text-red-400' : 'text-slate-500' },
+                ].map(({ label, value, color, mono, small }) => (
+                  <div key={label} className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl px-4 py-3">
+                    <p className="text-[11px] text-slate-500 mb-1">{label}</p>
+                    <p className={`font-bold tabular-nums truncate ${color} ${mono ? 'font-mono' : ''} ${small ? 'text-sm' : 'text-lg'}`}>{value}</p>
+                  </div>
+                ))}
+              </div>
 
               {/* ── IP change history ───────────────────────────────────── */}
               <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl overflow-hidden">
@@ -2861,7 +3083,7 @@ export default function Reports() {
                 {ipChanges.length === 0 ? (
                   <div className="py-10 flex flex-col items-center gap-2 text-slate-600">
                     <Globe className="w-7 h-7 opacity-30" />
-                    <p className="text-sm">{notConfigured ? 'Configure DDNS in Settings first' : 'No IP changes recorded yet — your IP will be logged here when it changes'}</p>
+                    <p className="text-sm">No IP changes recorded yet — your IP will be logged here when it changes</p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -2869,24 +3091,26 @@ export default function Reports() {
                       <thead>
                         <tr className="border-b border-[#1a1a30] bg-[#080810]">
                           <th className="px-4 py-2 text-left text-slate-500 font-medium">Time</th>
-                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Provider</th>
-                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Hostname</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">Held for</th>
                           <th className="px-4 py-2 text-left text-slate-500 font-medium">Old IP</th>
                           <th className="px-4 py-2 text-left text-slate-500 font-medium">New IP</th>
                           <th className="px-4 py-2 text-left text-slate-500 font-medium">Provider Response</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#0f0f20]">
-                        {ipChanges.map((e, i) => (
-                          <tr key={i} className="hover:bg-white/[0.02] transition-colors">
-                            <td className="px-4 py-2 text-slate-400 tabular-nums whitespace-nowrap">{fmtDate(e.ts)}</td>
-                            <td className="px-4 py-2 text-slate-300">{providerLabel[e.provider] ?? e.provider ?? '—'}</td>
-                            <td className="px-4 py-2 font-mono text-indigo-300 text-[11px]">{e.hostname ?? ds?.hostname ?? '—'}</td>
-                            <td className="px-4 py-2 font-mono text-slate-500">{e.old_ip ?? <span className="text-slate-700 italic">first record</span>}</td>
-                            <td className="px-4 py-2 font-mono text-emerald-300 font-semibold">{e.new_ip}</td>
-                            <td className="px-4 py-2 text-slate-500 font-mono text-[11px]">{e.response ?? '—'}</td>
-                          </tr>
-                        ))}
+                        {ipChanges.map((e, i) => {
+                          const prev = ipChanges[i + 1]  // history is newest-first
+                          const heldMs = prev ? e.ts - prev.ts : null
+                          return (
+                            <tr key={i} className="hover:bg-white/[0.02] transition-colors">
+                              <td className="px-4 py-2 text-slate-400 tabular-nums whitespace-nowrap">{fmtDate(e.ts)}</td>
+                              <td className="px-4 py-2 font-mono text-sky-300 text-[11px]">{heldMs != null ? fmtDur(heldMs) : <span className="text-slate-700 italic">first record</span>}</td>
+                              <td className="px-4 py-2 font-mono text-slate-500">{e.old_ip ?? <span className="text-slate-700 italic">—</span>}</td>
+                              <td className="px-4 py-2 font-mono text-emerald-300 font-semibold">{e.new_ip}</td>
+                              <td className="px-4 py-2 text-slate-500 font-mono text-[11px]">{e.response ?? '—'}</td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -2941,6 +3165,7 @@ export default function Reports() {
                         <tr className="border-b border-[#1a1a30]">
                           <th className="px-4 py-2 text-left text-slate-500 font-medium">Time</th>
                           <th className="px-4 py-2 text-left text-slate-500 font-medium">Event</th>
+                          <th className="px-4 py-2 text-left text-slate-500 font-medium">User</th>
                           <th className="px-4 py-2 text-left text-slate-500 font-medium">Details</th>
                         </tr>
                       </thead>
@@ -2952,12 +3177,17 @@ export default function Reports() {
                               <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${
                                 e.event === 'ip_changed'
                                   ? 'text-emerald-400 bg-emerald-500/10'
+                                  : e.event === 'force_update'
+                                  ? 'text-sky-400 bg-sky-500/10'
                                   : 'text-red-400 bg-red-500/10'
-                              }`}>{e.event}</span>
+                              }`}>{e.event === 'ip_changed' ? 'IP changed' : e.event === 'force_update' ? 'Force update' : 'Update failed'}</span>
+                            </td>
+                            <td className="px-4 py-2 text-violet-400 font-mono text-[11px]">
+                              {(!e.triggered_by || e.triggered_by === 'system') ? '' : e.triggered_by}
                             </td>
                             <td className="px-4 py-2 text-slate-400 font-mono text-[11px]">
-                              {e.event === 'ip_changed'
-                                ? `${e.old_ip ?? '?'} → ${e.new_ip}${e.hostname ? ` (${e.hostname})` : ''}`
+                              {e.event === 'ip_changed' || e.event === 'force_update'
+                                ? `${e.old_ip ?? '?'} → ${e.new_ip}`
                                 : e.error ?? '—'}
                             </td>
                           </tr>

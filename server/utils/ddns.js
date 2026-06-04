@@ -166,7 +166,7 @@ async function updateCloudflare(cfg, ip) {
 }
 
 // ── Main entrypoint ───────────────────────────────────────────────────────────
-export async function checkAndUpdateDdns(cfg, { force = false } = {}) {
+export async function checkAndUpdateDdns(cfg, { force = false, triggeredBy = 'system' } = {}) {
   if (!cfg?.ddns?.enabled) return
 
   const provider    = cfg.ddns.provider
@@ -203,12 +203,13 @@ export async function checkAndUpdateDdns(cfg, { force = false } = {}) {
       case 'cloudflare': result = await updateCloudflare(providerCfg, ip); break
       default: throw new Error(`Unknown provider: ${provider}`)
     }
+    const ipActuallyChanged = ip !== status.last_ip
     writeDdnsStatus({ last_ip: ip, last_updated: now, last_check: now, last_error: null, provider, response: result.response })
-    appendDdnsHistory({ ts: now, event: 'ip_changed', old_ip: status.last_ip ?? null, new_ip: ip, provider, response: result.response }, cfg.ddns.history_retention_days)
+    appendDdnsHistory({ ts: now, event: ipActuallyChanged ? 'ip_changed' : 'force_update', old_ip: status.last_ip ?? null, new_ip: ip, provider, response: result.response, triggered_by: triggeredBy }, cfg.ddns.history_retention_days)
     console.log(`[ddns] Update OK: ${result.response}`)
   } catch (err) {
     writeDdnsStatus({ ...status, last_ip: ip, last_check: now, last_error: err.message })
-    appendDdnsHistory({ ts: now, event: 'update_failed', ip, provider, error: err.message }, cfg.ddns.history_retention_days)
+    appendDdnsHistory({ ts: now, event: 'update_failed', ip, provider, error: err.message, triggered_by: triggeredBy }, cfg.ddns.history_retention_days)
     console.error('[ddns] Update failed:', err.message)
   }
 }

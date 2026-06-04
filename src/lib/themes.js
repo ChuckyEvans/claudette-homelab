@@ -491,3 +491,53 @@ export function applyTheme(themeId) {
     document.documentElement.style.removeProperty('--theme-photo')
   }
 }
+
+// ── Accent colour customisation ───────────────────────────────────────────────
+// Each preset lists the 5 RGB triplets for --ac-300 … --ac-700.
+
+export const ACCENT_PRESETS = [
+  { id: 'theme',   label: 'Theme default', description: 'Use the accent from the selected theme' },
+  { id: 'indigo',  label: 'Indigo',        description: 'Classic deep indigo',  swatchHex: '#818cf8', vars: ['165 180 252', '129 140 248',  '99 102 241',  '79  70 229',  '67  56 202'] },
+  { id: 'violet',  label: 'Violet',        description: 'Rich violet purple',   swatchHex: '#a78bfa', vars: ['196 181 253', '167 139 250', '139  92 246', '124  58 237', '109  40 217'] },
+  { id: 'sky',     label: 'Sky Blue',      description: 'Clear sky blue',       swatchHex: '#38bdf8', vars: ['125 211 252',  '56 189 248',  '14 165 233',   '2 132 199',   '3 105 161'] },
+  { id: 'cyan',    label: 'Cyan',          description: 'Electric cyan',        swatchHex: '#22d3ee', vars: ['103 232 249',  '34 211 238',   '6 182 212',   '8 145 178',  '14 116 144'] },
+  { id: 'teal',    label: 'Teal',          description: 'Deep teal',            swatchHex: '#2dd4bf', vars: [ '94 234 212',  '45 212 191',  '20 184 166',  '13 148 136',  '15 118 110'] },
+  { id: 'emerald', label: 'Emerald',       description: 'Vivid emerald green',  swatchHex: '#34d399', vars: ['110 231 183',  '52 211 153',  '16 185 129',   '5 150 105',   '4 120  87'] },
+  { id: 'green',   label: 'Green',         description: 'Fresh leafy green',    swatchHex: '#4ade80', vars: [ '74 222 128',  '34 197  94',  '22 163  74',  '21 128  61',  '20 101  48'] },
+  { id: 'lime',    label: 'Lime',          description: 'Sharp lime green',     swatchHex: '#a3e635', vars: ['190 242 100', '163 230  53', '132 204  22', '101 163  13',  '77 124   8'] },
+  { id: 'amber',   label: 'Amber',         description: 'Warm golden amber',    swatchHex: '#fbbf24', vars: ['252 211  77', '251 191  36', '245 158  11', '217 119   6', '180  83   9'] },
+  { id: 'orange',  label: 'Orange',        description: 'Bold orange',          swatchHex: '#fb923c', vars: ['253 186 116', '251 146  60', '249 115  22', '234  88  12', '194  65  12'] },
+  { id: 'red',     label: 'Red',           description: 'Vivid red',            swatchHex: '#f87171', vars: ['252 165 165', '248 113 113', '239  68  68', '220  38  38', '185  28  28'] },
+  { id: 'rose',    label: 'Rose',          description: 'Soft rose pink',       swatchHex: '#fb7185', vars: ['253 164 175', '251 113 133', '244  63  94', '225  29  72', '190  18  60'] },
+  { id: 'pink',    label: 'Pink',          description: 'Bright hot pink',      swatchHex: '#f472b6', vars: ['249 168 212', '244 114 182', '236  72 153', '219  39 119', '190  24  93'] },
+  { id: 'slate',   label: 'Slate',         description: 'Cool neutral slate',   swatchHex: '#94a3b8', vars: ['203 213 225', '148 163 184', '100 116 139',  '71  85 105',  '51  65  85'] },
+]
+
+const ACCENT_CSS_PROPS = ['--ac-300', '--ac-400', '--ac-500', '--ac-600', '--ac-700']
+
+/** Apply a named accent override, or remove override if id is 'theme'. */
+export function applyAccent(accentId) {
+  const el = document.documentElement
+  if (!accentId || accentId === 'theme') {
+    ACCENT_CSS_PROPS.forEach(p => el.style.removeProperty(p))
+    return
+  }
+  const preset = ACCENT_PRESETS.find(a => a.id === accentId)
+  if (!preset?.vars) return
+  ACCENT_CSS_PROPS.forEach((p, i) => el.style.setProperty(p, preset.vars[i]))
+}
+
+/** Read persisted accent from cookie. */
+export function loadAccent() {
+  return getCookie('claudette_accent') ?? 'theme'
+}
+
+/** Persist accent choice to cookie. */
+export function saveAccent(accentId) {
+  setCookie('claudette_accent', accentId)
+}
+
+/** Read stored accent and apply it. */
+export function loadApplyAccent() {
+  applyAccent(loadAccent())
+}

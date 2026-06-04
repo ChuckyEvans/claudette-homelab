@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Save, Plus, Trash2, Edit2, Check, X, RefreshCw, Wand2, Play, Loader2, Network, Download, Upload, ExternalLink, Lock } from 'lucide-react'
 import { api } from '../lib/api.js'
-import { THEMES, applyTheme, applyBgDim, loadTheme, saveTheme, readBgDim, saveBgDim } from '../lib/themes.js'
+import { THEMES, ACCENT_PRESETS, applyTheme, applyBgDim, applyAccent, loadTheme, saveTheme, readBgDim, saveBgDim, loadAccent, saveAccent } from '../lib/themes.js'
 
 // ── Job definitions ───────────────────────────────────────────────────────────
 const JOBS = {
@@ -711,6 +711,8 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
   const [checkInterval,         setCheckInterval]         = useState(5)
   const [internetCheckInterval, setInternetCheckInterval] = useState(5)
   const [speedtestInterval,     setSpeedtestInterval]     = useState(1)
+  const [vpnSpeedtestInterval,  setVpnSpeedtestInterval]  = useState(6)
+  const [speedtestProvider,     setSpeedtestProvider]     = useState('cloudflare')
   const [threatInterval,        setThreatInterval]        = useState(6)
   const [pingInterval,          setPingInterval]          = useState(5)
   const [deepScanHour,          setDeepScanHour]          = useState(4)
@@ -740,6 +742,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
   const [infraSlaNotes,         setInfraSlaNotes]         = useState('')
   const [theme,                 setTheme]                 = useState(() => loadTheme())
   const [bgDim,                 setBgDim]                 = useState(() => readBgDim())
+  const [accent,                setAccent]                = useState(() => loadAccent())
   const [services,              setServices]              = useState([])
   const [backupIntervalDays,        setBackupIntervalDays]        = useState(0)
   const [backupKeepDays,             setBackupKeepDays]             = useState(7)
@@ -761,7 +764,9 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
         setSubnets(cfg.network?.subnets ?? (cfg.network?.subnet ? [cfg.network.subnet] : []))
         setCheckInterval(cfg.schedule?.check_interval_minutes ?? 5)
         setInternetCheckInterval(cfg.schedule?.internet_check_minutes ?? 5)
-        setSpeedtestInterval(cfg.schedule?.speedtest_interval_hours ?? 1)
+        setSpeedtestInterval(cfg.schedule?.speedtest_interval_hours ?? 4)
+        setVpnSpeedtestInterval(cfg.schedule?.vpn_speedtest_interval_hours ?? 4)
+        setSpeedtestProvider(cfg.schedule?.speedtest_provider ?? 'cloudflare')
         setThreatInterval(cfg.schedule?.threat_interval_hours ?? 6)
         setPingInterval(cfg.schedule?.ping_interval_minutes ?? 5)
         setDeepScanHour(cfg.schedule?.deep_scan_hour ?? 4)
@@ -834,7 +839,9 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
     threat_interval_hours:    parseInt(threatInterval),
     ping_interval_minutes:    parseInt(pingInterval),
     deep_scan_hour:           parseInt(deepScanHour),
-    speedtest_interval_hours: parseInt(speedtestInterval),
+    speedtest_interval_hours:     parseInt(speedtestInterval),
+    vpn_speedtest_interval_hours: parseInt(vpnSpeedtestInterval),
+    speedtest_provider:           speedtestProvider,
     backup_interval_days:          parseInt(backupIntervalDays) || 0,
     backup_keep_days:              Math.max(1, parseInt(backupKeepDays) || 7),
     internet_outage_check_seconds: Math.max(5, parseInt(internetOutageCheckSecs) || 10),
@@ -883,6 +890,12 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
     setTheme(newTheme)
     applyTheme(newTheme)
     saveTheme(newTheme)
+  }
+
+  const onAccentChange = (newAccent) => {
+    setAccent(newAccent)
+    applyAccent(newAccent)
+    saveAccent(newAccent)
   }
 
   const save = async () => {
@@ -1175,7 +1188,8 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                 { jobId: 'internet', label: 'Internet check',  opts: MIN_OPTS, value: internetCheckInterval, set: v => setInternetCheckInterval(parseInt(v)) },
                 { jobId: 'ping',     label: 'Ping sweep',      opts: MIN_OPTS, value: pingInterval,          set: v => setPingInterval(parseInt(v)) },
                 { jobId: 'threats',  label: 'Threat refresh',  opts: HR_OPTS,  value: threatInterval,        set: v => setThreatInterval(parseInt(v)) },
-                { jobId: 'speedtest',label: 'Speed test',      opts: HR_OPTS,  value: speedtestInterval,     set: v => setSpeedtestInterval(parseInt(v)) },
+                { jobId: 'speedtest',    label: 'Speed test (direct)', opts: HR_OPTS,      value: speedtestInterval,    set: v => setSpeedtestInterval(parseInt(v)) },
+                { jobId: 'vpn-speedtest', label: 'Speed test (VPN)',    opts: [{ value: 0, label: 'Disabled' }, ...HR_OPTS], value: vpnSpeedtestInterval, set: v => setVpnSpeedtestInterval(parseInt(v)) },
               ].map(({ jobId, label, opts, value, set }) => (
                 <div key={jobId} className="flex items-center gap-3">
                   <div className="flex-1">
@@ -1191,6 +1205,18 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                   </button>
                 </div>
               ))}
+            </div>
+            <div className="mt-3 max-w-lg">
+              <label className="block text-xs font-medium text-slate-400 mb-1">Speed test provider</label>
+              <select value={speedtestProvider} onChange={e => setSpeedtestProvider(e.target.value)}
+                className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors">
+                <option value="cloudflare">Cloudflare (no binary, recommended)</option>
+                <option value="ookla">Ookla speedtest-cli (auto-selects nearest server)</option>
+              </select>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Ookla requires the <span className="font-mono">speedtest</span> CLI binary to be installed in the container.
+                Cloudflare uses pure HTTP and works everywhere.
+              </p>
             </div>
             <div className="mt-3 max-w-lg">
               <label className="block text-xs font-medium text-slate-400 mb-1">
@@ -1771,6 +1797,36 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                 </div>
               </div>
             )}
+
+            {/* Accent colour override */}
+            <div className="mt-6">
+              <SectionHeading>Customize Theme</SectionHeading>
+              <p className="text-[11px] text-slate-500 mb-3">Override the accent colour used for buttons, highlights, and active states — independently of your chosen background theme.</p>
+              <div className="flex flex-wrap gap-2 max-w-4xl">
+                {ACCENT_PRESETS.map(a => {
+                  const active = accent === a.id
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      title={a.description}
+                      onClick={() => onAccentChange(a.id)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-medium transition-all ${
+                        active
+                          ? 'border-[rgb(var(--ac-500))] bg-[rgb(var(--ac-500))]/10 text-slate-200 shadow-sm shadow-[rgb(var(--ac-500))]/20'
+                          : 'border-[#1a1a30] text-slate-400 hover:border-[#2a2a45] hover:text-slate-300'
+                      }`}
+                    >
+                      {a.swatchHex
+                        ? <span className="w-3.5 h-3.5 rounded-full flex-shrink-0 ring-1 ring-white/10" style={{ background: a.swatchHex }} />
+                        : <span className="w-3.5 h-3.5 rounded-full flex-shrink-0 ring-1 ring-white/10 bg-[conic-gradient(from_0deg,#818cf8,#38bdf8,#34d399,#fbbf24,#f87171,#a78bfa,#818cf8)]" />
+                      }
+                      {a.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           </section>
           </>)}
 

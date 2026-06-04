@@ -66,12 +66,25 @@ for f in /etc/pihole/dhcp.leases /var/lib/misc/dnsmasq.leases; do
     fi
 done
 
+# On Linux, Docker runs natively — use --network host so nmap can ARP-scan
+# the LAN and get real MAC addresses + vendor info, and so speedtests run
+# without VM overhead. On macOS, Docker runs in a VM (like Windows Docker
+# Desktop), so --network host doesn't reach the physical LAN; use -p instead.
+OS_TYPE="$(uname -s)"
+if [[ "$OS_TYPE" == "Linux" ]]; then
+    NETWORK_ARGS=(--network host)
+    echo "      Network: host (Linux native — ARP scanning and full-speed tests enabled)"
+else
+    NETWORK_ARGS=(-p 7654:7654)
+    echo "      Network: bridge (macOS — ARP scanning and speedtest accuracy limited by Docker VM)"
+fi
+
 docker run -d \
     --name      "$CONTAINER_NAME" \
     --restart   unless-stopped \
     --cap-add   NET_ADMIN \
     --cap-add   NET_RAW \
-    -p          7654:7654 \
+    "${NETWORK_ARGS[@]}" \
     -v          claudette-data:/app/data \
     "${EXTRA_MOUNTS[@]+"${EXTRA_MOUNTS[@]}"}" \
     "$IMAGE_NAME"

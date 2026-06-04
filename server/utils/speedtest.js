@@ -1,11 +1,16 @@
 /**
- * Speed test using Cloudflare's speed test infrastructure.
- * No binary dependencies — pure HTTP. Works on any platform including ARM64.
+ * Speed test supporting two providers:
+ *  - cloudflare (default): pure HTTP, no binary deps, works everywhere
+ *  - ookla: Ookla speedtest CLI — auto-selects the lowest-latency server
  *
- * Endpoints:
+ * Cloudflare endpoints:
  *  GET  https://speed.cloudflare.com/meta              → client IP, ISP, city, country, lat/lon
- *  GET  https://speed.cloudflare.com/__down?bytes=N    → download test (measures throughput)
+ *  GET  https://speed.cloudflare.com/__down?bytes=N    → download test
  *  POST https://speed.cloudflare.com/__up              → upload test
+ *
+ * Ookla CLI: `speedtest --accept-license --format=json [--interface <iface>]`
+ *  Outputs a JSON blob with ping.latency, download.bandwidth, upload.bandwidth,
+ *  server.name, server.location, server.country, server.id, isp, interface.externalIp
  */
 
 import { getDb, audit } from '../db.js'
@@ -16,9 +21,10 @@ import { promises as dns } from 'dns'
 const exec = promisify(_execCallback)
 
 const CF_BASE = 'https://speed.cloudflare.com'
-const DOWNLOAD_BYTES = 25_000_000   // 25 MB
-const UPLOAD_BYTES   = 10_000_000   // 10 MB
-const TIMEOUT_MS     = 30_000       // 30 s per test phase
+const DOWNLOAD_BYTES   = 25_000_000   // 25 MB per stream
+const UPLOAD_BYTES     = 10_000_000   // 10 MB per stream
+const PARALLEL_STREAMS = 4            // concurrent streams (saturates high-bandwidth connections)
+const TIMEOUT_MS       = 45_000       // 45 s per test phase
 
 // Cloudflare speed endpoints reject headless requests without a browser UA
 const CF_HEADERS = {
@@ -44,34 +50,34 @@ async function fetchWithTimeout(url, options = {}) {
   }
 }
 
-/** Measure download speed: fetch DOWNLOAD_BYTES, time it, return Mbps */
+/** Measure download speed using parallel streams to saturate high-bandwidth connections */
 async function measureDownload() {
   const start = Date.now()
-  const res   = await fetchWithTimeout(`${CF_BASE}/__down?bytes=${DOWNLOAD_BYTES}&measId=0`)
-  if (!res.ok) throw new Error(`Download test HTTP ${res.status}`)
-  // Drain body fully
-  const buf = await res.arrayBuffer()
-  const elapsed = (Date.now() - start) / 1000  // seconds
-  const bytes   = buf.byteLength
-  return parseFloat(((bytes * 8) / elapsed / 1_000_000).toFixed(2))  // Mbps
+  const streams = Array.from({ length: PARALLEL_STREAMS }, (_, i) =>
+    fetchWithTimeout(`${CF_BASE}/__down?bytes=${DOWNLOAD_BYTES}&measId=${i}`)
+      .then(res => { if (!res.ok) throw new Error(`Download test HTTP ${res.status}`); return res.arrayBuffer() })
+  )
+  const buffers = await Promise.all(streams)
+  const elapsed = (Date.now() - start) / 1000
+  const totalBytes = buffers.reduce((sum, b) => sum + b.byteLength, 0)
+  return parseFloat(((totalBytes * 8) / elapsed / 1_000_000).toFixed(2))  // Mbps
 }
 
-/** Measure upload speed: POST UPLOAD_BYTES of random data, return Mbps */
+/** Measure upload speed using parallel streams */
 async function measureUpload() {
-  // Generate random data
-  const body  = new Uint8Array(UPLOAD_BYTES)
-  crypto.getRandomValues(body.slice(0, Math.min(65536, UPLOAD_BYTES))) // seed first 64k
-
   const start = Date.now()
-  const res   = await fetchWithTimeout(`${CF_BASE}/__up`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body,
+  const streams = Array.from({ length: PARALLEL_STREAMS }, () => {
+    const body = new Uint8Array(UPLOAD_BYTES)
+    crypto.getRandomValues(body.slice(0, Math.min(65536, UPLOAD_BYTES)))
+    return fetchWithTimeout(`${CF_BASE}/__up`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body,
+    }).then(res => { if (!res.ok) throw new Error(`Upload test HTTP ${res.status}`); return res.text() })
   })
-  if (!res.ok) throw new Error(`Upload test HTTP ${res.status}`)
-  await res.text()
+  await Promise.all(streams)
   const elapsed = (Date.now() - start) / 1000
-  return parseFloat(((UPLOAD_BYTES * 8) / elapsed / 1_000_000).toFixed(2))
+  return parseFloat(((UPLOAD_BYTES * PARALLEL_STREAMS * 8) / elapsed / 1_000_000).toFixed(2))
 }
 
 /** Get client meta info from Cloudflare */
@@ -79,17 +85,19 @@ async function getClientMeta() {
   const res  = await fetchWithTimeout(`${CF_BASE}/meta`)
   if (!res.ok) throw new Error(`Meta HTTP ${res.status}`)
   const json = await res.json()
+  const lat  = parseFloat(json.latitude)
+  const lon  = parseFloat(json.longitude)
   return {
-    client_ip:      json.clientIp      ?? null,
-    client_isp:     json.asOrganization ?? json.isp ?? null,
-    client_city:    json.city          ?? null,
-    client_country: json.country       ?? null,
-    client_lat:     typeof json.latitude  === 'number' ? json.latitude  : null,
-    client_lon:     typeof json.longitude === 'number' ? json.longitude : null,
-    server_host:    'speed.cloudflare.com',
-    server_name:    `Cloudflare ${typeof json.colo === 'string' ? json.colo : (json.colo?.code ?? json.colo?.iata ?? '')}`.trim(),
+    client_ip:       json.clientIp          ?? null,
+    client_isp:      json.asOrganization    ?? json.isp ?? null,
+    client_city:     json.city              ?? null,
+    client_country:  json.country           ?? null,
+    client_lat:      Number.isFinite(lat) ? lat : null,
+    client_lon:      Number.isFinite(lon) ? lon : null,
+    server_host:     'speed.cloudflare.com',
+    server_name:     `Cloudflare ${typeof json.colo === 'string' ? json.colo : (json.colo?.code ?? json.colo?.iata ?? '')}`.trim(),
     server_location: [json.city, json.regionCode].filter(Boolean).join(', ') || null,
-    server_country: json.country ?? null,
+    server_country:  json.country ?? null,
   }
 }
 
@@ -180,21 +188,28 @@ async function detectGatewayForIface(iface) {
 export async function getClientMetaVia(iface) {
   try {
     const { stdout } = await exec(
-      `curl --interface ${iface} -s --max-time 8 -H "Accept: application/json" "${CF_BASE}/meta"`,
+      `curl --interface ${iface} -s --max-time 8 ` +
+      `-H "User-Agent: Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" ` +
+      `-H "Accept: */*" ` +
+      `-H "Origin: https://speed.cloudflare.com" ` +
+      `-H "Referer: https://speed.cloudflare.com/" ` +
+      `"${CF_BASE}/meta"`,
       { timeout: 10000 }
     )
     const json = JSON.parse(stdout)
+    const lat = parseFloat(json.latitude)
+    const lon = parseFloat(json.longitude)
     return {
-      client_ip:      json.clientIp          ?? null,
-      client_isp:     json.asOrganization    ?? json.isp ?? null,
-      client_city:    json.city              ?? null,
-      client_country: json.country           ?? null,
-      client_lat:     typeof json.latitude  === 'number' ? json.latitude  : null,
-      client_lon:     typeof json.longitude === 'number' ? json.longitude : null,
-      server_host:    'speed.cloudflare.com',
-      server_name:    `Cloudflare ${typeof json.colo === 'string' ? json.colo : (json.colo?.code ?? json.colo?.iata ?? '')}`.trim(),
+      client_ip:       json.clientIp          ?? null,
+      client_isp:      json.asOrganization    ?? json.isp ?? null,
+      client_city:     json.city              ?? null,
+      client_country:  json.country           ?? null,
+      client_lat:      Number.isFinite(lat) ? lat : null,
+      client_lon:      Number.isFinite(lon) ? lon : null,
+      server_host:     'speed.cloudflare.com',
+      server_name:     `Cloudflare ${typeof json.colo === 'string' ? json.colo : (json.colo?.code ?? json.colo?.iata ?? '')}`.trim(),
       server_location: [json.city, json.regionCode].filter(Boolean).join(', ') || null,
-      server_country: json.country ?? null,
+      server_country:  json.country ?? null,
     }
   } catch {
     return {}
@@ -230,6 +245,50 @@ async function runSpeedTestVia(iface) {
   return { ping_ms, download_mbps, upload_mbps }
 }
 
+/**
+ * Check whether the Ookla speedtest CLI is available on PATH.
+ */
+export function isOoklaAvailable() {
+  try {
+    execSync('speedtest --version', { timeout: 3000, stdio: 'ignore' })
+    return true
+  } catch { return false }
+}
+
+/**
+ * Run a speed test using the Ookla CLI.
+ * @param {string|null} iface  Network interface to bind to (null = default route)
+ * @returns {{ ping_ms, download_mbps, upload_mbps, client_ip, client_isp,
+ *             server_name, server_location, server_country, server_id }}
+ */
+async function runOoklaSpeedTest(iface) {
+  const ifaceFlag = iface ? `--interface ${iface}` : ''
+  const cmd = `speedtest --accept-license --accept-gdpr --format=json ${ifaceFlag}`.trim()
+  const { stdout } = await exec(cmd, { timeout: 120_000 })
+  const j = JSON.parse(stdout)
+  if (j.type === 'log' || j.type === 'progress') throw new Error('Unexpected Ookla output format')
+  // Ookla reports bandwidth in bytes/s
+  const download_mbps = parseFloat(((j.download?.bandwidth ?? 0) * 8 / 1_000_000).toFixed(2))
+  const upload_mbps   = parseFloat(((j.upload?.bandwidth   ?? 0) * 8 / 1_000_000).toFixed(2))
+  const ping_ms       = Math.round(j.ping?.latency ?? 0)
+  return {
+    provider:         'ookla',
+    ping_ms,
+    download_mbps,
+    upload_mbps,
+    client_ip:        j.interface?.externalIp   ?? null,
+    client_isp:       j.isp                     ?? null,
+    client_city:      null,
+    client_country:   j.server?.country         ?? null,
+    client_lat:       null,
+    client_lon:       null,
+    server_host:      j.server?.host            ?? null,
+    server_name:      j.server?.name ? `${j.server.name} (${j.server.id})` : null,
+    server_location:  j.server?.location        ?? null,
+    server_country:   j.server?.country         ?? null,
+  }
+}
+
 /** Persist a speed test row and write an audit entry */
 function persistSpeedTestRow(row) {
   try {
@@ -237,8 +296,8 @@ function persistSpeedTestRow(row) {
       INSERT INTO speedtest_results
         (ts, client_ip, client_isp, client_city, client_country, client_lat, client_lon,
          server_host, server_name, server_location, server_country,
-         ping_ms, download_mbps, upload_mbps, error, via)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         ping_ms, download_mbps, upload_mbps, error, via, provider)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `, [
       row.ts,
       row.client_ip ?? null, row.client_isp ?? null, row.client_city ?? null,
@@ -246,10 +305,11 @@ function persistSpeedTestRow(row) {
       row.server_host ?? null, row.server_name ?? null, row.server_location ?? null,
       row.server_country ?? null,
       row.ping_ms ?? null, row.download_mbps ?? null, row.upload_mbps ?? null,
-      row.error ?? null, row.via ?? 'direct',
+      row.error ?? null, row.via ?? 'direct', row.provider ?? 'cloudflare',
     ])
     audit('speedtest.run', {
       via:           row.via ?? 'direct',
+      provider:      row.provider ?? 'cloudflare',
       ping_ms:       row.ping_ms,
       download_mbps: row.download_mbps,
       upload_mbps:   row.upload_mbps,
@@ -268,8 +328,9 @@ function persistSpeedTestRow(row) {
  */
 export async function runSpeedTest(broadcast) {
   const ts = Date.now()
-  console.log('[speedtest] Starting direct speed test…')
-  let row = { ts, via: 'direct', error: null }
+  const provider = loadConfig()?.schedule?.speedtest_provider ?? 'cloudflare'
+  console.log(`[speedtest] Starting direct speed test… (provider: ${provider})`)
+  let row = { ts, via: 'direct', provider, error: null }
 
   // Detect VPN early — if it's up we must bind the direct test to the physical interface
   // to prevent the VPN's default route from hijacking the "direct" measurement.
@@ -308,7 +369,11 @@ export async function runSpeedTest(broadcast) {
   }
 
   try {
-    if (physIface) {
+    if (provider === 'ookla') {
+      // Ookla CLI handles everything in one call — auto-selects lowest-latency server
+      const result = await runOoklaSpeedTest(vpnActive && physIface ? physIface : null)
+      Object.assign(row, result)
+    } else if (physIface) {
       // VPN is up: bind direct test to physical interface via curl so we measure real ISP speed
       const meta = await getClientMetaVia(physIface)
       Object.assign(row, meta)
@@ -354,6 +419,7 @@ export async function runSpeedTest(broadcast) {
     broadcast('speedtest', {
       ts: row.ts,
       via: 'direct',
+      provider: row.provider ?? 'cloudflare',
       ping_ms: row.ping_ms,
       download_mbps: row.download_mbps,
       upload_mbps: row.upload_mbps,
@@ -377,11 +443,18 @@ export async function runVpnSpeedTest(broadcast) {
   if (!isInterfaceUp(VPN_IFACE)) throw new Error(`${VPN_IFACE} is not up`)
 
   console.log(`[speedtest] Starting VPN speed test via ${VPN_IFACE}…`)
-  const vpnMeta = await getClientMetaVia(VPN_IFACE)
-  const row = { ts: Date.now(), via: 'vpn', error: null, ...vpnMeta }
+  const provider = loadConfig()?.schedule?.speedtest_provider ?? 'cloudflare'
+  const row = { ts: Date.now(), via: 'vpn', provider, error: null }
   try {
-    const result = await runSpeedTestVia(VPN_IFACE)
-    Object.assign(row, result)
+    if (provider === 'ookla') {
+      const result = await runOoklaSpeedTest(VPN_IFACE)
+      Object.assign(row, result)
+    } else {
+      const vpnMeta = await getClientMetaVia(VPN_IFACE)
+      Object.assign(row, vpnMeta)
+      const result = await runSpeedTestVia(VPN_IFACE)
+      Object.assign(row, result)
+    }
     console.log(`[speedtest] VPN — ↓${row.download_mbps} Mbps ↑${row.upload_mbps} Mbps ping=${row.ping_ms}ms`)
   } catch (err) {
     console.error('[speedtest] VPN test failed:', err.message)
@@ -394,6 +467,7 @@ export async function runVpnSpeedTest(broadcast) {
     broadcast('speedtest', {
       ts: row.ts,
       via: 'vpn',
+      provider: row.provider ?? 'cloudflare',
       ping_ms: row.ping_ms,
       download_mbps: row.download_mbps,
       upload_mbps: row.upload_mbps,

@@ -6,7 +6,18 @@ function notifySessionExpired() {
   window.dispatchEvent(new CustomEvent('claudette:session-expired'))
 }
 
+// ── Slow-request tracker ──────────────────────────────────────────────────
+// Shows the global progress bar for any API call that takes longer than 5 s.
+let _slowCount = 0
+function _nudgeSlow(delta) {
+  _slowCount = Math.max(0, _slowCount + delta)
+  window.dispatchEvent(new CustomEvent('claudette:slow-request', { detail: { active: _slowCount > 0 } }))
+}
+
 async function request(path, options = {}) {
+  let fired = false
+  const timer = setTimeout(() => { fired = true; _nudgeSlow(+1) }, 5000)
+  try {
   const res = await fetch(`${BASE}${path}`, options)
   if (res.status === 401 && !path.startsWith('/auth/')) {
     notifySessionExpired()
@@ -29,6 +40,10 @@ async function request(path, options = {}) {
     throw new Error(err.error || res.statusText)
   }
   return res.json()
+  } finally {
+    clearTimeout(timer)
+    if (fired) _nudgeSlow(-1)
+  }
 }
 
 export const api = {
@@ -191,6 +206,17 @@ export const api = {
     update:  () => request('/ddns/update', { method: 'POST' }),
     history: () => request('/ddns/history'),
   },
+  logs: {
+    get: (params = {}) => {
+      const q = new URLSearchParams()
+      if (params.levels?.length)  q.set('levels',   params.levels.join(','))
+      if (params.search)          q.set('search',   params.search)
+      if (params.page)            q.set('page',     params.page)
+      if (params.pageSize)        q.set('pageSize', params.pageSize)
+      if (params.order)           q.set('order',    params.order)
+      return request(`/logs?${q}`)
+    },
+  },
 }
 
 export function createEventSource(onEvent) {
@@ -204,7 +230,11 @@ export function createEventSource(onEvent) {
   for (const ev of events) {
     es.addEventListener(ev, e => onEvent(ev, JSON.parse(e.data)))
   }
-  es.addEventListener('speedtest', e => onEvent('speedtest', JSON.parse(e.data)))
+  es.addEventListener('speedtest', e => {
+    const data = JSON.parse(e.data)
+    onEvent('speedtest', data)
+    window.dispatchEvent(new CustomEvent('claudette:speedtest', { detail: data }))
+  })
   es.onerror = () => console.warn('[SSE] connection lost, will retry')
   return es
 }
@@ -377,6 +407,65 @@ export async function exportToPdf(reportData, filename = 'report.pdf') {
     return hops.length ? hops : null
   }
 
+  function downsample(arr, max) {
+    if (!arr?.length || arr.length <= max) return arr ?? []
+    const step = (arr.length - 1) / (max - 1)
+    return Array.from({ length: max }, (_, i) => arr[Math.round(i * step)])
+  }
+
+  // Draw a mini sparkline chart. Mutates outer `y`.
+  function sparkChart(title, series, { x: ox = M, w: cw = COL, h: ch = 28, legend = [] } = {}) {
+    const allVals = series.flatMap(s => (s.data ?? []).map(d => d.v).filter(v => v != null))
+    if (!allVals.length) return
+    checkPage(ch + (title ? 10 : 4) + (legend.length ? 9 : 0))
+    const YPAD = 13
+    const cx   = ox + YPAD
+    const iw   = cw - YPAD
+    const yMin = Math.min(...allVals)
+    const yMax = Math.max(...allVals)
+    const yRng = yMax - yMin || 1
+    if (title) {
+      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); st(LABEL_CLR)
+      doc.text(title, ox, y); y += 4
+    }
+    // Y-axis labels
+    doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); st(MUTED)
+    doc.text(String(Math.round(yMax)), cx - 1.5, y + 2.5, { align: 'right' })
+    doc.text(String(Math.round(yMin)), cx - 1.5, y + ch - 0.5, { align: 'right' })
+    // Chart background + border
+    sf([245, 247, 253]); sd([200, 208, 230]); doc.setLineWidth(0.2)
+    box(cx, y, iw, ch, 'FD')
+    // Grid lines
+    sd([215, 220, 235]); doc.setLineWidth(0.1)
+    for (let g = 1; g <= 3; g++) doc.line(cx, y + ch * g / 4, cx + iw, y + ch * g / 4)
+    // Series
+    for (const { data, color } of series) {
+      if (!data || data.length < 2) continue
+      sd(color); doc.setLineWidth(0.65)
+      let prev = null
+      data.forEach((pt, i) => {
+        if (pt.v == null) { prev = null; return }
+        const px = cx + 1 + (i / (data.length - 1)) * (iw - 2)
+        const py = y + ch - 1.5 - ((pt.v - yMin) / yRng) * (ch - 3)
+        if (prev) doc.line(prev.px, prev.py, px, py)
+        prev = { px, py }
+      })
+    }
+    y += ch
+    // Legend
+    if (legend.length) {
+      y += 2
+      let lx = cx
+      doc.setFontSize(6); doc.setFont('helvetica', 'normal'); st(MUTED)
+      for (const { color, label } of legend) {
+        sd(color); doc.setLineWidth(0.9); doc.line(lx, y, lx + 5, y)
+        doc.text(label, lx + 6.5, y + 1); lx += 7 + doc.getTextWidth(label) + 8
+      }
+      y += 5
+    }
+    y += 3
+  }
+
   // ── Header band ─────────────────────────────────────────────────────────────
   const isp = reportData.ispConfig ?? {}
   sf(NAVY);       box(0, 0, W, 20)
@@ -465,6 +554,15 @@ export async function exportToPdf(reportData, filename = 'report.pdf') {
       doc.text(val, M + i * colW3, y + 6)
     })
     y += 14
+    // Latency sparkline
+    if ((reportData.internet ?? []).length > 1) {
+      const latPts = downsample(reportData.internet.filter(r => r.ms != null), 120)
+      if (latPts.length > 1) {
+        sparkChart('Latency Over Time', [
+          { data: latPts.map(p => ({ v: p.ms })), color: ACCENT },
+        ], { legend: [{ color: ACCENT, label: 'Avg latency (ms)' }] })
+      }
+    }
   }
 
   // ── Outage incidents ─────────────────────────────────────────────────────────
@@ -576,6 +674,18 @@ export async function exportToPdf(reportData, filename = 'report.pdf') {
       y += 2
     } else {
       sectionHead('Speed Test History')
+    }
+
+    // Speed test trend chart
+    const stPts = downsample(
+      [...(reportData.speedtests ?? [])].filter(r => (r.via ?? 'direct') !== 'vpn' && (r.download_mbps != null || r.upload_mbps != null)).reverse(),
+      80
+    )
+    if (stPts.length >= 2) {
+      sparkChart('Speed Test Trend — Direct Connection', [
+        { data: stPts.map(p => ({ v: p.download_mbps })), color: GREEN },
+        { data: stPts.map(p => ({ v: p.upload_mbps })),   color: ACCENT },
+      ], { legend: [{ color: GREEN, label: 'Download (Mbps)' }, { color: ACCENT, label: 'Upload (Mbps)' }] })
     }
 
     // Speed test detail table (always shown)

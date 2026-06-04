@@ -35,7 +35,7 @@ router.post('/update', async (req, res) => {
   const cfg = loadConfig()
   if (!cfg?.ddns?.enabled) return res.status(400).json({ error: 'DDNS is not enabled' })
   try {
-    await checkAndUpdateDdns(cfg, { force: true })
+    await checkAndUpdateDdns(cfg, { force: true, triggeredBy: req.user?.username ?? 'user' })
     audit('ddns.force_update', {}, 'user', req.ip)
     res.json({ ok: true, status: readDdnsStatus() })
   } catch (err) {

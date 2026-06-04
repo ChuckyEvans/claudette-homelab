@@ -65,12 +65,12 @@ describe('VALID_THEME_IDS', () => {
     expect(VALID_THEME_IDS).toEqual(THEMES.map(t => t.id))
   })
 
-  it('contains "storm" (regression: was missing causing forest theme revert)', () => {
-    expect(VALID_THEME_IDS).toContain('storm')
+  it('contains "typhoon" (formerly "storm" before theme library refresh)', () => {
+    expect(VALID_THEME_IDS).toContain('typhoon')
   })
 
-  it('contains "starfield"', () => {
-    expect(VALID_THEME_IDS).toContain('starfield')
+  it('contains "milkyway" (formerly "starfield" before theme library refresh)', () => {
+    expect(VALID_THEME_IDS).toContain('milkyway')
   })
 
   it('all entries are non-empty strings', () => {
@@ -81,7 +81,7 @@ describe('VALID_THEME_IDS', () => {
   })
 
   it('contains all expected base themes', () => {
-    const expected = ['starfield', 'dark', 'nebula', 'aurora', 'synthwave', 'ocean', 'forest', 'volcanic', 'arctic', 'matrix', 'crimson', 'cobalt', 'amber', 'crystal', 'circuit', 'storm']
+    const expected = ['dark', 'nebula', 'aurora', 'volcanic', 'matrix', 'cobalt', 'abyss', 'milkyway', 'neon', 'typhoon']
     for (const id of expected) {
       expect(VALID_THEME_IDS).toContain(id)
     }
@@ -93,17 +93,22 @@ describe('VALID_THEME_IDS', () => {
 describe('applyTheme()', () => {
   // Stub document.documentElement so applyTheme() can run in a Node environment
   const attrs = new Map()
+  const styles = new Map()
   const mockEl = {
-    setAttribute: (k, v) => attrs.set(k, v),
-    getAttribute:  (k)    => attrs.get(k) ?? null,
-    removeAttribute: (k)  => attrs.delete(k),
+    setAttribute:    (k, v) => attrs.set(k, v),
+    getAttribute:    (k)    => attrs.get(k) ?? null,
+    removeAttribute: (k)    => attrs.delete(k),
+    style: {
+      setProperty:    (k, v) => styles.set(k, v),
+      removeProperty: (k)    => styles.delete(k),
+    },
   }
   beforeAll(() => { vi.stubGlobal('document', { documentElement: mockEl }) })
   afterEach(() => { mockEl.removeAttribute('data-theme') })
 
   it('sets data-theme attribute on <html> for a valid theme', () => {
-    applyTheme('storm')
-    expect(document.documentElement.getAttribute('data-theme')).toBe('storm')
+    applyTheme('dark')
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
   })
 
   it('falls back to DEFAULT_THEME for an unknown theme id', () => {

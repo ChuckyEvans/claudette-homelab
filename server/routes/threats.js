@@ -18,20 +18,12 @@ const FEEDS = [
     url: 'https://cvefeed.io/rssfeed/severity/high.xml',
     severity: 'high',
   },
-  {
-    name: 'CVEfeed Critical',
-    url: 'https://cvefeed.io/rssfeed/severity/critical.xml',
-    severity: 'critical',
-  },
+  // CVEfeed Critical (/severity/critical.xml) returns 404 — removed
+  // NIST NVD RSS feed retired by NIST in 2024 — removed
   {
     name: 'GitHub Security Advisories',
     url: 'https://github.com/security-advisories.atom',
     severity: 'medium',
-  },
-  {
-    name: 'NIST NVD Recent',
-    url: 'https://nvd.nist.gov/feeds/xml/cve/misc/nvd-rss-analyzed.xml',
-    severity: 'high',
   },
 ]
 

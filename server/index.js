@@ -7,9 +7,14 @@ import cron from 'node-cron'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
+import { initLogBuffer } from './utils/logBuffer.js'
+
+// Patch console methods first so startup logs are captured
+initLogBuffer()
+
 import { loadConfig } from './config.js'
 import servicesRouter, { runChecks, checkConnectivity, setOutageCheckSeconds, runMtrSnapshot } from './routes/services.js'
-import { runSpeedTest } from './utils/speedtest.js'
+import { runSpeedTest, runVpnSpeedTest } from './utils/speedtest.js'
 import threatsRouter, { refreshThreats } from './routes/threats.js'
 import networkRouter, { setBroadcast, runPingSweep, runScheduledDeepScan, startBackgroundArpSniffer, startMdnsSniffer } from './routes/network.js'
 import systemRouter from './routes/system.js'
@@ -20,6 +25,7 @@ import reportsRouter from './routes/reports.js'
 import authRouter from './routes/auth.js'
 import themesRouter from './routes/themes.js'
 import ddnsRouter from './routes/ddns.js'
+import logsRouter from './routes/logs.js'
 import { checkAndUpdateDdns } from './utils/ddns.js'
 import { pruneOldData, getDataDir } from './db.js'
 import { requireAuth } from './middleware/auth.js'
@@ -119,6 +125,7 @@ app.use('/api/audit', auditRouter)
 app.use('/api/reports', reportsRouter)
 app.use('/api/themes', themesRouter)
 app.use('/api/ddns', ddnsRouter)
+app.use('/api/logs', logsRouter)
 
 // ── Static (production) ───────────────────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
@@ -192,7 +199,8 @@ function scheduleJobs() {
   const outageSecs   = cfg?.schedule?.internet_outage_check_seconds ?? 10
   setOutageCheckSeconds(outageSecs)
   const pingMin     = cfg?.schedule?.ping_interval_minutes    ?? 5
-  const speedtestHr = cfg?.schedule?.speedtest_interval_hours ?? 1
+  const speedtestHr    = cfg?.schedule?.speedtest_interval_hours     ?? 1
+  const vpnSpeedtestHr  = cfg?.schedule?.vpn_speedtest_interval_hours ?? 6
   const threatHr    = cfg?.schedule?.threat_interval_hours    ?? 6
   const deepHour    = cfg?.schedule?.deep_scan_hour           ?? 4
   const backupDays  = cfg?.schedule?.backup_interval_days     ?? 0
@@ -204,6 +212,11 @@ function scheduleJobs() {
   _tasks.push(cron.schedule(minutesToCron(internetMin), () => enqueue('internet',  () => checkConnectivity(broadcast))))
   _tasks.push(cron.schedule(minutesToCron(pingMin),     () => enqueue('ping',      () => runPingSweep(broadcast))))
   _tasks.push(cron.schedule(hoursToCron(speedtestHr),   () => enqueue('speedtest', () => runSpeedTest(broadcast))))
+
+  if (vpnSpeedtestHr > 0) {
+    console.log(`[jobs] VPN speedtest every ${vpnSpeedtestHr}h`)
+    _tasks.push(cron.schedule(hoursToCron(vpnSpeedtestHr), () => enqueue('vpn-speedtest', () => runVpnSpeedTest(broadcast).catch(() => {}))))
+  }
   _tasks.push(cron.schedule(hoursToCron(threatHr),      () => enqueue('threats',   () => refreshThreats(broadcast))))
 
   // Baseline mtr — runs on a configurable schedule when internet is healthy

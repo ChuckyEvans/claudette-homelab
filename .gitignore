@@ -16,3 +16,6 @@ output/kodi/*.zip
 *.py
 pyproject.toml
 requirements.txt
+
+# Copilot conversation logs
+.copilot/

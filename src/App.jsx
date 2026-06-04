@@ -3,7 +3,7 @@ import Layout from './components/Layout.jsx'
 import AuthModal from './components/AuthModal.jsx'
 import TopProgressBar from './components/TopProgressBar.jsx'
 import { createEventSource, api } from './lib/api.js'
-import { applyTheme, loadBgDim, loadTheme } from './lib/themes.js'
+import { applyTheme, loadBgDim, loadTheme, loadApplyAccent } from './lib/themes.js'
 
 // Page-level components loaded on-demand to keep the initial bundle small
 const Dashboard    = lazy(() => import('./components/Dashboard.jsx'))
@@ -16,12 +16,14 @@ const AuditLog      = lazy(() => import('./components/AuditLog.jsx'))
 const Settings      = lazy(() => import('./components/Settings.jsx'))
 const AboutPage     = lazy(() => import('./components/AboutPage.jsx'))
 const Reports       = lazy(() => import('./components/Reports.jsx'))
+const LogsPage      = lazy(() => import('./components/LogsPage.jsx'))
 
-// Apply stored theme + bg brightness immediately — before any React render — to avoid flash
+// Apply stored theme + bg brightness + accent immediately — before any React render — to avoid flash
 ;(function () {
   const t = loadTheme()
   if (t) applyTheme(t)
   loadBgDim()
+  loadApplyAccent()
 })()
 
 // Pop-up corner toasts — only shows notifications that are still "visible" (faded out after 5 s)
@@ -171,6 +173,14 @@ export default function App() {
     const handler = () => setAuth(a => ({ ...a, authenticated: false }))
     window.addEventListener('claudette:session-expired', handler)
     return () => window.removeEventListener('claudette:session-expired', handler)
+  }, [])
+
+  // Show the top progress bar for any API call that takes longer than 5 s
+  const [slowRequestActive, setSlowRequestActive] = useState(false)
+  useEffect(() => {
+    const handler = e => setSlowRequestActive(e.detail.active)
+    window.addEventListener('claudette:slow-request', handler)
+    return () => window.removeEventListener('claudette:slow-request', handler)
   }, [])
 
   const handleAuthenticated = (username) => {
@@ -353,7 +363,8 @@ export default function App() {
     network: NetworkScan,
     system: SystemStats,
     audit: AuditLog,
-    reports: Reports,
+    reports:  Reports,
+    logs:     LogsPage,
     settings: Settings,
     about: AboutPage,
   }
@@ -404,7 +415,7 @@ export default function App() {
       {/* ── Main app — only rendered when authenticated ── */}
       {!auth.checking && auth.authenticated && (
         <>
-      <TopProgressBar active={networkScan.scanning} progress={networkScan.progress} />
+      <TopProgressBar active={networkScan.scanning || slowRequestActive} progress={networkScan.scanning ? networkScan.progress : null} />
       {showWizard && (
         <Suspense fallback={null}>
           <WizardModal

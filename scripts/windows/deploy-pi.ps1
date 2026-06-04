@@ -2,6 +2,12 @@
 # Deploy Claudette to the Raspberry Pi from Windows.
 # Uploads the project source to the Pi and builds the Docker image natively — no cross-compilation needed.
 #
+# Cross-platform alternative (Windows / macOS / Linux):
+#   npm run deploy                   # full deploy
+#   npm run deploy -- --quick        # sync server/ only
+#   npm run deploy -- --pre-built    # skip npm build on Pi
+#   node scripts/deploy-pi.mjs --help
+#
 # Requirements: OpenSSH client + scp (built into Windows 10+), Docker installed on the Pi.
 #
 # Usage (from repo root):
@@ -146,7 +152,7 @@ CMD ["node", "server/index.js"]
     scp @SshArgs $tmpDockerfile "${PiUser}@${PiHost}:/tmp/claudette-Dockerfile"
     if ($LASTEXITCODE -ne 0) { Write-Error "scp Dockerfile failed."; exit 1 }
     Remove-Item $tmpDockerfile -Force
-    Invoke-Ssh "rm -rf /tmp/claudette-build && mkdir -p /tmp/claudette-build && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm /tmp/claudette-src.tar && mv /tmp/claudette-Dockerfile /tmp/claudette-build/Dockerfile && cd /tmp/claudette-build && sudo env DOCKER_BUILDKIT=0 docker build --build-arg CACHEBUST=$CacheBust -t claudette:latest . && cd / && rm -rf /tmp/claudette-build"
+    Invoke-Ssh "rm -rf /tmp/claudette-build && mkdir -p /tmp/claudette-build && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm /tmp/claudette-src.tar && mv /tmp/claudette-Dockerfile /tmp/claudette-build/Dockerfile && cd /tmp/claudette-build && sudo docker build --build-arg CACHEBUST=$CacheBust -t claudette:latest . && cd / && rm -rf /tmp/claudette-build"
     Write-Host "      Built." -ForegroundColor Green
 }
 
@@ -167,7 +173,7 @@ elseif (-not $SkipBuild) {
     Remove-Item $SrcTar -Force
     Write-Host "      Uploaded. Building on Pi (this takes a few minutes)..." -ForegroundColor DarkGray
     $CacheBust = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    Invoke-Ssh "rm -rf /tmp/claudette-build && mkdir -p /tmp/claudette-build && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm /tmp/claudette-src.tar && cd /tmp/claudette-build && sudo env DOCKER_BUILDKIT=0 docker build --build-arg CACHEBUST=$CacheBust -t claudette:latest . && cd / && rm -rf /tmp/claudette-build"
+    Invoke-Ssh "rm -rf /tmp/claudette-build && mkdir -p /tmp/claudette-build && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm /tmp/claudette-src.tar && cd /tmp/claudette-build && sudo docker build --build-arg CACHEBUST=$CacheBust -t claudette:latest . && cd / && rm -rf /tmp/claudette-build"
     Write-Host "      Built." -ForegroundColor Green
 } else {
     Write-Host "`n[1/2] Skipping build — reusing existing image on Pi." -ForegroundColor DarkGray

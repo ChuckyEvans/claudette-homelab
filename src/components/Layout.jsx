@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink } from 'lucide-react'
+import { ShieldAlert, Network, Cpu, LayoutDashboard, ClipboardList, Settings, HelpCircle, LogOut, BarChart2, ChevronLeft, ChevronRight, Bell, X, ExternalLink, ScrollText } from 'lucide-react'
 import { getUIPref, setUIPref } from '../lib/uiPrefs.js'
 import ClaudetteLogo from './ClaudetteLogo.jsx'
 
@@ -10,6 +10,7 @@ const NAV = [
   { id: 'system',    label: 'System',    icon: Cpu,             hint: 'CPU, memory, temperature & Pi hardware stats' },
   { id: 'reports',   label: 'Reports',   icon: BarChart2,       hint: 'Speed tests, uptime history & charts' },
   { id: 'audit',     label: 'Audit Log', icon: ClipboardList,   hint: 'Full record of events & configuration changes' },
+  { id: 'logs',      label: 'Logs',      icon: ScrollText,      hint: 'Live server console output with level filtering' },
   { id: 'settings',  label: 'Settings',  icon: Settings,        hint: 'Configure hosts, schedules, themes & services' },
   { id: 'about',     label: 'About',     icon: HelpCircle,      hint: 'Version info, links & credits' },
 ]
