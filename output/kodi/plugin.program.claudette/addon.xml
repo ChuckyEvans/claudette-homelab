@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.program.claudette"
        name="Claudette"
-       version="1.0.0"
+       version="1.2.0"
        provider-name="Claudette">
 
   <requires>
@@ -17,8 +17,11 @@
     <summary lang="en_GB">Claudette Homelab Monitor</summary>
     <description lang="en_GB">
       Monitor your homelab from Kodi. View network devices, service health,
-      CVE threat feed, and audit events — all pulled live from your
-      Claudette server.
+      internet connectivity and outages, VPN status, speed test history,
+      DDNS status, CVE threat feed, system stats, and audit events —
+      all pulled live from your Claudette server. Full action support:
+      trigger scans, deep scans, service refreshes, speed tests, and
+      DDNS updates directly from the Kodi interface.
     </description>
     <disclaimer lang="en_GB">
       Requires a running Claudette server on your network.
