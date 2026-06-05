@@ -207,7 +207,7 @@ function scheduleJobs() {
   const threatHr    = cfg?.schedule?.threat_interval_hours    ?? 6
   const deepHour    = cfg?.schedule?.deep_scan_hour           ?? 4
   const backupDays  = cfg?.schedule?.backup_interval_days     ?? 0
-  const retainDays  = cfg?.retention?.days                    ?? 90
+  const retainDays  = cfg?.retention?.days                    ?? 365
 
   console.log(`[jobs] Scheduled: services=${minutesToCron(checkMin)} internet=${minutesToCron(internetMin)} ping=${minutesToCron(pingMin)} speedtest=${hoursToCron(speedtestHr)} threats=${hoursToCron(threatHr)} deep-scan=0 ${deepHour} * * *`)
 

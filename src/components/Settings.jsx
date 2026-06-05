@@ -716,7 +716,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
   const [threatInterval,        setThreatInterval]        = useState(6)
   const [pingInterval,          setPingInterval]          = useState(5)
   const [deepScanHour,          setDeepScanHour]          = useState(4)
-  const [retentionDays,         setRetentionDays]         = useState(90)
+  const [retentionDays,         setRetentionDays]         = useState(365)
   const [connectivityHosts,     setConnectivityHosts]     = useState(['1.1.1.1'])
   const [fallbackDns,           setFallbackDns]           = useState([])
   const [vpnInterface,          setVpnInterface]          = useState('')
@@ -770,7 +770,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
         setThreatInterval(cfg.schedule?.threat_interval_hours ?? 6)
         setPingInterval(cfg.schedule?.ping_interval_minutes ?? 5)
         setDeepScanHour(cfg.schedule?.deep_scan_hour ?? 4)
-        setRetentionDays(cfg.retention?.days ?? 90)
+        setRetentionDays(cfg.retention?.days ?? 365)
         setConnectivityHosts(cfg.network?.connectivity_hosts ?? ['1.1.1.1'])
         setFallbackDns(cfg.network?.fallback_dns ?? [])
         setVpnInterface(cfg.network?.vpn_interface ?? '')
@@ -1274,8 +1274,11 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                 <option value={90}>90 days</option>
                 <option value={180}>180 days</option>
                 <option value={365}>1 year</option>
+                <option value={730}>2 years</option>
+                <option value={1095}>3 years</option>
+                <option value={1825}>5 years</option>
               </select>
-              <p className="text-[11px] text-slate-600">Events older than this are pruned nightly at 3 am</p>
+              <p className="text-[11px] text-slate-500">Events older than this are pruned nightly at 3 am</p>
             </div>
           </section>
           </>)}

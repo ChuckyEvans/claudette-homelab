@@ -13,7 +13,7 @@ const VALID_THEMES = [
   'volcanic','arctic','matrix','crimson','cobalt','amber','crystal','circuit','storm',
 ]
 
-const VALID_RETENTION_DAYS = [30, 60, 90, 180, 365]
+const VALID_RETENTION_DAYS = [30, 60, 90, 180, 365, 730, 1095, 1825]
 
 function buildSchedule(body) {
   const intOrDef = (v, def) => { const n = parseInt(v); return Number.isFinite(n) ? n : def }
@@ -67,7 +67,7 @@ function resolveTheme(body, existing = {}) {
 
 function resolveRetention(body, existing = {}) {
   const days = parseInt(body.retention?.days)
-  return VALID_RETENTION_DAYS.includes(days) ? days : (existing.days ?? 90)
+  return VALID_RETENTION_DAYS.includes(days) ? days : (existing.days ?? 365)
 }
 
 function sanitizeServices(services) {

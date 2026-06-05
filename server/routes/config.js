@@ -135,9 +135,9 @@ router.post('/', (req, res) => {
   }
 
   const existingRetention = loadConfig()?.retention ?? {}
-  const retentionDays = [30, 60, 90, 180, 365].includes(parseInt(body.retention?.days))
+  const retentionDays = [30, 60, 90, 180, 365, 730, 1095, 1825].includes(parseInt(body.retention?.days))
     ? parseInt(body.retention.days)
-    : (existingRetention.days ?? 90)
+    : (existingRetention.days ?? 365)
   config.retention = { days: retentionDays }
 
   // ── DDNS settings ────────────────────────────────────────────────────────
