@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { BarChart2, RefreshCw, X, Monitor, Activity, Server, Wifi, Download, Clock, Zap, Search, AlertTriangle, Copy, Check, TrendingDown, ClipboardCheck, Shield, Loader2, ChevronDown, Globe } from 'lucide-react'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, Legend,
   ResponsiveContainer, LineChart, Line, ReferenceLine,
 } from 'recharts'
 import { api, exportToCsv, exportToPdf } from '../lib/api.js'
@@ -1868,7 +1868,7 @@ export default function Reports() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" vertical={false} />
                     <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={v => v.slice(5)} />
                     <YAxis tick={{ fill: '#64748b', fontSize: 10 }} allowDecimals={false} />
-                    <Tooltip content={<ChartTip />} />
+                    <ChartTooltip content={<ChartTip />} />
                     <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: '11px', color: '#94a3b8', paddingTop: '6px' }} />
                     <Bar dataKey="new"     name="New"     fill={CHART_PALETTE.new}     radius={[2,2,0,0]} maxBarSize={18} style={{ cursor: 'pointer' }} onClick={d => handleBarClick(d, 'new')} />
                     <Bar dataKey="online"  name="Online"  fill={CHART_PALETTE.online}  radius={[2,2,0,0]} maxBarSize={18} style={{ cursor: 'pointer' }} onClick={d => handleBarClick(d, 'online')} />
@@ -1893,7 +1893,7 @@ export default function Reports() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" horizontal={false} />
                       <XAxis type="number" tick={{ fill: '#64748b', fontSize: 10 }} allowDecimals={false} />
                       <YAxis type="category" dataKey="port" width={130} tick={{ fill: '#94a3b8', fontSize: 11, fontFamily: 'monospace' }} tickFormatter={portLabel} />
-                      <Tooltip content={<ChartTip />} />
+                      <ChartTooltip content={<ChartTip />} />
                       <Bar dataKey="count" name="Finds" fill="#818cf8" radius={[0,2,2,0]} maxBarSize={14} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -1913,7 +1913,7 @@ export default function Reports() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#1a1a30" horizontal={false} />
                       <XAxis type="number" tick={{ fill: '#64748b', fontSize: 10 }} allowDecimals={false} />
                       <YAxis type="category" dataKey="name" width={70} tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                      <Tooltip content={<ChartTip />} />
+                      <ChartTooltip content={<ChartTip />} />
                       <Bar dataKey="count" name="Outages" fill="#f87171" radius={[0,2,2,0]} maxBarSize={14} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -2273,7 +2273,7 @@ export default function Reports() {
                     <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
                       tickFormatter={v => new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} />
                     <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit="ms" />
-                    <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                    <ChartTooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                     <Line type="monotone" dataKey="ms" name="Direct Latency" stroke="#38bdf8" dot={false} strokeWidth={1.5} unit="ms" connectNulls={false} />
                   </LineChart>
                 </ResponsiveContainer>
@@ -2468,7 +2468,7 @@ export default function Reports() {
                         <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
                           tickFormatter={v => new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} />
                         <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit="ms" />
-                        <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                        <ChartTooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                         <Line type="monotone" dataKey="vpn_ms" name="VPN Latency" stroke="#a78bfa" dot={false} strokeWidth={1.5} unit="ms" connectNulls={false} />
                       </LineChart>
                     </ResponsiveContainer>
@@ -2747,7 +2747,7 @@ export default function Reports() {
                               <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
                                 tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
                               <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
-                              <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                              <ChartTooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                               <Bar dataKey="direct_down" name="Direct ↓" fill="#10b981" unit=" Mbps" radius={[2,2,0,0]} />
                               <Bar dataKey="direct_up"   name="Direct ↑" fill="#38bdf8" unit=" Mbps" radius={[2,2,0,0]} />
                               {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown}`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
@@ -2759,7 +2759,7 @@ export default function Reports() {
                               <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
                                 tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
                               <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
-                              <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                              <ChartTooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                               <Line type="monotone" dataKey="direct_down" name="Direct ↓" stroke="#10b981" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
                               <Line type="monotone" dataKey="direct_up"   name="Direct ↑" stroke="#38bdf8" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
                               {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown}`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
@@ -2791,7 +2791,7 @@ export default function Reports() {
                               <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
                                 tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
                               <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
-                              <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                              <ChartTooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                               <Bar dataKey="vpn_down" name="VPN ↓" fill="#a78bfa" unit=" Mbps" radius={[2,2,0,0]} />
                               <Bar dataKey="vpn_up"   name="VPN ↑" fill="#fb923c" unit=" Mbps" radius={[2,2,0,0]} />
                             </BarChart>
@@ -2801,7 +2801,7 @@ export default function Reports() {
                               <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
                                 tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
                               <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
-                              <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                              <ChartTooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                               <Line type="monotone" dataKey="vpn_down" name="VPN ↓" stroke="#a78bfa" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
                               <Line type="monotone" dataKey="vpn_up"   name="VPN ↑" stroke="#fb923c" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
                             </LineChart>
@@ -2841,7 +2841,7 @@ export default function Reports() {
                           <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
                             tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
                           <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
-                          <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                          <ChartTooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                           <Bar dataKey="direct_down" name="Direct ↓" fill="#10b981" unit=" Mbps" radius={[2,2,0,0]} />
                           <Bar dataKey="direct_up"   name="Direct ↑" fill="#38bdf8" unit=" Mbps" radius={[2,2,0,0]} />
                           {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown} Mbps`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
@@ -2853,7 +2853,7 @@ export default function Reports() {
                           <XAxis dataKey="ts" tick={{ fill: '#64748b', fontSize: 10 }}
                             tickFormatter={v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} />
                           <YAxis tick={{ fill: '#64748b', fontSize: 10 }} unit=" M" />
-                          <Tooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
+                          <ChartTooltip content={<ChartTip />} labelFormatter={v => fmtDate(v)} />
                           <Line type="monotone" dataKey="direct_down" name="Direct ↓" stroke="#10b981" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
                           <Line type="monotone" dataKey="direct_up"   name="Direct ↑" stroke="#38bdf8" dot={{ r: 2 }} strokeWidth={1.5} unit=" Mbps" connectNulls={false} />
                           {planDown > 0 && <ReferenceLine y={planDown} stroke="#10b981" strokeDasharray="5 3" strokeOpacity={0.5} label={{ value: `${planDown} Mbps`, fill: '#10b981', fontSize: 9, opacity: 0.7 }} />}
