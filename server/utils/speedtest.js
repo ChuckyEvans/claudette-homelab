@@ -256,14 +256,75 @@ export function isOoklaAvailable() {
 }
 
 /**
+ * Returns true if a server name appears to be hosted by the client's ISP.
+ * Strips AS numbers and punctuation, then checks for shared significant words.
+ */
+function ownedByClientIsp(serverName, clientIsp) {
+  if (!serverName || !clientIsp) return false
+  const clean = s => s.toLowerCase().replace(/\bas\d+\b/g, '').replace(/[^a-z0-9 ]/g, ' ')
+  const ispWords = clean(clientIsp).split(/\s+/).filter(w => w.length > 3)
+  const svrText  = clean(serverName)
+  return ispWords.some(w => svrText.includes(w))
+}
+
+/**
+ * List nearby Ookla speedtest servers.
+ * Returns an array of { id, name, location, country, host } or [] on failure.
+ */
+async function getOoklaServers(iface) {
+  const ifaceFlag = iface ? `--interface ${iface}` : ''
+  // `-L`/`--servers` lists nearby servers without running a test
+  const cmd = `speedtest --accept-license --accept-gdpr --format=json --servers ${ifaceFlag}`.trim()
+  let stdout = ''
+  try {
+    ;({ stdout } = await exec(cmd, { timeout: 30_000 }))
+  } catch {
+    return []
+  }
+  // CLI emits a single JSON object: { type: "serverList", servers: [...] }
+  for (const line of stdout.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    try {
+      const obj = JSON.parse(t)
+      if (Array.isArray(obj)) return obj
+      if (obj.type === 'serverList' && Array.isArray(obj.servers)) return obj.servers
+    } catch { /* skip non-JSON lines */ }
+  }
+  return []
+}
+
+/**
  * Run a speed test using the Ookla CLI.
- * @param {string|null} iface  Network interface to bind to (null = default route)
+ * @param {string|null} iface      Network interface to bind to (null = default route)
+ * @param {string|null} clientIsp  Client ISP name used to skip same-network servers
  * @returns {{ ping_ms, download_mbps, upload_mbps, client_ip, client_isp,
  *             server_name, server_location, server_country, server_id }}
  */
-async function runOoklaSpeedTest(iface) {
+async function runOoklaSpeedTest(iface, clientIsp = null) {
   const ifaceFlag = iface ? `--interface ${iface}` : ''
-  const cmd = `speedtest --accept-license --accept-gdpr --format=json ${ifaceFlag}`.trim()
+
+  // Prefer a third-party server to avoid biased same-ISP results.
+  // Only fall back to an ISP-owned server if no other options exist.
+  let serverFlag = ''
+  if (clientIsp) {
+    try {
+      const servers = await getOoklaServers(iface)
+      if (servers.length > 0) {
+        const nonIsp = servers.filter(s => !ownedByClientIsp(s.name, clientIsp))
+        if (nonIsp.length > 0) {
+          serverFlag = `--server-id ${nonIsp[0].id}`
+          console.log(`[speedtest] Ookla: skipping ISP servers — using "${nonIsp[0].name}" (${nonIsp[0].location})`)
+        } else {
+          console.warn('[speedtest] Ookla: all nearby servers belong to client ISP — using auto-select (last resort)')
+        }
+      }
+    } catch (e) {
+      console.warn('[speedtest] Ookla: server list fetch failed:', e.message)
+    }
+  }
+
+  const cmd = `speedtest --accept-license --accept-gdpr --format=json ${ifaceFlag} ${serverFlag}`.trim()
   const { stdout } = await exec(cmd, { timeout: 120_000 })
   const j = JSON.parse(stdout)
   if (j.type === 'log' || j.type === 'progress') throw new Error('Unexpected Ookla output format')
@@ -370,8 +431,18 @@ export async function runSpeedTest(broadcast) {
 
   try {
     if (provider === 'ookla') {
-      // Ookla CLI handles everything in one call — auto-selects lowest-latency server
-      const result = await runOoklaSpeedTest(vpnActive && physIface ? physIface : null)
+      // Pre-fetch client ISP so we can skip same-network servers
+      let clientIsp = null
+      try {
+        const meta = vpnActive && physIface
+          ? await getClientMetaVia(physIface)
+          : await getClientMeta()
+        clientIsp = meta.client_isp ?? null
+        Object.assign(row, meta)
+      } catch (e) {
+        console.warn('[speedtest] Meta fetch before Ookla failed:', e.message)
+      }
+      const result = await runOoklaSpeedTest(vpnActive && physIface ? physIface : null, clientIsp)
       Object.assign(row, result)
     } else if (physIface) {
       // VPN is up: bind direct test to physical interface via curl so we measure real ISP speed
@@ -447,7 +518,14 @@ export async function runVpnSpeedTest(broadcast) {
   const row = { ts: Date.now(), via: 'vpn', provider, error: null }
   try {
     if (provider === 'ookla') {
-      const result = await runOoklaSpeedTest(VPN_IFACE)
+      // Pre-fetch client ISP so we can skip same-network servers
+      let clientIsp = null
+      try {
+        const meta = await getClientMetaVia(VPN_IFACE)
+        clientIsp = meta.client_isp ?? null
+        Object.assign(row, meta)
+      } catch { /* ignore — ISP filtering is best-effort */ }
+      const result = await runOoklaSpeedTest(VPN_IFACE, clientIsp)
       Object.assign(row, result)
     } else {
       const vpnMeta = await getClientMetaVia(VPN_IFACE)
