@@ -12,9 +12,7 @@ config.yaml
 *.tar
 output/kodi/*.zip
 
-# Old Python prototype (superseded by Node.js rewrite) — these files remain tracked
-# in git history but should not be re-committed if recreated
-*.py
+# Old Python prototype (superseded by Node.js rewrite)
 pyproject.toml
 requirements.txt
 

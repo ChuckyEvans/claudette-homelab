@@ -136,8 +136,16 @@ class ClaudetteAPI:
         return self._get('/reports/speedtest?limit={0}&via={1}'.format(limit, via))
 
     def run_speedtest(self):
-        """POST /api/reports/speedtest → triggers an immediate speed test."""
+        """POST /api/reports/speedtest → triggers an immediate direct speed test."""
         return self._post('/reports/speedtest')
+
+    def run_vpn_speedtest(self):
+        """POST /api/reports/speedtest/vpn → triggers an immediate VPN speed test."""
+        return self._post('/reports/speedtest/vpn')
+
+    def get_vpn_speedtest_report(self, limit=10):
+        """GET /api/reports/speedtest?limit=<n>&via=vpn → {speedtests, summary, …}"""
+        return self._get('/reports/speedtest?limit={0}&via=vpn'.format(limit))
 
     def get_reports(self, limit=50, offset=0):
         """GET /api/reports → {events, summary, total, from, to}"""

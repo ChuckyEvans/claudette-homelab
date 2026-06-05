@@ -263,8 +263,9 @@ def main_menu():
     vpn_up   = internet_raw.get('vpn_up', False)
     vpn_ok   = internet_raw.get('vpn_ok')
 
-    spd_tests = spd_raw.get('speedtests', [])
-    last_spd  = spd_tests[0] if spd_tests else None
+    spd_tests    = spd_raw.get('speedtests', [])
+    last_spd     = spd_tests[0] if spd_tests else None
+    spd_provider = last_spd.get('provider', '') if last_spd else ''
 
     # Header
     scan_tag = muted('  [scanning...]') if scanning else ''
@@ -367,8 +368,10 @@ def main_menu():
         spd_sub  = (c(dl_col, chr(0x25BC) + ' {0:.0f}'.format(spd_dl)) + dim(' Mbps  ') +
                     c(ul_col, chr(0x25B2) + ' {0:.0f}'.format(spd_ul)) + dim(' Mbps  ') +
                     dim('ping {0}ms'.format(int(spd_ping))))
+        if spd_provider: spd_sub += dim('  ') + muted(spd_provider)
         spd_plot = 'Last test: {0}\nDown: {1:.1f} Mbps\nUp: {2:.1f} Mbps\nPing: {3}ms'.format(
             fmt_ts(last_spd.get('ts')), spd_dl, spd_ul, int(spd_ping))
+        if spd_provider: spd_plot += '\nProvider: ' + spd_provider
         if cfg_dl: spd_plot += '\n\nISP plan: {0}/{1} Mbps'.format(int(cfg_dl), int(cfg_ul) if cfg_ul else '?')
     else:
         spd_sub  = dim('no results yet')
@@ -949,36 +952,64 @@ def show_speedtest():
                  info={'title': 'Run Speed Test', 'plot': 'Takes about 20-30 seconds.'})
         end_dir(); return
 
-    sep('Results (newest first)')
+    sep('Direct Results (newest first)')
     for t in tests:
-        ts   = fmt_ts(t.get('ts'))
-        dl   = t.get('download_mbps') or 0
-        ul   = t.get('upload_mbps') or 0
-        ping = t.get('ping_ms') or 0
-        isp  = t.get('client_isp') or ''
-        srv  = t.get('server_name') or ''
-        via  = t.get('via', 'direct')
+        ts       = fmt_ts(t.get('ts'))
+        dl       = t.get('download_mbps') or 0
+        ul       = t.get('upload_mbps') or 0
+        ping     = t.get('ping_ms') or 0
+        isp      = t.get('client_isp') or ''
+        srv      = t.get('server_name') or ''
+        prov     = t.get('provider', '')
 
         dl_col  = pct_color(dl / cfg_dl * 100) if cfg_dl else ('44FF88' if dl >= 50 else ('FFCC00' if dl >= 10 else 'FF4444'))
         ul_col  = pct_color(ul / cfg_ul * 100) if cfg_ul else ('44AAFF' if ul >= 20 else ('FFCC00' if ul >= 5 else 'FF8800'))
         row = (dim(ts) + '   ' +
                c(dl_col, chr(0x25BC) + ' {0:.1f}'.format(dl)) + dim(' Mbps  ') +
                c(ul_col, chr(0x25B2) + ' {0:.1f}'.format(ul)) + dim(' Mbps') +
-               dim('  ping {0}ms'.format(int(ping))) +
-               (dim(' [VPN]') if via and via != 'direct' else ''))
+               dim('  ping {0}ms'.format(int(ping))))
+        if prov: row += dim('  ' + prov)
         plot = 'Date: {0}\nDown: {1:.1f} Mbps\nUp: {2:.1f} Mbps\nPing: {3}ms'.format(ts, dl, ul, int(ping))
-        if srv: plot += '\nServer: ' + srv
-        if isp: plot += '\nISP: '    + isp
-        if via != 'direct': plot += '\nVia: ' + via
+        if prov: plot += '\nProvider: ' + prov
+        if srv:  plot += '\nServer: '   + srv
+        if isp:  plot += '\nISP: '      + isp
         if cfg_dl:
             plot += '\n\nVs plan: {0:.0f}% down'.format(dl / cfg_dl * 100)
             if cfg_ul: plot += ' / {0:.0f}% up'.format(ul / cfg_ul * 100)
 
         add_item(row, info={'title': ts, 'plot': plot})
 
+    # VPN speed test section
+    vpn_limit   = int(ADDON.getSetting('vpn_speedtest_limit') or 10)
+    vpn_data    = api.get_vpn_speedtest_report(limit=vpn_limit)
+    vpn_tests   = (vpn_data.get('speedtests', []) if vpn_data else [])
+    if vpn_tests:
+        sep('VPN Results')
+        for t in vpn_tests:
+            ts   = fmt_ts(t.get('ts'))
+            dl   = t.get('download_mbps') or 0
+            ul   = t.get('upload_mbps') or 0
+            ping = t.get('ping_ms') or 0
+            prov = t.get('provider', '')
+            dl_col = '44FF88' if dl >= 20 else ('FFCC00' if dl >= 5 else 'FF4444')
+            ul_col = '44AAFF' if ul >= 10 else ('FFCC00' if ul >= 2 else 'FF8800')
+            row = (dim(ts) + '   ' +
+                   c(dl_col, chr(0x25BC) + ' {0:.1f}'.format(dl)) + dim(' Mbps  ') +
+                   c(ul_col, chr(0x25B2) + ' {0:.1f}'.format(ul)) + dim(' Mbps') +
+                   dim('  ping {0}ms'.format(int(ping))) + dim(' [VPN]'))
+            if prov: row += dim('  ' + prov)
+            plot = 'VPN test: {0}\nDown: {1:.1f} Mbps\nUp: {2:.1f} Mbps\nPing: {3}ms'.format(
+                ts, dl, ul, int(ping))
+            if prov: plot += '\nProvider: ' + prov
+            add_item(row, info={'title': 'VPN ' + ts, 'plot': plot})
+
     sep()
-    add_item(info_c('>') + '  ' + muted('Run Speed Test Now'), url(action='run_speedtest'),
-             info={'title': 'Run Speed Test', 'plot': 'Trigger an immediate speed test. Takes ~30 seconds.'})
+    add_item(info_c('>') + '  ' + muted('Run Speed Test Now  (direct)'),
+             url(action='run_speedtest'),
+             info={'title': 'Run Direct Speed Test', 'plot': 'Trigger an immediate direct speed test. Takes ~30 seconds.'})
+    add_item(accent('>') + '  ' + muted('Run VPN Speed Test'),
+             url(action='run_vpn_speedtest'),
+             info={'title': 'Run VPN Speed Test', 'plot': 'Trigger an immediate speed test via the VPN tunnel. Takes ~30 seconds.'})
     end_dir()
 
 
@@ -1328,15 +1359,22 @@ def show_ddns():
     if history:
         sep('History ({0})'.format(len(history)))
         for h in history:
-            ts    = fmt_ts(h.get('ts'))
-            event = h.get('event', '')
-            ip    = h.get('ip', '')
-            ok_h  = h.get('ok', True)
-            row   = dim(ts) + '  ' + (good(event) if ok_h else bad(event))
-            if ip: row += dim('  ' + ip)
-            add_item(row, info={'title': event,
-                                'plot': 'Event: {0}\nIP: {1}\nTime: {2}\nStatus: {3}'.format(
-                                    event, ip, ts, 'OK' if ok_h else 'FAILED')})
+            ts          = fmt_ts(h.get('ts'))
+            event       = h.get('event', '')
+            ip          = h.get('ip', '')
+            ok_h        = h.get('ok', True)
+            triggered   = h.get('triggered_by', '')
+            actor       = h.get('user', '')
+            row         = dim(ts) + '  ' + (good(event) if ok_h else bad(event))
+            if ip:          row += dim('  ' + ip)
+            if triggered and triggered != 'scheduled':
+                row += dim('  [' + triggered + ']')
+            if actor:       row += dim('  ' + actor)
+            plot = 'Event: {0}\nIP: {1}\nTime: {2}\nStatus: {3}'.format(
+                event, ip, ts, 'OK' if ok_h else 'FAILED')
+            if triggered: plot += '\nTriggered by: ' + triggered
+            if actor:     plot += '\nUser: ' + actor
+            add_item(row, info={'title': event, 'plot': plot})
 
     sep()
     add_item(info_c('>') + '  ' + muted('Force DDNS Update Now'),
@@ -1412,13 +1450,27 @@ def run_speedtest_action():
     api  = get_api()
     if api is None: return
     if not xbmcgui.Dialog().yesno('Claudette',
-                                   'Run a speed test now?\nThis will take about 30 seconds.'):
+                                   'Run a direct speed test now?\nThis will take about 30 seconds.'):
         return
     resp = api.run_speedtest()
     if resp is not None:
         notify('Speed test started — check back in ~30s', 4000)
     else:
         err_dialog('Speed Test', 'Could not start speed test.')
+    xbmc.executebuiltin('Container.Refresh')
+
+
+def run_vpn_speedtest_action():
+    api  = get_api()
+    if api is None: return
+    if not xbmcgui.Dialog().yesno('Claudette',
+                                   'Run a VPN speed test now?\nThis will take about 30 seconds.'):
+        return
+    resp = api.run_vpn_speedtest()
+    if resp is not None:
+        notify('VPN speed test started \u2014 check back in ~30s', 4000)
+    else:
+        err_dialog('VPN Speed Test', 'Could not start VPN speed test. Is VPN connected?')
     xbmc.executebuiltin('Container.Refresh')
 
 
@@ -1460,6 +1512,7 @@ ROUTES = {
     'refresh_threats_action':   refresh_threats_action,
     'run_internet_check':       run_internet_check,
     'run_speedtest':            run_speedtest_action,
+    'run_vpn_speedtest':        run_vpn_speedtest_action,
     'force_ddns_update':        force_ddns_update,
     'open_settings':            open_settings,
 }

@@ -32,22 +32,36 @@ whichever machine is running the Claudette Node.js server.
 
 FEATURES
 ---------
-- Network Devices   live list of discovered hosts, online/offline status,
-                    open ports, vendor, OS, latency, traceroute
-- Services          health status of all monitored HTTP/Docker services
-- Threat Feed       CVE advisories grouped by affected project/package
-- Audit Log         timestamped record of all system events
-- Trigger Scan      kick off a fresh nmap scan from your TV remote
+- Network Devices      live list with online/offline status, open ports,
+                       vendor, OS, latency, traceroute, host scripts
+- Internet             current status, per-probe latency, VPN status,
+                       outage history (7 / 30 / 90 days), SLA compliance
+- Services             HTTP/Docker service health + uptime %
+- Speed Tests          direct + VPN test history, ISP plan comparison,
+                       provider badge (Cloudflare / Ookla), run-now action
+- Threats              CVE feed grouped by package, severity filter
+- System Stats         CPU, memory, disk, network, uptime
+- DDNS                 status, current IP, history, force-update action
+- Server Logs          live rolling log buffer with level filter
+- Audit Log            paginated timestamped system event record
+- Activity Report      device + service activity summary
+- Actions              trigger scan, deep scan, refresh services/threats,
+                       run speed test (direct + VPN), run connectivity check
 
 
 SETTINGS
 ---------
-  Server URL            full URL of the Claudette server, e.g.
-                        http://192.168.8.10:7654
-  Request Timeout       seconds before a request is abandoned (default 10)
-  Show offline devices  toggle whether offline devices appear in the list
-  Minimum threat sev.   hide threats below a certain severity
-  Audit events to show  how many audit rows to fetch
+  Server URL               full URL of the Claudette server, e.g.
+                           http://192.168.8.10:7654  or
+                           https://mypi.hopto.org:7443
+  Request Timeout          seconds before a request is abandoned (default 10)
+  Show offline devices     toggle whether offline devices appear in the list
+  Minimum threat severity  hide threats below this severity (Low/Medium/High/Critical)
+  Direct speed test limit  how many direct test results to show
+  VPN speed test limit     how many VPN test results to show
+  ISP plan Mbps            set down/up to enable SLA compliance colouring
+  Audit events per page    rows fetched per page in the audit log
+  DDNS history entries     rows shown in DDNS event history
 
 
 REQUIREMENTS

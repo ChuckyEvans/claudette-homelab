@@ -20,9 +20,10 @@
   </category>
 
   <category label="Speed and Limits">
-    <setting id="speedtest_limit"    type="slider" label="Speed test results to show"    default="10" range="5,5,30"    option="int" />
-    <setting id="isp_plan_dl"        type="text"   label="ISP plan download Mbps (0=off)" default="0" />
-    <setting id="isp_plan_ul"        type="text"   label="ISP plan upload Mbps (0=off)"   default="0" />
+    <setting id="speedtest_limit"     type="slider" label="Direct speed test results to show" default="10" range="5,5,30"    option="int" />
+    <setting id="vpn_speedtest_limit" type="slider" label="VPN speed test results to show"    default="10" range="5,5,30"    option="int" />
+    <setting id="isp_plan_dl"         type="text"   label="ISP plan download Mbps (0=off)"   default="0" />
+    <setting id="isp_plan_ul"         type="text"   label="ISP plan upload Mbps (0=off)"     default="0" />
     <setting type="sep" />
     <setting id="audit_limit"        type="slider" label="Audit events per page"         default="50" range="10,10,100" option="int" />
     <setting id="ddns_history_limit" type="slider" label="DDNS history entries"          default="15" range="5,5,30"    option="int" />
