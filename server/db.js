@@ -29,6 +29,7 @@ export function getDb() {
   _db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
+    PRAGMA busy_timeout = 5000;
 
     CREATE TABLE IF NOT EXISTS audit_log (
       id      INTEGER PRIMARY KEY AUTOINCREMENT,
