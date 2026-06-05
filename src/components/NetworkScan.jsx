@@ -198,12 +198,128 @@ function DeviceFilterDropdown({ options, selected, onChange }) {
   )
 }
 
+// ── Device quick-actions modal ───────────────────────────────────────────────
+function DeviceActionsModal({ device, allFlags, onDeviceUpdated, onSelectDevice, onClose }) {
+  const [localDevice, setLocalDevice] = useState(device)
+  const [myDevice, setMyDevice] = useState(
+    () => localStorage.getItem('claudette:my-device') === (device.mac || device.ip)
+  )
+  const Icon = guessIcon(device)
+  const name = localDevice.label || localDevice.hostname || localDevice.ip
+
+  function toggleFlag(flagKey) {
+    if (!localDevice.mac) return
+    api.network.toggleFlag(localDevice.mac, flagKey)
+      .then(({ active: a }) => {
+        const newFlags = a
+          ? [...(localDevice.flags ?? []), flagKey]
+          : (localDevice.flags ?? []).filter(k => k !== flagKey)
+        const updated = { ...localDevice, flags: newFlags,
+          favorited: newFlags.includes('favorite'),
+          flagged:   newFlags.includes('pest'),
+          dormant:   newFlags.includes('dormant'),
+        }
+        setLocalDevice(updated)
+        onDeviceUpdated?.(updated)
+      })
+      .catch(console.error)
+  }
+
+  function toggleMe() {
+    const key = localDevice.mac || localDevice.ip
+    if (myDevice) localStorage.removeItem('claudette:my-device')
+    else          localStorage.setItem('claudette:my-device', key)
+    setMyDevice(v => !v)
+    window.dispatchEvent(new Event('claudette:my-device-changed'))
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#0f0f20] border border-[#1a1a35] rounded-2xl shadow-2xl w-72 overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-[#1a1a30]">
+          <div className="relative w-9 h-9 bg-[#1a1a35] rounded-xl flex items-center justify-center flex-shrink-0">
+            <Icon className="w-4 h-4 text-indigo-400" />
+            <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#0f0f20] ${
+              localDevice.status === 'online' ? 'bg-emerald-400' : localDevice.status === 'filtered' ? 'bg-orange-400' : 'bg-slate-600'
+            }`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-white truncate">{name}</p>
+            <p className="text-xs text-slate-400 font-mono">{localDevice.ip}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-slate-500 hover:text-slate-300 hover:bg-white/5 rounded-lg transition-colors flex-shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Flag toggles */}
+        {localDevice.mac && allFlags.length > 0 && (
+          <div className="p-3 grid grid-cols-2 gap-2 border-b border-[#1a1a30]">
+            {allFlags.map(f => {
+              const active = (localDevice.flags ?? []).includes(f.key)
+              return (
+                <button
+                  key={f.key}
+                  onClick={() => toggleFlag(f.key)}
+                  className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-medium border transition-all ${
+                    active
+                      ? 'bg-indigo-500/15 border-indigo-500/35 text-indigo-300 hover:bg-indigo-500/25'
+                      : 'bg-white/[0.025] border-[#1a1a30] text-slate-400 hover:bg-white/[0.06] hover:border-[#2a2a45] hover:text-slate-200'
+                  }`}
+                >
+                  <span className="text-sm leading-none flex-shrink-0">{f.icon || '🏷️'}</span>
+                  <span className="flex-1 truncate">{f.label}</span>
+                  {active && <Check className="w-3 h-3 flex-shrink-0 text-indigo-400" />}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="p-3 space-y-1.5">
+          <button
+            onClick={toggleMe}
+            className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium border transition-all ${
+              myDevice
+                ? 'bg-cyan-500/10 border-cyan-500/25 text-cyan-400 hover:bg-cyan-500/20'
+                : 'bg-white/[0.025] border-[#1a1a30] text-slate-400 hover:bg-white/[0.06] hover:border-[#2a2a45] hover:text-slate-200'
+            }`}
+          >
+            <Monitor className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="flex-1 text-left">{myDevice ? 'My Device' : 'Mark as My Device'}</span>
+            {myDevice && <Check className="w-3 h-3 text-cyan-400 flex-shrink-0" />}
+          </button>
+          <button
+            onClick={() => { onSelectDevice(device); onClose() }}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium border border-[#1a1a30] bg-white/[0.025] text-slate-300 hover:bg-white/[0.06] hover:border-indigo-500/30 hover:text-indigo-300 transition-all"
+          >
+            <Search className="w-3.5 h-3.5 flex-shrink-0 text-indigo-400" />
+            <span className="flex-1 text-left">View Details &amp; Scan Ports</span>
+            <ChevronRight className="w-3 h-3 ml-auto text-slate-500 flex-shrink-0" />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Device Tree (left sidebar) ────────────────────────────────────────────────
 function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = {}, subnets = [], threatMap = {}, myIp = null, forcedFilter = null, onDeviceUpdated, dormantAfterDays = 3, skullAfterDays = 7, allFlags = [] }) {
   const [filter, setFilter] = useState('')
   const [collapsed, setCollapsed] = useState({})
   const [activeFilters, setActiveFilters] = useState([])
-  const [menuIp, setMenuIp] = useState(null)
+  const [actionDevice, setActionDevice] = useState(null)
   const [, setTick] = useState(0)
 
   // Sync forced filter from parent (rescan scope dropdown)
@@ -284,7 +400,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
           <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-indigo-400' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} title={inferDeviceType(d) ?? 'Unknown device type'} />
           <div className="flex-1 min-w-0">
             <p className={`text-xs font-medium font-mono truncate flex items-center gap-1 ${isSelected ? 'text-slate-100' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-300'}`}>
-              {(d.flags ?? []).map(fk => {
+              {(d.flags ?? []).filter(fk => fk !== 'favorite' && fk !== 'dormant').map(fk => {
                 const fl = allFlags.find(f => f.key === fk)
                 return fl ? <span key={fk} className="text-[11px] flex-shrink-0" title={fl.label}>{fl.icon || '🏷️'}</span> : null
               })}
@@ -324,70 +440,14 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
           {threatMap[d.ip] === 'medium'   && <AlertCircle   className="w-3 h-3 text-amber-400 flex-shrink-0" title="Medium severity threat detected" />}
           {isSelected && <ChevronRight className="w-3 h-3 text-indigo-500 flex-shrink-0" />}
         </button>
-        {/* Ellipsis quick-action toggle */}
+        {/* Ellipsis quick-action button */}
         <button
-          onClick={e => { e.stopPropagation(); setMenuIp(v => v === d.ip ? null : d.ip) }}
+          onClick={e => { e.stopPropagation(); setActionDevice(d) }}
           title="Quick actions"
           className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded text-slate-500 hover:text-slate-300 hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all"
         >
           <MoreHorizontal className="w-3.5 h-3.5" />
         </button>
-        {/* Inline quick actions */}
-        {menuIp === d.ip && (
-          <div className="flex flex-wrap items-center gap-1 px-2.5 pb-2 pt-0.5 bg-[#0b0b1e] border-b border-[#1a1a30]">
-            {d.mac && allFlags.map(f => {
-                const active = (d.flags ?? []).includes(f.key)
-                return (
-                  <button
-                    key={f.key}
-                    onClick={() => {
-                      api.network.toggleFlag(d.mac, f.key)
-                        .then(({ active: a }) => {
-                          const newFlags = a ? [...(d.flags ?? []), f.key] : (d.flags ?? []).filter(k => k !== f.key)
-                          onDeviceUpdated?.({ ...d, flags: newFlags,
-                            favorited: newFlags.includes('favorite'),
-                            flagged: newFlags.includes('pest'),
-                            dormant: newFlags.includes('dormant') })
-                        })
-                        .catch(console.error)
-                      setMenuIp(null)
-                    }}
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
-                      active ? 'border-indigo-500/40 text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20'
-                             : 'border-slate-600/30 text-slate-400 hover:bg-white/5'
-                    }`}
-                  >
-                    {f.icon && <span className="text-[11px]">{f.icon}</span>}
-                    {active ? `Remove ${f.label}` : f.label}
-                  </button>
-                )
-              })}
-            <button
-              onClick={() => {
-                const key = d.mac || d.ip
-                const cur = localStorage.getItem('claudette:my-device')
-                if (cur === key) localStorage.removeItem('claudette:my-device')
-                else localStorage.setItem('claudette:my-device', key)
-                window.dispatchEvent(new Event('claudette:my-device-changed'))
-                setMenuIp(null)
-              }}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
-                localStorage.getItem('claudette:my-device') === (d.mac || d.ip)
-                  ? 'border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10'
-                  : 'border-slate-600/20 text-slate-400 hover:bg-white/5'
-              }`}
-            >
-              <Monitor className="w-3 h-3" />
-              {localStorage.getItem('claudette:my-device') === (d.mac || d.ip) ? 'Unmark me' : 'My device'}
-            </button>
-            <button
-              onClick={() => { onSelect(d); setMenuIp(null) }}
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border border-indigo-500/20 text-indigo-400 hover:bg-indigo-500/10 transition-colors"
-            >
-              <Search className="w-3 h-3" />Scan ports
-            </button>
-          </div>
-        )}
       </div>
     )
   }
@@ -457,6 +517,15 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
           sortDevices(displayDevices).map(renderDevice)
         )}
       </div>
+      {actionDevice && (
+        <DeviceActionsModal
+          device={actionDevice}
+          allFlags={allFlags}
+          onDeviceUpdated={onDeviceUpdated}
+          onSelectDevice={onSelect}
+          onClose={() => setActionDevice(null)}
+        />
+      )}
     </div>
   )
 }
