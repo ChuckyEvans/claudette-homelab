@@ -15,6 +15,11 @@ export function resetDb() {
   // Delete stale WAL/SHM files so the restored database opens cleanly
   try { if (fs.existsSync(DB_PATH + '-wal')) fs.unlinkSync(DB_PATH + '-wal') } catch {}
   try { if (fs.existsSync(DB_PATH + '-shm')) fs.unlinkSync(DB_PATH + '-shm') } catch {}
+  // Delete stale node-sqlite3-wasm lock directory left over from a hard shutdown
+  try {
+    const lockDir = DB_PATH + '.lock'
+    if (fs.existsSync(lockDir)) fs.rmdirSync(lockDir)
+  } catch {}
 }
 
 let _db = null
