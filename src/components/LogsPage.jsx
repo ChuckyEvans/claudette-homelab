@@ -15,7 +15,7 @@ const PAGE_SIZES = [50, 100, 200, 500]
 
 export default function LogsPage() {
   // ── Filter state ────────────────────────────────────────────────────────
-  const [selectedLevels, setSelectedLevels] = useState(['info', 'warn', 'error'])
+  const [selectedLevels, setSelectedLevels] = useState(['warn', 'error'])
   const [search,         setSearch]         = useState('')
   const [searchInput,    setSearchInput]    = useState('')
   const [pageSize,       setPageSize]       = useState(100)

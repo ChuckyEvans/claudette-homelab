@@ -276,8 +276,11 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
             isSelected ? 'bg-indigo-600/15 border-r-2 border-indigo-500' : isMe ? 'bg-cyan-500/5 hover:bg-cyan-500/10' : 'hover:bg-white/[0.03]'
           }`}
         >
-          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${d.status === 'online' ? 'bg-emerald-400' : d.status === 'filtered' ? 'bg-orange-400' : badge === 'skull' ? 'bg-red-900/60' : badge === 'moon' ? 'bg-slate-700' : 'bg-slate-600'}`}
-            title={d.status === 'online' ? 'Online' : d.status === 'filtered' ? 'Filtered — ping blocked but ports respond' : badge === 'skull' ? 'Unreachable for an extended period' : badge === 'moon' ? 'Dormant' : 'Offline'} />
+          <div className="relative flex-shrink-0">
+            <span className={`w-1.5 h-1.5 rounded-full block ${d.status === 'online' ? 'bg-emerald-400' : d.status === 'filtered' ? 'bg-orange-400' : badge === 'skull' ? 'bg-red-900/60' : badge === 'moon' ? 'bg-slate-700' : 'bg-slate-600'}`}
+              title={d.status === 'online' ? 'Online' : d.status === 'filtered' ? 'Filtered — ping blocked but ports respond' : badge === 'skull' ? 'Unreachable for an extended period' : badge === 'moon' ? 'Dormant' : 'Offline'} />
+            {d.favorited && <Star className="absolute -top-2 -left-1 w-3 h-3 text-amber-400 drop-shadow" fill="currentColor" title="Favourite" />}
+          </div>
           <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-indigo-400' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} title={inferDeviceType(d) ?? 'Unknown device type'} />
           <div className="flex-1 min-w-0">
             <p className={`text-xs font-medium font-mono truncate flex items-center gap-1 ${isSelected ? 'text-slate-100' : (isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-300'}`}>

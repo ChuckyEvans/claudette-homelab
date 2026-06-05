@@ -446,9 +446,9 @@ function setCookie(name, value) {
   document.cookie = `${name}=${encodeURIComponent(value)}; expires=${exp}; path=/; SameSite=Strict`
 }
 
-/** Read persisted theme from cookie (falls back to old localStorage key, then coastal for new users). */
+/** Read persisted theme from cookie (falls back to old localStorage key, then dark for new users). */
 export function loadTheme() {
-  return getCookie('claudette_theme') ?? localStorage.getItem('claudette:theme') ?? 'coastal'
+  return getCookie('claudette_theme') ?? localStorage.getItem('claudette:theme') ?? DEFAULT_THEME
 }
 
 /** Persist theme choice to cookie. */
