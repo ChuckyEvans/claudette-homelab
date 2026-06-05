@@ -404,10 +404,10 @@ describe('resolveRetention()', () => {
   })
 
   it('rejects arbitrary values and uses fallback', () => {
-    expect(resolveRetention({ retention: { days: 7    } })).toBe(90)
-    expect(resolveRetention({ retention: { days: 1000 } })).toBe(90)
-    expect(resolveRetention({ retention: { days: 'all time' } })).toBe(90)
-    expect(resolveRetention({                                 })).toBe(90)
+    expect(resolveRetention({ retention: { days: 7    } })).toBe(365)
+    expect(resolveRetention({ retention: { days: 1000 } })).toBe(365)
+    expect(resolveRetention({ retention: { days: 'all time' } })).toBe(365)
+    expect(resolveRetention({                                 })).toBe(365)
   })
 
   it('uses existing retention when body has no retention', () => {
