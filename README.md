@@ -103,6 +103,8 @@ The setup wizard runs on first launch — create an admin account and confirm yo
 
 No Docker Desktop needed on your workstation for Pi deploys — just OpenSSH.
 
+> **Pi first-time setup:** before your first deploy, SSH into the Pi and run `setup-pi.sh` to install Docker, nginx, certbot, UFW, and fail2ban in one shot. See [Pi first-time setup](#pi-first-time-setup) in the Linux section below.
+
 ```powershell
 # Full deploy — builds natively on the Pi, restarts container
 npm run deploy
@@ -157,6 +159,8 @@ open http://localhost:7654
 
 The macOS deploy script cross-compiles a `linux/arm64` image on your Mac via Docker Buildx, then ships it to the Pi.
 
+> **Pi first-time setup:** before your first deploy, SSH into the Pi and run `setup-pi.sh` to install Docker, nginx, certbot, UFW, and fail2ban in one shot. See [Pi first-time setup](#pi-first-time-setup) in the Linux section below.
+
 ```bash
 chmod +x scripts/linux/deploy-pi.sh   # one-time
 
@@ -207,32 +211,47 @@ npm run build   # production build
 | Requirement | Notes |
 |---|---|
 | **Raspberry Pi OS or Ubuntu** | 64-bit (arm64). Pi 4 (2 GB+) recommended; Pi 3B+ works. |
-| **Docker on the Pi** | Install once — see [Pi first-time setup](#pi-first-time-setup) below. |
+| **Docker on the Pi** | Installed automatically by `setup-pi.sh` — see [Pi first-time setup](#pi-first-time-setup) below. |
 | **Key-based SSH auth** | Required — deploy scripts use `BatchMode=yes` and will not prompt for a password. |
 
 ### Pi first-time setup
 
-**1. Install Docker on the Pi**
-
-SSH into the Pi and run:
+Run `scripts/linux/setup-pi.sh` **once on the Pi** (not from your workstation). It installs and configures everything in one shot:
 
 ```bash
-# Option A — official Docker install script (recommended)
-curl -fsSL https://get.docker.com | sudo sh
+# Copy the script to the Pi
+scp scripts/linux/setup-pi.sh ubuntu@<pi-ip>:~/
 
-# Option B — via apt
-sudo apt update && sudo apt install -y docker.io
+# SSH in and run it
+ssh ubuntu@<pi-ip>
+chmod +x setup-pi.sh
+sudo ./setup-pi.sh --domain mypi.hopto.org --user ubuntu
 ```
 
-Add your user to the `docker` group so deploy scripts can run `docker` without a full sudo password:
+**What the script does:**
+
+| Step | Action |
+|---|---|
+| 1 | Installs Docker (official repo) + adds your user to the `docker` group |
+| 2 | Installs nginx, certbot, UFW firewall, fail2ban |
+| 3 | Configures UFW — deny inbound by default; allow 22/80/443/7443/8443 |
+| 4 | Writes nginx config with rate-limiting and security headers |
+| 5 | Obtains a Let's Encrypt TLS certificate (HTTP-01 challenge) |
+| 6 | Configures fail2ban jails for SSH, nginx rate-limits, and Claudette login |
+| 7 | Enables certbot auto-renewal timer and runs a dry-run to verify it |
+
+**Options:**
 
 ```bash
-sudo usermod -aG docker $USER
-# Log out and back in for the group change to take effect
-docker run --rm hello-world   # verify it works
+sudo ./setup-pi.sh --domain mypi.hopto.org   # public HTTPS (recommended)
+sudo ./setup-pi.sh --skip-certbot            # LAN-only, no TLS
+sudo ./setup-pi.sh --no-ha                   # skip Home Assistant (8443) block
+sudo ./setup-pi.sh --skip-firewall           # skip UFW (if you manage firewall separately)
 ```
 
-**2. Set up SSH key access**
+> **Note:** After the script runs, log out and back in as `ubuntu` so the docker group takes effect.
+
+**1. Set up SSH key access** *(the script does not do this — do it first)*
 
 ```bash
 # Generate a key on your workstation if you don't have one
@@ -251,9 +270,7 @@ Test it — this should print `ok` with no password prompt:
 ssh ubuntu@<pi-ip> echo ok
 ```
 
-**3. Configure `config.yaml`**
-
-The deploy scripts read the Pi address and SSH user from `config.yaml`:
+**2. Configure `config.yaml`** *(on your workstation, before deploying)*
 
 ```yaml
 pi:
