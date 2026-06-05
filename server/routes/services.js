@@ -119,7 +119,10 @@ export async function runChecks(broadcast) {
 
   const upCount   = results.filter(r => r.ok).length
   const downCount = results.filter(r => !r.ok).length
-  audit('service.check', { up: upCount, down: downCount, total: results.length })
+  // Only log service.check when something is actually down (service.up/down events handle transitions)
+  if (downCount > 0) {
+    audit('service.check', { up: upCount, down: downCount, total: results.length })
+  }
 
   if (broadcast) broadcast('services', { results, ts: Date.now() })
   if (broadcast) broadcast('job_done', { job: 'services', ts: Date.now() })

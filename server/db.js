@@ -379,6 +379,8 @@ export function pruneOldData(retentionDays) {
   const db = getDb()
   db.run('DELETE FROM audit_log    WHERE ts < ?', [cutoff])
   db.run('DELETE FROM device_events WHERE ts < ?', [cutoff])
+  // Keep mtr_snapshots on the same retention window (they can be large)
+  db.run('DELETE FROM mtr_snapshots WHERE ts < ?', [cutoff])
 }
 
 export function upsertDevice(device) {
