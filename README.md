@@ -143,17 +143,24 @@ npm run build      # production build
 
 ### Run locally (macOS)
 
+**Option A — Docker** (recommended; ARP scanning limited by Docker VM on macOS):
+
 ```bash
-# 1. Copy the example config and edit it
-cp config.example.yaml config.yaml
-# Edit config.yaml — set your subnet, ISP details, etc.
-
-# 2. Build and start the container
-./scripts/linux/restart.sh
-
-# 3. Open in browser
+cp config.example.yaml config.yaml   # edit subnet, ISP details, etc.
+./scripts/linux/restart.sh           # build + start container
 open http://localhost:7654
 ```
+
+**Option B — Native Node.js** (no Docker required; full network access):
+
+```bash
+chmod +x scripts/linux/run-local.sh  # one-time
+./scripts/linux/run-local.sh         # hot-reload dev server
+./scripts/linux/run-local.sh --prod  # production build + server
+./scripts/linux/run-local.sh --stop  # stop the server
+```
+
+Requires: `brew install node nmap`
 
 ### Deploy to a Raspberry Pi (macOS → Pi)
 
@@ -311,16 +318,25 @@ npm run deploy:skip-build
 
 ### Run locally on Linux
 
+**Option A — Docker** (recommended; full network access via `--network host`):
+
 ```bash
-# 1. Copy and edit the config
-cp config.example.yaml config.yaml
-
-# 2. Build and start
-./scripts/linux/restart.sh
-
-# 3. Open in browser
-xdg-open http://localhost:7654
+cp config.example.yaml config.yaml   # edit subnet, ISP details, etc.
+./scripts/linux/restart.sh           # build + start container
 ```
+
+**Option B — Native Node.js** (no Docker required; also full network access):
+
+```bash
+chmod +x scripts/linux/run-local.sh  # one-time
+./scripts/linux/run-local.sh         # hot-reload dev server
+./scripts/linux/run-local.sh --prod  # production build + server
+./scripts/linux/run-local.sh --stop  # stop the server
+```
+
+Requires: `sudo apt install nodejs nmap`
+
+Open in browser: `xdg-open http://localhost:7654`
 
 ### Development (Linux)
 
@@ -366,14 +382,19 @@ network:
     - 9.9.9.9
 
 schedule:
-  check_interval_minutes: 5     # Service health check frequency
-  internet_check_minutes: 5     # Internet connectivity check frequency
-  ping_interval_minutes: 5      # Lightweight device ping-sweep frequency
-  speedtest_interval_hours: 1   # Speed test frequency
-  threat_interval_hours: 6      # CVE feed refresh frequency
-  deep_scan_hour: 4             # Hour (0–23) for the nightly full port scan
-  backup_interval_days: 7       # Auto-backup frequency (0 = disabled)
-  backup_keep_days: 7           # How many days to keep auto-backups
+  check_interval_minutes: 5           # Service health check frequency
+  internet_check_minutes: 5           # Internet connectivity check frequency
+  internet_outage_check_seconds: 10   # Fast-poll interval (seconds) during an outage
+  ping_interval_minutes: 5            # Lightweight device ping-sweep frequency
+  speedtest_interval_hours: 4         # Direct speed test frequency
+  vpn_speedtest_interval_hours: 4     # VPN speed test frequency (0 = disabled)
+  speedtest_provider: cloudflare      # cloudflare or ookla
+  threat_interval_hours: 6            # CVE feed refresh frequency
+  deep_scan_hour: 4                   # Hour (0–23) for the nightly full port scan
+  backup_interval_days: 0             # Auto-backup frequency in days (0 = disabled)
+  backup_keep_days: 7                 # Days of auto-backups to retain
+  mtr_baseline_hours: 1               # MTR baseline run interval in hours (0 = disabled)
+  mtr_outage_repeat_minutes: 15       # Re-run MTR every N minutes during an outage
 
 isp:
   name: MyISP

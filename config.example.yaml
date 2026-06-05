@@ -29,13 +29,19 @@ network:
   #     - 192.168.1.101
 
 schedule:
-  check_interval_minutes: 5   # Service check frequency: 1, 2, 5, 10, 15, 30, or 60 (= every hour on the dot)
+  check_interval_minutes: 5             # Service check frequency: 1, 2, 5, 10, 15, 30, or 60
   internet_check_minutes: 5             # Internet connectivity check frequency (same options)
   internet_outage_check_seconds: 10     # Fast-poll interval (seconds) during an outage — min 5, max 300
-  ping_interval_minutes: 5    # Ping sweep frequency (same options)
-  speedtest_interval_hours: 1  # Speed test frequency: 1, 2, 3, 4, 6, 12, or 24 (= once a day)
-  threat_interval_hours: 6    # CVE / threat intelligence refresh frequency (same options)
-  deep_scan_hour: 4           # Hour (0-23) for the nightly deep port scan — e.g. 4 = 4:00 AM
+  ping_interval_minutes: 5             # Ping sweep frequency (same options)
+  speedtest_interval_hours: 4          # Direct speed test frequency: 1, 2, 3, 4, 6, 12, or 24
+  vpn_speedtest_interval_hours: 4      # VPN speed test frequency (same options; 0 = disabled)
+  speedtest_provider: cloudflare       # Speed test backend: cloudflare or ookla
+  threat_interval_hours: 6             # CVE / threat intelligence refresh frequency (same options)
+  deep_scan_hour: 4                    # Hour (0-23) for the nightly deep port scan — e.g. 4 = 4:00 AM
+  backup_interval_days: 0              # Auto-backup frequency in days (0 = disabled)
+  backup_keep_days: 7                  # How many days of auto-backups to retain
+  mtr_baseline_hours: 1                # MTR baseline run interval in hours (0 = disabled)
+  mtr_outage_repeat_minutes: 15        # Re-run MTR every N minutes while an outage is active (0 = once only)
 
 isp:
   name: "Your ISP Name"       # Your ISP name — shown in outage reports and exports
@@ -59,6 +65,7 @@ infra:
   sla_url: ""                 # URL to SLA or warranty document
   sla_notes: ""               # Free-text notes
 
+threats:
   keywords:
     - docker
     - python flask
