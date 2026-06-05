@@ -105,7 +105,7 @@ export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates, ch
         <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl divide-y divide-[#1a1a30]">
           {STACK.map(({ label, value }) => (
             <div key={label} className="flex items-center px-4 py-3 gap-4">
-              <span className="text-xs text-slate-600 w-24 flex-shrink-0">{label}</span>
+              <span className="text-xs text-slate-400 w-24 flex-shrink-0">{label}</span>
               <span className="text-sm text-slate-300 font-mono">{value}</span>
             </div>
           ))}
@@ -123,7 +123,7 @@ export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates, ch
             { label: 'Kodi addon',value: 'output/kodi/plugin.program.claudette/' },
           ].map(({ label, value }) => (
             <div key={label} className="flex items-center px-4 py-3 gap-4">
-              <span className="text-xs text-slate-600 w-24 flex-shrink-0">{label}</span>
+              <span className="text-xs text-slate-400 w-24 flex-shrink-0">{label}</span>
               <span className="text-[12px] text-slate-400 font-mono">{value}</span>
             </div>
           ))}

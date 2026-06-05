@@ -249,6 +249,7 @@ for (const dns of yamlList('fallback_dns')) {
 
 remote([
   `sudo docker run -d`,
+  `--init`,
   `--name ${CONTAINER}`,
   `--restart unless-stopped`,
   `--cap-add NET_ADMIN`,

@@ -202,9 +202,10 @@ export const api = {
     }),
   },
   ddns: {
-    status:  () => request('/ddns/status'),
-    update:  () => request('/ddns/update', { method: 'POST' }),
-    history: () => request('/ddns/history'),
+    status:   () => request('/ddns/status'),
+    update:   () => request('/ddns/update',   { method: 'POST' }),
+    history:  () => request('/ddns/history'),
+    portscan: () => request('/ddns/portscan', { method: 'POST' }),
   },
   logs: {
     get: (params = {}) => {

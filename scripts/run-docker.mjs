@@ -108,6 +108,7 @@ if (leasesFile) info(`DHCP leases: ${leasesFile} will be mounted.`)
 
 run('docker', [
   'run', '-d',
+  '--init',
   '--name',        CONTAINER,
   '--restart',     'unless-stopped',
   '--cap-add',     'NET_ADMIN',

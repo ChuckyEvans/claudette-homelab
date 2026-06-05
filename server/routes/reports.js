@@ -145,8 +145,11 @@ router.get('/chart', (req, res) => {
     }
     const serviceDowns = Array.from(svcCounts.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
 
-    // Internet connectivity — at most 300 samples for charting
-    const netRows = db.all(`SELECT ts, payload FROM audit_log WHERE ts >= ? AND ts <= ? AND event = 'internet.check' ORDER BY ts ASC LIMIT 300`, [from, to])
+    // Internet connectivity — at most 300 samples for charting.
+    // Fetch the most-recent 300 rows (DESC) then reverse so the chart renders oldest→newest.
+    // This ensures recent VPN data (which may not have existed at the start of the range) is included.
+    const netRows = db.all(`SELECT ts, payload FROM audit_log WHERE ts >= ? AND ts <= ? AND event = 'internet.check' ORDER BY ts DESC LIMIT 300`, [from, to])
+    netRows.reverse()
     const internet = netRows.flatMap(r => {
       try {
         const p = JSON.parse(r.payload)

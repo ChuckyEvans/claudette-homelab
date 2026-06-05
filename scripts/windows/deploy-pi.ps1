@@ -214,6 +214,7 @@ foreach ($dns in $fallbackDns) {
 
 Invoke-Ssh (@(
     "sudo docker run -d",
+    "--init",
     "--name $ContainerName",
     "--restart unless-stopped",
     "--cap-add NET_ADMIN",

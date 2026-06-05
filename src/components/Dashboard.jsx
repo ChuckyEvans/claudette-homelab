@@ -116,7 +116,7 @@ export default function Dashboard({ services, threats, systemStats, setPage }) {
           value={failCount}
           sub={failCount === 0 ? 'All clear' : 'Needs attention'}
           icon={XCircle}
-          accent={failCount === 0 ? 'text-slate-600' : 'text-red-400'}
+          accent={failCount === 0 ? 'text-slate-500' : 'text-red-400'}
           onClick={failCount > 0 ? () => setPage('services') : undefined}
         />
         <StatCard
@@ -124,7 +124,7 @@ export default function Dashboard({ services, threats, systemStats, setPage }) {
           value={threatCount}
           sub={threatCount > 0 ? 'Review feed' : 'No new threats'}
           icon={Shield}
-          accent={threatCount > 0 ? 'text-amber-400' : 'text-slate-600'}
+          accent={threatCount > 0 ? 'text-amber-400' : 'text-slate-500'}
           onClick={() => setPage('threats')}
         />
         {systemStats ? (
@@ -143,7 +143,7 @@ export default function Dashboard({ services, threats, systemStats, setPage }) {
             onClick={() => setPage('system')}
           />
         ) : (
-          <StatCard title="CPU" value="—" sub="Loading…" icon={Activity} accent="text-slate-600" />
+          <StatCard title="CPU" value="—" sub="Loading…" icon={Activity} accent="text-slate-500" />
         )}
       </div>
 

@@ -44,7 +44,7 @@ export default function Pagination({ page, totalPages, onPage }) {
       </button>
       {pages.map((p, i) =>
         p === '...'
-          ? <span key={`d${i}`} className="w-7 text-center text-xs text-slate-600 select-none">…</span>
+          ? <span key={`d${i}`} className="w-7 text-center text-xs text-slate-500 select-none">…</span>
           : <button key={p} onClick={() => onPage(p - 1)} className={BTN_PAGE(page === p - 1)}>{p}</button>
       )}
       <button onClick={() => onPage(page + 1)} disabled={page >= totalPages - 1} className={BTN_NAV} title="Next">

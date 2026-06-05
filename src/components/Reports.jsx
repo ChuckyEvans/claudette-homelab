@@ -7,6 +7,7 @@ import {
 import { api, exportToCsv, exportToPdf } from '../lib/api.js'
 import Pagination from './Pagination.jsx'
 import TopProgressBar from './TopProgressBar.jsx'
+import Tooltip from './Tooltip.jsx'
 
 const PAGE_SIZE = 50
 
@@ -82,6 +83,7 @@ function rangeMs(key) {
 
 const RANGE_OPTS   = ['1h', '3h', '1d', '7d', '30d', '90d', '1y', 'custom']
 const RANGE_LABELS = { '1h': '1h', '3h': '3h', '1d': '1d', '7d': '7d', '30d': '30d', '90d': '90d', '1y': '1y', custom: 'Custom' }
+const RANGE_TIPS   = { '1h': 'Last 1 hour', '3h': 'Last 3 hours', '1d': 'Last 24 hours', '7d': 'Last 7 days', '30d': 'Last 30 days', '90d': 'Last 90 days', '1y': 'Last year', custom: 'Pick a custom date range' }
 
 const EV_FILTERS = [
   { label: 'All',      value: '' },
@@ -290,7 +292,7 @@ function MtrPathView({ hops }) {
       <div className="flex items-center justify-between mb-3 pb-3 border-b border-[#1a1a30]">
         <div className="flex items-center gap-2 text-[11px] font-mono">
           <span className="text-indigo-300 font-semibold">Pi</span>
-          <span className="text-slate-600">→</span>
+          <span className="text-slate-500">→</span>
           <span className="text-emerald-300 font-semibold">8.8.8.8</span>
         </div>
         <div className="flex items-center gap-3 text-[10px]">
@@ -333,7 +335,7 @@ function MtrPathView({ hops }) {
               </div>
               <div className="min-w-0">
                 <div className="text-xs font-mono truncate text-slate-300">{h.host}</div>
-                <div className="text-[10px] text-slate-600">best {h.best.toFixed(1)} · worst {h.wrst.toFixed(1)}ms · {h.snt} probes</div>
+                <div className="text-[10px] text-slate-500">best {h.best.toFixed(1)} · worst {h.wrst.toFixed(1)}ms · {h.snt} probes</div>
               </div>
             </div>
           </div>
@@ -364,7 +366,7 @@ function MtrPathView({ hops }) {
               <div className="flex-1 flex items-center justify-between min-w-0">
                 <div className="min-w-0">
                   <div className="text-xs font-mono font-semibold text-emerald-300">{dest.host}</div>
-                  <div className="text-[10px] text-slate-600">best {dest.best.toFixed(1)} · worst {dest.wrst.toFixed(1)}ms · hop {dest.hop}</div>
+                  <div className="text-[10px] text-slate-500">best {dest.best.toFixed(1)} · worst {dest.wrst.toFixed(1)}ms · hop {dest.hop}</div>
                 </div>
                 <span className="text-[10px] font-semibold text-emerald-500 ml-2 flex-shrink-0">destination reached</span>
               </div>
@@ -406,7 +408,7 @@ function MtrTable({ output }) {
             <tbody>
               {hops.map((h, i) => (
                 <tr key={h.hop} className="border-b border-[#1a1a30] last:border-0 bg-[#080810] hover:bg-[#0d0d20] transition-colors">
-                  <td className="px-3 py-1.5 text-slate-600">{h.hop}</td>
+                  <td className="px-3 py-1.5 text-slate-500">{h.hop}</td>
                   <td className={`px-3 py-1.5 ${i === hops.length - 1 ? 'text-emerald-400 font-semibold' : 'text-slate-300'}`}>{h.host}</td>
                   <td className={`px-3 py-1.5 text-right ${h.loss > 0 ? 'text-red-400' : 'text-slate-500'}`}>{h.loss.toFixed(1)}%</td>
                   <td className="px-3 py-1.5 text-right text-sky-300">{h.avg.toFixed(1)}</td>
@@ -489,7 +491,7 @@ function OutageMtrPath({ hops, outageType }) {
                 <div className="w-7 flex justify-center">
                   <div className={`w-px flex-1 ${isDead ? 'bg-red-800/40' : 'bg-slate-700'}`} />
                 </div>
-                <div className={`flex items-center gap-1.5 py-0.5 text-[10px] font-mono ${isDead ? 'text-red-800' : 'text-slate-600'}`}>
+                <div className={`flex items-center gap-1.5 py-0.5 text-[10px] font-mono ${isDead ? 'text-red-800' : 'text-slate-500'}`}>
                   {isDead ? '×' : `${h.avg.toFixed(1)}ms`}
                   {isLast && <span className="text-emerald-600 text-[9px] font-semibold uppercase tracking-wide ml-1">← last reached</span>}
                 </div>
@@ -518,10 +520,10 @@ function OutageMtrPath({ hops, outageType }) {
                     isDead ? 'text-red-700' : isLast ? 'text-emerald-400 font-semibold' : 'text-slate-300'
                   }`}>
                     {h.host === '???' ? '??? (no response)' : h.host}
-                    {!isDead && isPrivateIp(h.host) && <span className="ml-1.5 text-[10px] text-slate-600">local</span>}
+                    {!isDead && isPrivateIp(h.host) && <span className="ml-1.5 text-[10px] text-slate-500">local</span>}
                   </div>
                   {!isDead && (
-                    <div className="text-[10px] text-slate-600">
+                    <div className="text-[10px] text-slate-500">
                       avg {h.avg.toFixed(1)} · best {h.best.toFixed(1)} · worst {h.wrst.toFixed(1)}ms · {h.loss.toFixed(1)}% loss
                     </div>
                   )}
@@ -598,7 +600,7 @@ function MultiSelectDropdown({ label, options, selected, onApply, className }) {
                 <span className="text-xs text-slate-300 truncate">{opt.label}</span>
               </label>
             ))}
-            {options.length === 0 && <p className="text-xs text-slate-600 px-2 py-1">No options</p>}
+            {options.length === 0 && <p className="text-xs text-slate-500 px-2 py-1">No options</p>}
           </div>
           <div className="flex gap-2 px-3 py-2 border-t border-[#1a1a30]">
             <button onClick={apply} className="flex-1 px-2 py-1 text-xs bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/40 rounded-lg transition-colors">OK</button>
@@ -783,7 +785,7 @@ function CheckDetailModal({ check, onClose, onTraceStart, onTraceEnd }) {
             )}
             {traceroute && <MtrTable output={traceroute} />}
             {!traceroute && !traceError && !tracing && (
-              <p className="text-xs text-slate-600 italic">Click &ldquo;Run Traceroute&rdquo; to probe the current network path from the Pi</p>
+              <p className="text-xs text-slate-500 italic">Click &ldquo;Run Traceroute&rdquo; to probe the current network path from the Pi</p>
             )}
           </div>
         </div>
@@ -793,12 +795,12 @@ function CheckDetailModal({ check, onClose, onTraceStart, onTraceEnd }) {
 }
 
 const ALL_TABS = [
-  { id: 'overview',  label: 'Overview',   Icon: BarChart2 },
-  { id: 'internet',  label: 'Internet',   Icon: Wifi      },
-  { id: 'vpn',       label: 'VPN',        Icon: Shield    },
-  { id: 'speedtest', label: 'Speed Test', Icon: Zap       },
-  { id: 'ddns',      label: 'DDNS',       Icon: Globe     },
-  { id: 'activity',  label: 'Activity',   Icon: Activity  },
+  { id: 'overview',  label: 'Overview',   Icon: BarChart2, tip: 'Summary: network activity, connectivity and device events' },
+  { id: 'internet',  label: 'Internet',   Icon: Wifi,      tip: 'Internet connectivity checks, latency trends and outage history' },
+  { id: 'vpn',       label: 'VPN',        Icon: Shield,    tip: 'VPN uptime, latency and connection checks via your VPN interface' },
+  { id: 'speedtest', label: 'Speed Test', Icon: Zap,       tip: 'Broadband speed test history — download, upload and ping' },
+  { id: 'ddns',      label: 'DDNS',       Icon: Globe,     tip: 'Dynamic DNS hostname tracking and public IP change history' },
+  { id: 'activity',  label: 'Activity',   Icon: Activity,  tip: 'Full event log — device changes, scans, service alerts and more' },
 ]
 
 export default function Reports() {
@@ -842,6 +844,7 @@ export default function Reports() {
   const [traceActive,          setTraceActive]          = useState(false) // drives top progress bar
   const [ddnsData,             setDdnsData]             = useState(null)  // { status, history }
   const [ddnsChecking,         setDdnsChecking]         = useState(false)
+  const [ddnsPortScanning,     setDdnsPortScanning]     = useState(false)
 
   function clearOutage() { setSelectedOutage(null) }
   const { toasts, add: addToast } = useToast()
@@ -928,6 +931,19 @@ export default function Reports() {
       setDdnsChecking(false)
     }
   }, [loadDdns])
+
+  const handlePortScan = useCallback(async () => {
+    setDdnsPortScanning(true)
+    try {
+      const scan = await api.ddns.portscan()
+      // Merge scan result into existing ddnsData without a full reload
+      setDdnsData(prev => prev ? { ...prev, status: { ...prev.status, port_scan: scan } } : prev)
+    } catch (e) {
+      console.error('[Reports/ddns/portscan]', e)
+    } finally {
+      setDdnsPortScanning(false)
+    }
+  }, [])
 
   // Hide DDNS tab if provider has never been configured
   // Hide VPN tab if no vpn_interface is configured AND no VPN records exist in the loaded data
@@ -1433,7 +1449,7 @@ export default function Reports() {
                     <div>
                       <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                         <Wifi className="w-3 h-3" /> Connectivity at Outage Start
-                        {selectedOutage.diagnostics.gateway && <span className="text-slate-600 normal-case font-normal">· gateway: <span className="font-mono">{selectedOutage.diagnostics.gateway}</span></span>}
+                        {selectedOutage.diagnostics.gateway && <span className="text-slate-500 normal-case font-normal">· gateway: <span className="font-mono">{selectedOutage.diagnostics.gateway}</span></span>}
                       </p>
                       <div className="flex flex-wrap gap-2">
                         {selectedOutage.diagnostics.ping_detail.map((r, i) => (
@@ -1452,13 +1468,13 @@ export default function Reports() {
                   <div>
                     <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-2">
                       <Activity className="w-3 h-3" /> Packet Path at Outage Start
-                      <span className="text-slate-600 normal-case font-normal">captured {new Date(selectedOutage.diagnostics.captured_at).toLocaleString('en-GB')}</span>
+                      <span className="text-slate-500 normal-case font-normal">captured {new Date(selectedOutage.diagnostics.captured_at).toLocaleString('en-GB')}</span>
                     </p>
                     <OutageMtrView output={selectedOutage.diagnostics.traceroute || ''} outageType={selectedOutage.outage_type} />
                   </div>
                 </>
               ) : (
-                <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#1a1a30] bg-[#080810] text-[11px] text-slate-600">
+                <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#1a1a30] bg-[#080810] text-[11px] text-slate-500">
                   <Activity className="w-4 h-4 opacity-40 flex-shrink-0" />
                   No diagnostics stored for this outage — traceroute and ping detail are captured automatically when internet goes down
                 </div>
@@ -1474,24 +1490,30 @@ export default function Reports() {
           <h1 className="text-lg font-bold text-white">Reports</h1>
         </div>
         <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => { loadData(); loadCharts(); loadInternet(); loadSpeedtest(); loadOutages() }}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-[#1a1a35] text-slate-400 hover:text-slate-200 hover:border-[#2a2a4a] rounded-lg transition-colors disabled:opacity-40"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-          <button onClick={handleExportCsv} disabled={exporting} title="Export to CSV"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#1a1a35] text-slate-400 hover:text-slate-200 hover:border-[#2a2a4a] rounded-lg transition-colors disabled:opacity-40">
-            <Download className={`w-3.5 h-3.5 ${exporting === 'csv' ? 'animate-spin' : ''}`} />
-            {exporting === 'csv' ? 'CSV...' : 'CSV'}
-          </button>
-          <button onClick={handleExportPdf} disabled={exporting} title="Export to PDF"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#1a1a35] text-slate-400 hover:text-slate-200 hover:border-[#2a2a4a] rounded-lg transition-colors disabled:opacity-40">
-            <Download className={`w-3.5 h-3.5 ${exporting === 'pdf' ? 'animate-spin' : ''}`} />
-            {exporting === 'pdf' ? 'PDF...' : 'PDF'}
-          </button>
+          <Tooltip tip="Reload all report data">
+            <button
+              onClick={() => { loadData(); loadCharts(); loadInternet(); loadSpeedtest(); loadOutages() }}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-[#1a1a35] text-slate-400 hover:text-slate-200 hover:border-[#2a2a4a] rounded-lg transition-colors disabled:opacity-40"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </Tooltip>
+          <Tooltip tip="Export visible data as a CSV spreadsheet">
+            <button onClick={handleExportCsv} disabled={exporting}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#1a1a35] text-slate-400 hover:text-slate-200 hover:border-[#2a2a4a] rounded-lg transition-colors disabled:opacity-40">
+              <Download className={`w-3.5 h-3.5 ${exporting === 'csv' ? 'animate-spin' : ''}`} />
+              {exporting === 'csv' ? 'CSV...' : 'CSV'}
+            </button>
+          </Tooltip>
+          <Tooltip tip="Export a formatted PDF report for ISP disputes">
+            <button onClick={handleExportPdf} disabled={exporting}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs border border-[#1a1a35] text-slate-400 hover:text-slate-200 hover:border-[#2a2a4a] rounded-lg transition-colors disabled:opacity-40">
+              <Download className={`w-3.5 h-3.5 ${exporting === 'pdf' ? 'animate-spin' : ''}`} />
+              {exporting === 'pdf' ? 'PDF...' : 'PDF'}
+            </button>
+          </Tooltip>
 
 
         </div>
@@ -1500,28 +1522,32 @@ export default function Reports() {
       {/* Tab bar + range selector */}
       <div className="flex items-center justify-between px-6 pb-2 flex-shrink-0 border-b border-[#1a1a30]">
         <div className="flex gap-0.5">
-          {TABS.map(({ id, label, Icon }) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-t transition-colors ${
-                tab === id
-                  ? 'text-indigo-300 border-b-2 border-indigo-500 pb-[6px]'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {label}
-            </button>
+          {TABS.map(({ id, label, Icon, tip }) => (
+            <Tooltip key={id} tip={tip} side="bottom">
+              <button onClick={() => setTab(id)}
+                className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-t transition-colors ${
+                  tab === id
+                    ? 'text-indigo-300 border-b-2 border-indigo-500 pb-[6px]'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {label}
+              </button>
+            </Tooltip>
           ))}
         </div>
         <div className="flex gap-0.5 p-0.5 bg-[#0a0a18] rounded-lg border border-[#1a1a30]">
           {RANGE_OPTS.map(r => (
-            <button key={r} onClick={() => changeRange(r)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                range === r && !drillDay ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              {RANGE_LABELS[r]}
-            </button>
+            <Tooltip key={r} tip={RANGE_TIPS[r]} side="bottom">
+              <button onClick={() => changeRange(r)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  range === r && !drillDay ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {RANGE_LABELS[r]}
+              </button>
+            </Tooltip>
           ))}
         </div>
       </div>
@@ -1596,15 +1622,27 @@ export default function Reports() {
           {/* Activity filters */}
           {tab === 'activity' && (
             <>
-              {EV_FILTERS.map(f => (
-                <button key={f.value} onClick={() => changeEvFilter(f.value)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                    eventFilter === f.value
-                      ? 'bg-indigo-600/25 border-indigo-500/50 text-indigo-300'
-                      : 'border-[#1a1a30] text-slate-400 hover:text-slate-200'
-                  }`}
-                >{f.label}</button>
-              ))}
+              {EV_FILTERS.map(f => {
+                const filterTips = {
+                  '': 'Show all event types',
+                  device: 'Device join/leave, hostname changes',
+                  service: 'Service up/down alerts',
+                  scan: 'Network and port scan events',
+                  threat: 'Blocked or suspicious traffic',
+                  internet: 'Internet connectivity checks',
+                }
+                return (
+                  <Tooltip key={f.value} tip={filterTips[f.value]} side="bottom">
+                    <button onClick={() => changeEvFilter(f.value)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                        eventFilter === f.value
+                          ? 'bg-indigo-600/25 border-indigo-500/50 text-indigo-300'
+                          : 'border-[#1a1a30] text-slate-400 hover:text-slate-200'
+                      }`}
+                    >{f.label}</button>
+                  </Tooltip>
+                )
+              })}
               {devices.length > 0 && (
                 <MultiSelectDropdown
                   label="Devices"
@@ -1626,16 +1664,18 @@ export default function Reports() {
           {/* Internet filters */}
           {tab === 'internet' && (
             <>
-              {[['', 'All'], ['online', 'Online'], ['offline', 'Offline']].map(([v, label]) => (
-                <button key={v} onClick={() => setInternetStatusFilter(v)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                    internetStatusFilter === v
-                      ? v === 'offline' ? 'bg-red-600/25 border-red-500/50 text-red-300'
-                      : v === 'online'  ? 'bg-emerald-600/25 border-emerald-500/50 text-emerald-300'
-                      : 'bg-indigo-600/25 border-indigo-500/50 text-indigo-300'
-                      : 'border-[#1a1a30] text-slate-400 hover:text-slate-200'
-                  }`}
-                >{label}</button>
+              {[['', 'All', 'Show all connectivity checks'], ['online', 'Online', 'Only checks where internet was up'], ['offline', 'Offline', 'Only outage / offline checks']].map(([v, label, tip]) => (
+                <Tooltip key={v} tip={tip} side="bottom">
+                  <button onClick={() => setInternetStatusFilter(v)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                      internetStatusFilter === v
+                        ? v === 'offline' ? 'bg-red-600/25 border-red-500/50 text-red-300'
+                        : v === 'online'  ? 'bg-emerald-600/25 border-emerald-500/50 text-emerald-300'
+                        : 'bg-indigo-600/25 border-indigo-500/50 text-indigo-300'
+                        : 'border-[#1a1a30] text-slate-400 hover:text-slate-200'
+                    }`}
+                  >{label}</button>
+                </Tooltip>
               ))}
             </>
           )}
@@ -1703,8 +1743,8 @@ export default function Reports() {
                       <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
                         <Wifi className={`w-3 h-3 ${ongoing ? 'text-red-400' : outages > 0 ? 'text-amber-400' : 'text-emerald-400'}`} />
                         Internet Health
-                        <span className="normal-case tracking-normal font-normal text-slate-600">{rangeLabel}</span>
-                        {ispName && <span className="normal-case tracking-normal font-normal text-slate-600">· {ispName}</span>}
+                        <span className="normal-case tracking-normal font-normal text-slate-500">{rangeLabel}</span>
+                        {ispName && <span className="normal-case tracking-normal font-normal text-slate-500">· {ispName}</span>}
                       </p>
                       {ongoing && (
                         <p className="text-xs text-red-300 font-semibold mb-2 flex items-center gap-1.5">
@@ -1716,49 +1756,49 @@ export default function Reports() {
                       <div className="flex flex-wrap gap-x-6 gap-y-2">
                         {/* Uptime */}
                         <div>
-                          <p className="text-[10px] text-slate-600 mb-0.5">Uptime</p>
+                          <p className="text-[10px] text-slate-500 mb-0.5">Uptime</p>
                           <p className={`text-2xl font-bold tabular-nums ${uptime === 100 ? 'text-emerald-400' : uptime >= 99 ? 'text-amber-400' : 'text-red-400'}`}>
                             {uptime === 100 ? '100%' : `${uptime.toFixed(3)}%`}
                           </p>
                         </div>
                         {/* Outages */}
                         <div>
-                          <p className="text-[10px] text-slate-600 mb-0.5">Outages</p>
+                          <p className="text-[10px] text-slate-500 mb-0.5">Outages</p>
                           <p className={`text-2xl font-bold tabular-nums ${outages === 0 ? 'text-emerald-400' : 'text-red-400'}`}>{outages}</p>
                         </div>
                         {/* Total downtime */}
                         {downMs > 0 && (
                           <div>
-                            <p className="text-[10px] text-slate-600 mb-0.5">Total downtime</p>
+                            <p className="text-[10px] text-slate-500 mb-0.5">Total downtime</p>
                             <p className="text-2xl font-bold tabular-nums text-red-400">{fmtMs(downMs)}</p>
                           </div>
                         )}
                         {/* Longest outage */}
                         {longestMs > 0 && (
                           <div>
-                            <p className="text-[10px] text-slate-600 mb-0.5">Longest outage</p>
+                            <p className="text-[10px] text-slate-500 mb-0.5">Longest outage</p>
                             <p className="text-xl font-bold tabular-nums text-red-300">{fmtMs(longestMs)}</p>
                           </div>
                         )}
                         {/* Avg latency */}
                         {avgLat != null && (
                           <div>
-                            <p className="text-[10px] text-slate-600 mb-0.5">Avg latency</p>
+                            <p className="text-[10px] text-slate-500 mb-0.5">Avg latency</p>
                             <p className={`text-2xl font-bold tabular-nums ${avgLat < 30 ? 'text-emerald-400' : avgLat < 80 ? 'text-amber-400' : 'text-red-400'}`}>{avgLat} ms</p>
                           </div>
                         )}
                         {/* Checks */}
                         <div>
-                          <p className="text-[10px] text-slate-600 mb-0.5">Checks run</p>
+                          <p className="text-[10px] text-slate-500 mb-0.5">Checks run</p>
                           <p className="text-2xl font-bold tabular-nums text-slate-400">{stats.totalChecks.toLocaleString()}</p>
                         </div>
                         {/* ISP / infra fault split */}
                         {((stats.ispFailures ?? 0) > 0 || (stats.infraFailures ?? 0) > 0) && (
                           <div>
-                            <p className="text-[10px] text-slate-600 mb-0.5">Fault attribution</p>
+                            <p className="text-[10px] text-slate-500 mb-0.5">Fault attribution</p>
                             <p className="text-sm font-semibold">
                               {(stats.ispFailures ?? 0) > 0 && <span className="text-orange-400">{stats.ispFailures} ISP</span>}
-                              {(stats.ispFailures ?? 0) > 0 && (stats.infraFailures ?? 0) > 0 && <span className="text-slate-600 mx-1">·</span>}
+                              {(stats.ispFailures ?? 0) > 0 && (stats.infraFailures ?? 0) > 0 && <span className="text-slate-500 mx-1">·</span>}
                               {(stats.infraFailures ?? 0) > 0 && <span className="text-yellow-400">{stats.infraFailures} Infra</span>}
                             </p>
                           </div>
@@ -1768,18 +1808,18 @@ export default function Reports() {
                     {/* Latest speed test */}
                     {latestDirect && (
                       <div className="border-l border-[#1a1a30] pl-4 min-w-[140px]">
-                        <p className="text-[10px] text-slate-600 mb-2">Latest speed test</p>
+                        <p className="text-[10px] text-slate-500 mb-2">Latest speed test</p>
                         <div className="space-y-1">
                           <p className={`text-sm font-bold tabular-nums ${planDown > 0 && latestDirect.download_mbps < planDown * 0.8 ? 'text-red-400' : 'text-emerald-400'}`}>
                             ↓ {latestDirect.download_mbps ?? '—'} Mbps
-                            {planDown > 0 && latestDirect.download_mbps != null && <span className="text-[10px] font-normal text-slate-600 ml-1">({Math.round(latestDirect.download_mbps / planDown * 100)}%)</span>}
+                            {planDown > 0 && latestDirect.download_mbps != null && <span className="text-[10px] font-normal text-slate-500 ml-1">({Math.round(latestDirect.download_mbps / planDown * 100)}%)</span>}
                           </p>
                           <p className={`text-sm font-bold tabular-nums ${planUp > 0 && latestDirect.upload_mbps < planUp * 0.8 ? 'text-red-400' : 'text-sky-400'}`}>
                             ↑ {latestDirect.upload_mbps ?? '—'} Mbps
-                            {planUp > 0 && latestDirect.upload_mbps != null && <span className="text-[10px] font-normal text-slate-600 ml-1">({Math.round(latestDirect.upload_mbps / planUp * 100)}%)</span>}
+                            {planUp > 0 && latestDirect.upload_mbps != null && <span className="text-[10px] font-normal text-slate-500 ml-1">({Math.round(latestDirect.upload_mbps / planUp * 100)}%)</span>}
                           </p>
                           {latestDirect.ping_ms != null && <p className="text-xs text-slate-500">{latestDirect.ping_ms} ms ping</p>}
-                          <p className="text-[10px] text-slate-700">{new Date(latestDirect.ts).toLocaleString('en-GB')}</p>
+                          <p className="text-[10px] text-slate-500">{new Date(latestDirect.ts).toLocaleString('en-GB')}</p>
                         </div>
                         <button onClick={() => setTab('speedtest')} className="text-[10px] text-indigo-400/60 hover:text-indigo-300 mt-2">all tests →</button>
                       </div>
@@ -1821,7 +1861,7 @@ export default function Reports() {
               <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-4">
                 <p className="text-xs font-medium text-slate-400 mb-3">
                   Activity Timeline
-                  <span className="text-slate-600 font-normal ml-1.5">— click a bar to drill into that day</span>
+                  <span className="text-slate-500 font-normal ml-1.5">— click a bar to drill into that day</span>
                 </p>
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={chartData.daily} margin={{ top: 2, right: 4, left: -22, bottom: 0 }}>
@@ -1838,7 +1878,7 @@ export default function Reports() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-8 flex items-center justify-center text-slate-600 text-sm">
+              <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-8 flex items-center justify-center text-slate-500 text-sm">
                 No activity data for this range
               </div>
             )}
@@ -1859,7 +1899,7 @@ export default function Reports() {
                   </ResponsiveContainer>
                 </div>
               ) : (
-                <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-8 flex items-center justify-center text-slate-600 text-sm">
+                <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-8 flex items-center justify-center text-slate-500 text-sm">
                   No port discovery data
                 </div>
               )}
@@ -1879,7 +1919,7 @@ export default function Reports() {
                   </ResponsiveContainer>
                 </div>
               ) : (
-                <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-8 flex items-center justify-center text-slate-600 text-sm">
+                <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-8 flex items-center justify-center text-slate-500 text-sm">
                   No service outages recorded
                 </div>
               )}
@@ -1898,11 +1938,10 @@ export default function Reports() {
                   <span className="flex items-center flex-wrap gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0a0a18] border border-sky-500/15 text-[11px]">
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-400 inline-block flex-shrink-0" />
                     <span className="text-slate-500">Direct</span>
-                    {ispConfig?.name && <><span className="text-slate-700">·</span><span className="text-slate-300 font-medium">{ispConfig.name}</span></>}
-                    {ispConfig?.connection_type && <span className="text-slate-600">({ispConfig.connection_type})</span>}
+                    {ispConfig?.name && <><span className="text-slate-500">·</span><span className="text-slate-300 font-medium">{ispConfig.name}</span></>}
+                    {ispConfig?.connection_type && <span className="text-slate-500">({ispConfig.connection_type})</span>}
                     {(ispConfig?.plan_download_mbps > 0 || ispConfig?.plan_upload_mbps > 0) && (
-                      <span className="text-slate-600 border-l border-[#1a1a30] pl-1.5">
-                        {ispConfig.plan_download_mbps > 0 && ispConfig.plan_upload_mbps > 0
+                      <span className="text-slate-500 border-l border-[#1a1a30] pl-1.5">                        {ispConfig.plan_download_mbps > 0 && ispConfig.plan_upload_mbps > 0
                           ? `plan: ${ispConfig.plan_download_mbps}↓/${ispConfig.plan_upload_mbps}↑ Mbps`
                           : ispConfig.plan_download_mbps > 0
                           ? `plan: ${ispConfig.plan_download_mbps} Mbps ↓`
@@ -1926,11 +1965,11 @@ export default function Reports() {
                 {/* Pinging hosts */}
                 {networkConfig?.connectivity_hosts?.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                    <span className="text-slate-600 uppercase tracking-wide">Pinging</span>
+                    <span className="text-slate-500 uppercase tracking-wide">Pinging</span>
                     {networkConfig.connectivity_hosts.map(h => (
                       <span key={h} className="font-mono text-slate-600 bg-[#0a0a18] border border-[#1a1a30] px-1.5 py-0.5 rounded">{h}</span>
                     ))}
-                    <span className="text-slate-700">+ http://connectivity-check.ubuntu.com</span>
+                    <span className="text-slate-500">+ http://connectivity-check.ubuntu.com</span>
                   </div>
                 )}
               </div>
@@ -1940,7 +1979,7 @@ export default function Reports() {
             <div>
               <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-sky-400 inline-block" /> Direct Connection
-                {ispConfig?.name && <span className="normal-case tracking-normal font-normal text-slate-600">· {ispConfig.name}{ispConfig.connection_type ? ` (${ispConfig.connection_type})` : ''}</span>}
+                {ispConfig?.name && <span className="normal-case tracking-normal font-normal text-slate-500">· {ispConfig.name}{ispConfig.connection_type ? ` (${ispConfig.connection_type})` : ''}</span>}
               </p>
               {chartData?.internetStats ? (() => {
                 const stats    = chartData.internetStats
@@ -1955,7 +1994,7 @@ export default function Reports() {
                     {[
                       { label: 'Uptime %',        value: `${uptime.toFixed(uptime === 100 ? 1 : 3)}%`,  color: uptime < 99.9 ? 'text-red-400' : uptime < 100 ? 'text-amber-400' : 'text-emerald-400', border: uptime < 100 ? 'border-red-500/40' : 'border-sky-500/15',    Icon: Wifi     },
                       { label: 'Total Online',     value: fmtMs(uptimeMs),                              color: uptime === 100 ? 'text-emerald-400' : 'text-sky-400',                                    border: 'border-sky-500/15',                                           Icon: Wifi     },
-                      { label: 'Total Offline',    value: downMs > 0 ? fmtMs(downMs) : '—',             color: downMs > 0 ? 'text-red-400' : 'text-slate-600',                                          border: downMs > 0 ? 'border-red-500/40' : 'border-sky-500/15',        Icon: Activity },
+                      { label: 'Total Offline',    value: downMs > 0 ? fmtMs(downMs) : '—',             color: downMs > 0 ? 'text-red-400' : 'text-slate-500',                                          border: downMs > 0 ? 'border-red-500/40' : 'border-sky-500/15',        Icon: Activity },
                       { label: 'Avg Latency',      value: `${stats.avgLatency} ms`,                     color: 'text-sky-400',                                                                           border: 'border-sky-500/15',                                           Icon: Zap      },
                       { label: 'Checks Run',       value: stats.totalChecks.toLocaleString(),            color: 'text-indigo-400',                                                                        border: 'border-sky-500/15',                                           Icon: Clock    },
                       { label: 'Status Changes',   value: stats.changes,                                color: 'text-slate-300',                                                                         border: 'border-sky-500/15',                                           Icon: Activity },
@@ -2029,7 +2068,7 @@ export default function Reports() {
                       )
                     })}
                     {ispTarget !== null && (
-                      <span className="text-[10px] text-slate-600 ml-1">· ISP SLA target: {ispTarget}%</span>
+                      <span className="text-[10px] text-slate-500 ml-1">· ISP SLA target: {ispTarget}%</span>
                     )}
                   </div>
                   {/* SLA pass/fail badges */}
@@ -2095,7 +2134,7 @@ export default function Reports() {
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                         SLA document
                       </a>
-                      {ispConfig.sla_notes && <span className="text-[10px] text-slate-600">· {ispConfig.sla_notes.slice(0, 100)}{ispConfig.sla_notes.length > 100 ? '…' : ''}</span>}
+                      {ispConfig.sla_notes && <span className="text-[10px] text-slate-500">· {ispConfig.sla_notes.slice(0, 100)}{ispConfig.sla_notes.length > 100 ? '…' : ''}</span>}
                     </div>
                   )}
                 </div>
@@ -2169,7 +2208,7 @@ export default function Reports() {
                         <tr key={i}
                           onClick={() => setSelectedOutage(o)}
                           className={`cursor-pointer hover:bg-red-950/30 transition-colors ${o.ongoing ? 'bg-red-950/20' : ''}`}>
-                          <td className="px-4 py-2 text-slate-600 tabular-nums">{i + 1}</td>
+                          <td className="px-4 py-2 text-slate-500 tabular-nums">{i + 1}</td>
                           <td className="px-4 py-2 text-red-300 tabular-nums whitespace-nowrap">{new Date(o.start).toLocaleString('en-GB')}</td>
                           <td className="px-4 py-2 tabular-nums whitespace-nowrap">
                             {o.ongoing
@@ -2240,7 +2279,7 @@ export default function Reports() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-8 flex items-center justify-center text-slate-600 text-sm">
+              <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl p-8 flex items-center justify-center text-slate-500 text-sm">
                 No internet check data for this range
               </div>
             )}
@@ -2250,7 +2289,6 @@ export default function Reports() {
               <p className="text-xs font-medium text-slate-400 mb-3">Recent Checks</p>
               {internetData?.checks?.length > 0 ? (() => {
                 const filtered = internetData.checks.filter(c => {
-                  if (c.vpn_up) return false
                   if (internetStatusFilter === 'online'  && !c.ok) return false
                   if (internetStatusFilter === 'offline' &&  c.ok) return false
                   if (internetSearch) {
@@ -2267,8 +2305,9 @@ export default function Reports() {
                       <tr className="border-b border-[#1a1a30]">
                         <th className="px-2 py-1.5 text-left text-slate-400">Time</th>
                         <th className="px-2 py-1.5 text-left text-sky-400/70">Direct Status</th>
+                        <th className="px-2 py-1.5 text-left text-violet-400/70">VPN</th>
                         <th className="px-2 py-1.5 text-left text-slate-400">Mode</th>
-                        <th className="px-2 py-1.5 text-right text-slate-400">Direct{ispConfig?.name ? <span className="text-slate-600 font-normal ml-1">({ispConfig.name})</span> : ''}</th>
+                <th className="px-2 py-1.5 text-right text-slate-400">Direct{ispConfig?.name ? <span className="text-slate-500 font-normal ml-1">({ispConfig.name})</span> : ''}</th>
                         <th className="px-2 py-1.5 text-right text-slate-400">Hosts</th>
                       </tr>
                     </thead>
@@ -2282,6 +2321,16 @@ export default function Reports() {
                                 ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
                                 : 'bg-red-500/15 text-red-400 border-red-500/20'
                             }`}>{check.ok ? 'Online' : 'Offline'}</span>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {check.vpn_up
+                              ? <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border ${
+                                  check.vpn_ok !== false
+                                    ? 'bg-violet-500/10 text-violet-400 border-violet-500/20'
+                                    : 'bg-red-500/15 text-red-400 border-red-500/20'
+                                }`}>{check.vpn_ok !== false ? '✓' : '✗'}</span>
+                              : <span className="text-slate-700 text-[10px]">—</span>
+                            }
                           </td>
                           <td className="px-2 py-1.5">
                             {check.outage_mode
@@ -2299,14 +2348,14 @@ export default function Reports() {
                         </tr>
                       ))}
                       {filtered.length === 0 && (
-                        <tr><td colSpan={5} className="px-2 py-6 text-center text-slate-600 text-xs">No checks match the filter</td></tr>
+                        <tr><td colSpan={6} className="px-2 py-6 text-center text-slate-500 text-xs">No checks match the filter</td></tr>
                       )}
                     </tbody>
                   </table>
                 </div>
                 )
               })() : (
-                <div className="flex items-center justify-center py-8 text-slate-600 text-sm">No check data in this range</div>
+                <div className="flex items-center justify-center py-8 text-slate-500 text-sm">No check data in this range</div>
               )}
             </div>
           </>
@@ -2315,7 +2364,7 @@ export default function Reports() {
         {/* ── VPN ── */}
         {tab === 'vpn' && (() => {
           const checks = internetData?.checks ?? []
-          const vpnChecks = checks.filter(c => c.vpn_up != null)
+          const vpnChecks = checks.filter(c => c.vpn_up === true)
           const vpnOkChecks = vpnChecks.filter(c => c.vpn_ok !== false)
           const vpnUptime = vpnChecks.length > 0 ? parseFloat(((vpnOkChecks.length / vpnChecks.length) * 100).toFixed(1)) : null
           const vpnLatMs = vpnChecks.filter(c => c.vpnAvgMs != null)
@@ -2325,7 +2374,7 @@ export default function Reports() {
             <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
               <Shield className="w-8 h-8 text-violet-500/30" />
               <p className="text-slate-400 font-medium">No VPN data in this period</p>
-              <p className="text-slate-600 text-sm">VPN stats appear here when the system detects an active VPN during internet checks.</p>
+              <p className="text-slate-500 text-sm">VPN stats appear here when the system detects an active VPN during internet checks.</p>
             </div>
           )
           return (
@@ -2353,9 +2402,9 @@ export default function Reports() {
                   </div>
                   {networkConfig?.connectivity_hosts?.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                      <span className="text-slate-600 uppercase tracking-wide">Pinging via VPN</span>
+                      <span className="text-slate-500 uppercase tracking-wide">Pinging via VPN</span>
                       {networkConfig.connectivity_hosts.map(h => (
-                        <span key={h} className="font-mono text-slate-600 bg-[#0a0a18] border border-[#1a1a30] px-1.5 py-0.5 rounded">{h}</span>
+                        <span key={h} className="font-mono text-slate-500 bg-[#0a0a18] border border-[#1a1a30] px-1.5 py-0.5 rounded">{h}</span>
                       ))}
                     </div>
                   )}
@@ -2505,20 +2554,24 @@ export default function Reports() {
                 {/* Direct button */}
                 <div className="flex flex-col items-end gap-0.5">
                   {lastDirectTs && <span className="text-[10px] text-slate-500">last: {fmtDate(lastDirectTs)}</span>}
-                  <button onClick={handleRunSpeedtest} disabled={running || runningVpn}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30 rounded-lg transition-colors disabled:opacity-40">
-                    <Zap className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} />
-                    {running ? 'Running…' : 'Run Direct'}
-                  </button>
+                  <Tooltip tip="Test direct internet speed (bypasses VPN)" side="bottom">
+                    <button onClick={handleRunSpeedtest} disabled={running || runningVpn}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30 rounded-lg transition-colors disabled:opacity-40">
+                      <Zap className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} />
+                      {running ? 'Running…' : 'Run Direct'}
+                    </button>
+                  </Tooltip>
                 </div>
                 {/* VPN button */}
                 <div className="flex flex-col items-end gap-0.5">
                   {lastVpnTs && <span className="text-[10px] text-slate-500">last: {fmtDate(lastVpnTs)}</span>}
-                  <button onClick={handleRunVpnSpeedtest} disabled={running || runningVpn}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-violet-600/20 border border-violet-500/40 text-violet-300 hover:bg-violet-600/30 rounded-lg transition-colors disabled:opacity-40">
-                    <Shield className={`w-3.5 h-3.5 ${runningVpn ? 'animate-spin' : ''}`} />
-                    {runningVpn ? 'Running…' : 'Run VPN'}
-                  </button>
+                  <Tooltip tip="Test speed through your VPN tunnel" side="bottom">
+                    <button onClick={handleRunVpnSpeedtest} disabled={running || runningVpn}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-violet-600/20 border border-violet-500/40 text-violet-300 hover:bg-violet-600/30 rounded-lg transition-colors disabled:opacity-40">
+                      <Shield className={`w-3.5 h-3.5 ${runningVpn ? 'animate-spin' : ''}`} />
+                      {runningVpn ? 'Running…' : 'Run VPN'}
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
             </div>
@@ -3032,17 +3085,18 @@ export default function Reports() {
                       <p className="text-sm text-slate-300">{ds?.last_updated ? new Date(ds.last_updated).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</p>
                     </div>
                   </div>
-                  <button
-                    onClick={handleForceDdnsCheck}
-                    disabled={ddnsChecking || !ds?.enabled}
-                    title="Force IP check now"
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {ddnsChecking
-                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking…</>
-                      : <><RefreshCw className="w-3.5 h-3.5" /> Check Now</>
-                    }
-                  </button>
+                  <Tooltip tip={!ds?.enabled ? 'DDNS is disabled in settings' : 'Check your public IP now and update the DDNS hostname if it has changed'}>
+                    <button
+                      onClick={handleForceDdnsCheck}
+                      disabled={ddnsChecking || !ds?.enabled}
+                      className="flex items-center gap-1.5 px-3 py-2 text-xs bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-600/30 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {ddnsChecking
+                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking…</>
+                        : <><RefreshCw className="w-3.5 h-3.5" /> Check Now</>
+                      }
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -3073,6 +3127,73 @@ export default function Reports() {
                   </div>
                 ))}
               </div>
+
+              {/* ── Port Exposure ──────────────────────────────────────── */}
+              {(() => {
+                const scan = ds?.port_scan ?? null
+                const openPorts = scan?.results?.filter(r => r.open) ?? []
+                return (
+                  <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl overflow-hidden">
+                    <div className="px-4 py-3 border-b border-[#1a1a30] flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-white">Port Exposure</span>
+                        {scan && <span className="text-[10px] text-slate-600">scanned {fmtDate(scan.ts)} · {scan.ip}</span>}
+                        {openPorts.length > 0 && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                            {openPorts.length} open
+                          </span>
+                        )}
+                        {scan && openPorts.length === 0 && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                            all closed
+                          </span>
+                        )}
+                      </div>
+                      <Tooltip tip={!ds?.last_ip ? 'Run a DDNS check first to detect your IP' : 'Scan your public IP address for open or exposed ports'}>
+                        <button
+                          onClick={handlePortScan}
+                          disabled={ddnsPortScanning || !ds?.last_ip}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-violet-600/20 border border-violet-500/40 text-violet-300 hover:bg-violet-600/30 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {ddnsPortScanning
+                            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning…</>
+                            : <><Activity className="w-3.5 h-3.5" /> Scan Ports</>
+                          }
+                        </button>
+                      </Tooltip>
+                    </div>
+                    {!scan ? (
+                      <div className="py-10 flex flex-col items-center gap-2 text-slate-600">
+                        <Activity className="w-7 h-7 opacity-30" />
+                        <p className="text-sm">No scan results yet</p>
+                        <p className="text-xs text-slate-700">Click <span className="text-violet-500">Scan Ports</span> to probe your public IP for open ports</p>
+                      </div>
+                    ) : (
+                      <div className="p-4">
+                        <div className="flex flex-wrap gap-2">
+                          {scan.results.map(r => (
+                            <div key={r.port} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-mono ${
+                              r.open
+                                ? 'bg-amber-500/10 border-amber-500/25 text-amber-300'
+                                : 'bg-[#0d0d1a] border-[#1a1a30] text-slate-600'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${r.open ? 'bg-amber-400' : 'bg-slate-700'}`} />
+                              <span className="font-bold">{r.port}</span>
+                              {r.service && <span className={r.open ? 'text-amber-500/70' : 'text-slate-700'}>{r.service}</span>}
+                              <span className={`text-[10px] font-sans ${r.open ? 'text-amber-500' : 'text-slate-700'}`}>{r.open ? 'open' : 'closed'}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {openPorts.length > 0 && (
+                          <p className="mt-3 text-[11px] text-slate-600">
+                            Open ports are reachable from the internet — verify these match your intended port forwards.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* ── IP change history ───────────────────────────────────── */}
               <div className="bg-[#0a0a18] border border-[#1a1a30] rounded-xl overflow-hidden">
@@ -3179,8 +3300,15 @@ export default function Reports() {
                                   ? 'text-emerald-400 bg-emerald-500/10'
                                   : e.event === 'force_update'
                                   ? 'text-sky-400 bg-sky-500/10'
+                                  : e.event === 'port_scan'
+                                  ? 'text-violet-400 bg-violet-500/10'
                                   : 'text-red-400 bg-red-500/10'
-                              }`}>{e.event === 'ip_changed' ? 'IP changed' : e.event === 'force_update' ? 'Force update' : 'Update failed'}</span>
+                              }`}>{
+                                e.event === 'ip_changed' ? 'IP changed'
+                                  : e.event === 'force_update' ? 'Force update'
+                                  : e.event === 'port_scan' ? 'Port scan'
+                                  : 'Update failed'
+                              }</span>
                             </td>
                             <td className="px-4 py-2 text-violet-400 font-mono text-[11px]">
                               {(!e.triggered_by || e.triggered_by === 'system') ? '' : e.triggered_by}
@@ -3188,6 +3316,13 @@ export default function Reports() {
                             <td className="px-4 py-2 text-slate-400 font-mono text-[11px]">
                               {e.event === 'ip_changed' || e.event === 'force_update'
                                 ? `${e.old_ip ?? '?'} → ${e.new_ip}`
+                                : e.event === 'port_scan'
+                                ? (() => {
+                                    const open = (e.results ?? []).filter(r => r.open)
+                                    return open.length > 0
+                                      ? `${open.length} open: ${open.map(r => r.port).join(', ')}`
+                                      : 'all closed'
+                                  })()
                                 : e.error ?? '—'}
                             </td>
                           </tr>
@@ -3228,7 +3363,7 @@ export default function Reports() {
                   <RefreshCw className="w-4 h-4 animate-spin" /> Loading…
                 </div>
               ) : !events.length ? (
-                <div className="flex items-center justify-center py-16 text-slate-600 text-sm">No events in this range</div>
+                <div className="flex items-center justify-center py-16 text-slate-500 text-sm">No events in this range</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">

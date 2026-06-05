@@ -72,7 +72,7 @@ function MtrHopTable({ output }) {
         <tbody>
           {hops.map((h, i) => (
             <tr key={h.hop} className="border-b border-[#1a1a30] last:border-0 bg-[#080810] hover:bg-[#0d0d20] transition-colors">
-              <td className="px-3 py-1.5 text-slate-600">{h.hop}</td>
+              <td className="px-3 py-1.5 text-slate-400">{h.hop}</td>
               <td className={`px-3 py-1.5 ${i === hops.length - 1 ? 'text-emerald-400 font-semibold' : 'text-slate-300'}`}>{h.host}</td>
               <td className={`px-3 py-1.5 text-right ${h.loss > 0 ? 'text-red-400' : 'text-slate-500'}`}>{h.loss.toFixed(1)}%</td>
               <td className="px-3 py-1.5 text-right text-sky-300">{h.avg.toFixed(1)}</td>
@@ -325,7 +325,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
         <button
           onClick={e => { e.stopPropagation(); setMenuIp(v => v === d.ip ? null : d.ip) }}
           title="Quick actions"
-          className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded text-slate-600 hover:text-slate-300 hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all"
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded text-slate-500 hover:text-slate-300 hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-all"
         >
           <MoreHorizontal className="w-3.5 h-3.5" />
         </button>
@@ -467,7 +467,7 @@ function InfoRow({ icon: Icon, label, value, mono = false, note = null }) {
       <span className="text-xs text-slate-400 w-24 flex-shrink-0">{label}</span>
       <span className={`text-xs text-slate-300 flex-1 break-all ${mono ? 'font-mono' : ''}`}>
         {value}
-        {note && <span className="ml-1.5 text-[10px] text-slate-600 italic">{note}</span>}
+        {note && <span className="ml-1.5 text-[10px] text-slate-500 italic">{note}</span>}
       </span>
     </div>
   )
@@ -613,12 +613,12 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
               {livePercent != null && <Loader className="w-4 h-4 flex-shrink-0 text-indigo-400 animate-spin" />}
             </h2>
             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${device.status === 'online' ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-            <span className={`text-xs ${device.status === 'online' ? 'text-emerald-400' : 'text-slate-600'}`}>{device.status}</span>
+            <span className={`text-xs ${device.status === 'online' ? 'text-emerald-400' : 'text-slate-500'}`}>{device.status}</span>
           </div>
           {device.hostname && (
             <p className="text-sm text-slate-400 font-mono mt-0.5">
               {device.ip}
-              {device.hostnameStale && <span className="ml-2 text-[10px] text-slate-600 italic">hostname unconfirmed</span>}
+              {device.hostnameStale && <span className="ml-2 text-[10px] text-slate-500 italic">hostname unconfirmed</span>}
             </p>
           )}
         </div>
@@ -1011,7 +1011,7 @@ function NetworkMap({ devices, gateway, gatewayAssignments = {}, selected, onSel
   const offlineCnt = devices.filter(d => d.status === 'offline').length
   const filterBar  = (
     <div className="flex items-center gap-1.5 px-4 py-2.5 bg-[#07070e] border-b border-[#0d1117] flex-shrink-0">
-      <span className="text-[11px] text-slate-600 mr-1">Show</span>
+      <span className="text-[11px] text-slate-500 mr-1">Show</span>
       {[
         { id: 'all',     label: `All · ${devices.length}` },
         { id: 'online',  label: `Online · ${onlineCnt}` },
@@ -1584,7 +1584,7 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
               {deepPhase !== 'ping' && deepTotal > 0 && (
                 <span className="text-[11px] text-slate-500 font-mono tabular-nums">{Math.round((deepDone / deepTotal) * 100)}%</span>
               )}
-              <button onClick={() => api.network.cancelDeepScan().catch(console.error)} className="text-[11px] text-slate-600 hover:text-red-400 transition-colors">
+              <button onClick={() => api.network.cancelDeepScan().catch(console.error)} className="text-[11px] text-slate-500 hover:text-red-400 transition-colors">
                 Cancel
               </button>
             </div>

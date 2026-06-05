@@ -77,7 +77,7 @@ function ServiceCard({ result, history = [] }) {
               </ResponsiveContainer>
             </>
           ) : (
-            <p className="text-xs text-slate-700 mt-4">Not enough history yet — checks run every few minutes</p>
+            <p className="text-xs text-slate-500 mt-4">Not enough history yet — checks run every few minutes</p>
           )}
         </div>
       )}

@@ -192,7 +192,7 @@ export default function AuditLog() {
                   </td>
                   <td className="px-4 py-2.5 text-slate-400">{row.actor}</td>
                   <td className="px-4 py-2.5 font-mono tabular-nums whitespace-nowrap text-slate-400">
-                    {fmtDuration(row.payload) ?? <span className="text-slate-700">—</span>}
+                    {fmtDuration(row.payload) ?? <span className="text-slate-500">—</span>}
                   </td>
                   <td className="px-4 py-2.5">
                     <PayloadSummary payload={row.payload} />

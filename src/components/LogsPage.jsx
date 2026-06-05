@@ -97,7 +97,7 @@ export default function LogsPage() {
     const date  = new Date(entry.ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
     return (
       <div className="flex items-start gap-2 py-1.5 px-3 border-b border-[#1a1a30] hover:bg-[#0d0d20] text-[11px] font-mono">
-        <span className="text-slate-600 flex-shrink-0 tabular-nums whitespace-nowrap">{date} {time}</span>
+        <span className="text-slate-400 flex-shrink-0 tabular-nums whitespace-nowrap">{date} {time}</span>
         <span className={`flex-shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-medium uppercase ${style.badge}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
           {entry.level}
@@ -138,7 +138,7 @@ export default function LogsPage() {
                 className={`inline-flex items-center gap-1 px-2 py-1 rounded border text-[10px] font-medium uppercase transition-all ${
                   active
                     ? style.badge
-                    : 'bg-transparent border-[#1a1a30] text-slate-600 hover:text-slate-400 hover:border-slate-600'
+                    : 'bg-transparent border-[#1a1a30] text-slate-500 hover:text-slate-300 hover:border-slate-500'
                 }`}
               >
                 {active && <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />}
@@ -231,7 +231,7 @@ export default function LogsPage() {
         </button>
 
         {/* Result count */}
-        <span className="ml-auto text-[10px] text-slate-600 tabular-nums">
+        <span className="ml-auto text-[10px] text-slate-500 tabular-nums">
           {total.toLocaleString()} result{total !== 1 ? 's' : ''}
           {search && <span className="text-amber-500/80"> · filtered</span>}
         </span>
@@ -242,7 +242,7 @@ export default function LogsPage() {
         {error ? (
           <div className="p-6 text-center text-red-400 text-sm">{error}</div>
         ) : logs.length === 0 ? (
-          <div className="p-8 text-center text-slate-600 text-sm">
+          <div className="p-8 text-center text-slate-500 text-sm">
             {loading ? 'Loading…' : 'No log entries match the current filters.'}
           </div>
         ) : (
@@ -255,7 +255,7 @@ export default function LogsPage() {
       {/* ── Pagination ── */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-slate-600">
+          <span className="text-[11px] text-slate-500">
             Page {page} of {totalPages} · {total.toLocaleString()} total entries
           </span>
           <div className="flex items-center gap-1">

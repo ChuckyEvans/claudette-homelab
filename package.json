@@ -16,15 +16,13 @@
     "deploy:quick": "node scripts/deploy-pi.mjs --quick",
     "deploy:pre-built": "node scripts/deploy-pi.mjs --pre-built",
     "deploy:skip-build": "node scripts/deploy-pi.mjs --skip-build",
+    "local:rebuild": "node scripts/run-docker.mjs",
+    "local:rebuild:skip": "node scripts/run-docker.mjs --skip-build",
     "docker:build": "docker build -t claudette:latest .",
-    "docker:run": "docker run -d --name claudette --cap-add=NET_ADMIN --cap-add=NET_RAW -p 7654:7654 -v claudette-data:/app/data claudette:latest",
+    "docker:run": "docker run -d --init --name claudette --cap-add=NET_ADMIN --cap-add=NET_RAW -p 7654:7654 -v claudette-data:/app/data claudette:latest",
     "docker:stop": "docker stop claudette && docker rm claudette",
     "docker:logs": "docker logs -f claudette",
-    "docker:restart": "npm run docker:stop; npm run docker:run",
-    "docker:rebuild": "node scripts/run-docker.mjs",
-    "docker:rebuild:skip": "node scripts/run-docker.mjs --skip-build",
-    "docker:deploy-pi": "node scripts/deploy-pi.mjs",
-    "docker:deploy-pi:linux": "node scripts/deploy-pi.mjs"
+    "docker:restart": "npm run docker:stop; npm run docker:run"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

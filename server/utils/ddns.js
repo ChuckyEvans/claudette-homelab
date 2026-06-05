@@ -10,8 +10,13 @@
 //   cloudflare — Cloudflare DNS API
 
 import fs from 'fs'
+import net from 'net'
 import path from 'path'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { getDataDir } from '../db.js'
+
+const execFileAsync = promisify(execFile)
 
 const STATUS_FILE  = () => path.join(getDataDir(), 'ddns-status.json')
 const HISTORY_FILE = () => path.join(getDataDir(), 'ddns-history.json')
@@ -26,8 +31,7 @@ export function readDdnsStatus() {
   return { last_ip: null, last_updated: null, last_check: null, last_error: null }
 }
 
-function writeDdnsStatus(data) {
-  try {
+export function writeDdnsStatus(data) {  try {
     const dir = getDataDir()
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(STATUS_FILE(), JSON.stringify(data, null, 2))
@@ -60,23 +64,60 @@ function appendDdnsHistory(entry, retentionDays = 365) {
   }
 }
 
+// ── Port scan ─────────────────────────────────────────────────────────────────
+// Probes each port via TCP connect. Works on most home networks (hairpin NAT permitting).
+// Does NOT require root or nmap — pure Node.js net.createConnection().
+
+const DEFAULT_PORTS = [21, 22, 25, 80, 443, 3389, 8080, 8443, 25565, 32400, 51820]
+
+const PORT_SERVICES = {
+  21: 'FTP', 22: 'SSH', 25: 'SMTP', 80: 'HTTP', 443: 'HTTPS',
+  3389: 'RDP', 8080: 'HTTP-alt', 8443: 'HTTPS-alt',
+  25565: 'Minecraft', 32400: 'Plex', 51820: 'WireGuard',
+}
+
+function probePort(host, port, timeoutMs = 3000) {
+  return new Promise(resolve => {
+    const socket = net.createConnection({ host, port })
+    socket.setTimeout(timeoutMs)
+    const done = (open) => { socket.destroy(); resolve({ port, open, service: PORT_SERVICES[port] ?? null }) }
+    socket.on('connect', () => done(true))
+    socket.on('error',   () => done(false))
+    socket.on('timeout', () => done(false))
+  })
+}
+
+export async function scanPorts(ip, ports = DEFAULT_PORTS) {
+  const results = await Promise.all(ports.map(p => probePort(ip, p)))
+  return { ts: Date.now(), ip, results }
+}
+
 // ── Public IP detection (multiple fallbacks) ─────────────────────────────────
+// Uses curl --interface eth0 so the request bypasses any active VPN tunnel.
+// Falls back to plain fetch if curl is unavailable (e.g. non-Linux environments).
 async function getPublicIp() {
-  const sources = [
-    { url: 'https://api.ipify.org?format=json', json: true,  key: 'ip' },
-    { url: 'https://ipv4.icanhazip.com',         json: false },
-    { url: 'https://checkip.amazonaws.com',      json: false },
+  const urls = [
+    'https://api4.my-ip.io/ip',
+    'https://ipv4.icanhazip.com',
+    'https://checkip.amazonaws.com',
   ]
-  for (const src of sources) {
+  // Try curl bound to eth0 first (avoids VPN routing)
+  for (const url of urls) {
     try {
-      const res = await fetch(src.url, { signal: AbortSignal.timeout(8000) })
+      const { stdout } = await execFileAsync('curl', [
+        '--interface', 'eth0',
+        '--silent', '--max-time', '8', '--ipv4', url
+      ])
+      const ip = stdout.trim()
+      if (ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return ip
+    } catch {}
+  }
+  // Fallback: plain fetch (will use default route — may go via VPN)
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
-      let ip
-      if (src.json) {
-        ip = (await res.json())[src.key]
-      } else {
-        ip = (await res.text()).trim()
-      }
+      const ip = (await res.text()).trim()
       if (ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return ip
     } catch {}
   }
@@ -183,10 +224,29 @@ export async function checkAndUpdateDdns(cfg, { force = false, triggeredBy = 'sy
     return
   }
 
-  // Skip update if IP is unchanged (unless force=true)
+  // Determine if a port scan is due
+  const portPorts      = cfg.ddns.port_check_ports ?? DEFAULT_PORTS
+  const portIntervalMs = (cfg.ddns.port_check_interval_minutes ?? 60) * 60 * 1000
+  const lastScanTs     = status.port_scan?.ts ?? 0
+  const scanDue        = portPorts.length > 0 && (force || (now - lastScanTs) >= portIntervalMs)
+
+  // Skip DDNS update if IP is unchanged (unless force=true)
   if (!force && ip === status.last_ip) {
-    writeDdnsStatus({ ...status, last_check: now, last_error: null })
-    console.log(`[ddns] IP unchanged (${ip}), no update needed`)
+    const newStatus = { ...status, last_check: now, last_error: null }
+    if (scanDue) {
+      console.log(`[ddns] Running port scan on ${ip}…`)
+      try {
+        const scan = await scanPorts(ip, portPorts)
+        newStatus.port_scan = scan
+        appendDdnsHistory({ ts: now, event: 'port_scan', ip, results: scan.results, triggered_by: triggeredBy }, cfg.ddns.history_retention_days)
+        console.log(`[ddns] Port scan done: ${scan.results.filter(r => r.open).length}/${scan.results.length} open`)
+      } catch (scanErr) {
+        console.warn('[ddns] Port scan failed:', scanErr.message)
+      }
+    } else {
+      console.log(`[ddns] IP unchanged (${ip}), no update needed`)
+    }
+    writeDdnsStatus(newStatus)
     return
   }
 
@@ -204,7 +264,22 @@ export async function checkAndUpdateDdns(cfg, { force = false, triggeredBy = 'sy
       default: throw new Error(`Unknown provider: ${provider}`)
     }
     const ipActuallyChanged = ip !== status.last_ip
-    writeDdnsStatus({ last_ip: ip, last_updated: now, last_check: now, last_error: null, provider, response: result.response })
+    const newStatus = { last_ip: ip, last_updated: now, last_check: now, last_error: null, provider, response: result.response }
+
+    // Always scan on IP change or force; otherwise respect interval
+    if (portPorts.length > 0 && (ipActuallyChanged || scanDue)) {
+      console.log(`[ddns] Running port scan on ${ip}…`)
+      try {
+        const scan = await scanPorts(ip, portPorts)
+        newStatus.port_scan = scan
+        appendDdnsHistory({ ts: now, event: 'port_scan', ip, results: scan.results, triggered_by: triggeredBy }, cfg.ddns.history_retention_days)
+        console.log(`[ddns] Port scan done: ${scan.results.filter(r => r.open).length}/${scan.results.length} open`)
+      } catch (scanErr) {
+        console.warn('[ddns] Port scan failed:', scanErr.message)
+      }
+    }
+
+    writeDdnsStatus(newStatus)
     appendDdnsHistory({ ts: now, event: ipActuallyChanged ? 'ip_changed' : 'force_update', old_ip: status.last_ip ?? null, new_ip: ip, provider, response: result.response, triggered_by: triggeredBy }, cfg.ddns.history_retention_days)
     console.log(`[ddns] Update OK: ${result.response}`)
   } catch (err) {

@@ -80,6 +80,7 @@ else
 fi
 
 docker run -d \
+    --init \
     --name      "$CONTAINER_NAME" \
     --restart   unless-stopped \
     --cap-add   NET_ADMIN \

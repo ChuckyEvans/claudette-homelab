@@ -34,6 +34,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 const PORT = process.env.PORT || 7654
 
+// Trust the first proxy (Nginx) so req.secure reflects HTTPS and rate-limit sees real IPs
+app.set('trust proxy', 1)
+
 app.use(cors({ origin: true, credentials: true }))
 app.use(cookieParser())
 app.use(express.json())

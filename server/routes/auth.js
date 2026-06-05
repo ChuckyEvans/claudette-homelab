@@ -13,11 +13,12 @@ const COOKIE_OPTS = {
   path: '/',
 }
 
-function issueToken(res, username, remember = false) {
+function issueToken(req, res, username, remember = false) {
   const expiresIn = remember ? '30d' : '7d'
   const maxAge   = remember ? 30 * 24 * 60 * 60 * 1000 : undefined // undefined = session cookie
   const token = jwt.sign({ username }, getJwtSecret(), { expiresIn })
-  res.cookie(COOKIE_NAME, token, { ...COOKIE_OPTS, ...(maxAge ? { maxAge } : {}) })
+  // secure:true only when accessed over HTTPS (req.secure=true behind Nginx); plain HTTP locally stays working
+  res.cookie(COOKIE_NAME, token, { ...COOKIE_OPTS, secure: req.secure, ...(maxAge ? { maxAge } : {}) })
 }
 
 // GET /api/auth/status — public, used by frontend to decide what to show
@@ -51,7 +52,7 @@ router.post('/register', async (req, res) => {
   const hash = await bcrypt.hash(password, 12)
   createUser(username, hash)
   audit('auth.register', { username })
-  issueToken(res, username)
+  issueToken(req, res, username)
   res.json({ ok: true, username })
 })
 
@@ -71,7 +72,7 @@ router.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid username or password' })
   }
   audit('auth.login', { username })
-  issueToken(res, username, !!req.body?.remember)
+  issueToken(req, res, username, !!req.body?.remember)
   res.json({ ok: true, username })
 })
 

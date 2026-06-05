@@ -108,10 +108,9 @@ export default function Layout({ page, setPage, services, _threats, username, on
           )}
 
           {/* Bell with unread badge */}
-          <div className="relative flex-shrink-0">
+          <div className="relative flex-shrink-0 group">
             <button
               onClick={openNotif}
-              title="Notifications"
               className="p-1.5 rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors"
             >
               <Bell className="w-3.5 h-3.5" />
@@ -121,15 +120,18 @@ export default function Layout({ page, setPage, services, _threats, username, on
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
+            <Tooltip text={unreadCount > 0 ? `${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}` : 'Notifications'} />
           </div>
 
-          <button
-            onClick={toggle}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="flex-shrink-0 p-1.5 rounded-md text-slate-600 hover:text-slate-300 hover:bg-white/5 transition-colors"
-          >
-            {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
-          </button>
+          <div className="relative group">
+            <button
+              onClick={toggle}
+              className="flex-shrink-0 p-1.5 rounded-md text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors"
+            >
+              {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+            </button>
+            <Tooltip text={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} />
+          </div>
         </div>
 
         {/* Nav */}
@@ -178,9 +180,9 @@ export default function Layout({ page, setPage, services, _threats, username, on
           <div className={`${collapsed ? 'px-1.5' : 'px-3'} pb-2`}>
             {collapsed ? (
               <div className="relative group flex justify-center">
-                <button
+                  <button
                   onClick={onLogout}
-                  className="p-2 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
@@ -191,7 +193,7 @@ export default function Layout({ page, setPage, services, _threats, username, on
                 <span className="flex-1 text-xs text-slate-400 truncate">{username}</span>
                 <button
                   onClick={onLogout}
-                  className="text-slate-600 hover:text-red-400 transition-colors"
+                  className="text-slate-500 hover:text-red-400 transition-colors"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                 </button>
@@ -267,7 +269,7 @@ export default function Layout({ page, setPage, services, _threats, username, on
             {/* List */}
             <div className="flex-1 overflow-y-auto divide-y divide-[#1a1a30]">
               {notifications.length === 0 ? (
-                <p className="text-xs text-slate-600 text-center py-10">No notifications</p>
+                <p className="text-xs text-slate-500 text-center py-10">No notifications</p>
               ) : notifications.map(n => {
                 const hasNav = !!(n.navigate?.page || n.navigate?.href)
                 const handleNav = () => {
@@ -286,7 +288,7 @@ export default function Layout({ page, setPage, services, _threats, username, on
                         {hasNav && <ExternalLink className="inline w-3 h-3 ml-1 opacity-50" />}
                       </p>
                       {n.ts && (
-                        <p className="text-[10px] text-slate-600 mt-0.5">{formatTs(n.ts)}</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">{formatTs(n.ts)}</p>
                       )}
                     </div>
                     <button

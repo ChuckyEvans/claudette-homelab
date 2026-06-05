@@ -21,25 +21,29 @@ scripts/
 
 ## Quick reference — npm scripts (easiest)
 
+### Deploy to Pi / Linux (remote)
 ```bash
 npm run deploy                  # full deploy: upload source, build on Pi, restart
 npm run deploy -- --quick       # fast path: sync server/ only (~5 s, no rebuild)
 npm run deploy -- --pre-built   # ship local dist/, skip npm build on Pi (~2× faster)
 npm run deploy -- --skip-build  # reuse existing image on Pi (restart only)
+```
 
-npm run docker:rebuild          # build & run locally via Docker
-npm run docker:rebuild:skip     # restart local Docker container without rebuilding
+### Run locally via Docker (Windows / macOS)
+```bash
+npm run local:rebuild           # build image + start container locally
+npm run local:rebuild:skip      # restart local container without rebuilding
 ```
 
 ## Quick reference — direct script invocation
 
 | Task | Any platform | Windows PowerShell | Linux / macOS |
 |---|---|---|---|
-| Deploy to Pi (full) | `node scripts/deploy-pi.mjs` | `.\scripts\windows\deploy-pi.ps1` | `./scripts/linux/deploy-pi.sh` |
-| Deploy to Pi (quick) | `node scripts/deploy-pi.mjs --quick` | `.\deploy-pi.ps1 -Quick` | `./deploy-pi.sh --quick` |
-| Deploy to Pi (skip build) | `node scripts/deploy-pi.mjs --skip-build` | `.\deploy-pi.ps1 -SkipBuild` | `./deploy-pi.sh --skip-build` |
-| Run locally (Docker) | `node scripts/run-docker.mjs` | `.\scripts\windows\deploy-win.ps1` | `./scripts/linux/restart.sh` |
-| Run locally (no Docker) | `npm run dev` | `.\scripts\windows\run-local.ps1` | `npm run dev` |
+| **Deploy to Pi (full)** | `node scripts/deploy-pi.mjs` | `.\scripts\windows\deploy-pi.ps1` | `./scripts/linux/deploy-pi.sh` |
+| **Deploy to Pi (quick)** | `node scripts/deploy-pi.mjs --quick` | `.\scripts\windows\deploy-pi.ps1 -Quick` | `./scripts/linux/deploy-pi.sh --quick` |
+| **Deploy to Pi (skip build)** | `node scripts/deploy-pi.mjs --skip-build` | `.\scripts\windows\deploy-pi.ps1 -SkipBuild` | `./scripts/linux/deploy-pi.sh --skip-build` |
+| **Run locally (Docker)** | `node scripts/run-docker.mjs` | `.\scripts\windows\deploy-win.ps1` | `./scripts/linux/restart.sh` |
+| **Run locally (no Docker)** | `npm run dev` | `.\scripts\windows\run-local.ps1` | `npm run dev` |
 | Kodi addon setup | — | `.\scripts\windows\kodi-setup.ps1` | — |
 
 ## Flags

@@ -65,6 +65,7 @@ if (-not $SkipBuild) {
 Write-Host "`n[3/3] Starting container '$ContainerName'..." -ForegroundColor Cyan
 
 & docker run -d `
+    --init `
     --name      $ContainerName `
     --restart   unless-stopped `
     --cap-add   NET_ADMIN `
