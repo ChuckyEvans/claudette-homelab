@@ -57,73 +57,164 @@ A self-hosted home network monitoring dashboard. Runs in Docker on a Raspberry P
 
 ---
 
-## Requirements
+## Platform setup
 
-### Running locally
+Jump to your platform:
 
-| Tool | Notes |
-|---|---|
-| **Docker Desktop** (Windows / macOS) or **Docker Engine** (Linux) | Required to build and run the app. |
-| nmap | Installed *inside* the Docker image — not needed on your workstation. |
+- [Windows](#windows)
+- [macOS](#macos)
+- [Linux / Raspberry Pi](#linux--raspberry-pi)
 
-### Deploying to a Raspberry Pi
+---
+
+## Windows
+
+### Prerequisites
+
+| Tool | How to get it | Notes |
+|---|---|---|
+| **Docker Desktop** | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) | Required to run Claudette locally. Enable WSL2 backend during install. |
+| **OpenSSH client** | Built into Windows 10+ | Run `ssh -V` to verify. |
+| **Node.js 22+** | [nodejs.org](https://nodejs.org) | Only needed for development; not required for deploy-only. |
+
+> **WSL2 note:** Docker Desktop on Windows runs containers inside a WSL2 VM. Two things behave differently from a native Linux install:
+> - **Speedtest results** read ~40–60% of your actual line speed due to VM networking overhead.
+> - **Device vendor/hostname info** from nmap is limited — ARP scanning only reaches the VM's virtual NIC, not your physical LAN.
+>
+> For accurate speed and full device discovery, deploy to a Raspberry Pi or Linux machine.
+
+### Run locally (Windows)
+
+```powershell
+# 1. Copy the example config and edit it
+copy config.example.yaml config.yaml
+# Edit config.yaml — set your subnet, ISP details, etc.
+
+# 2. Build and start the container
+.\scripts\windows\deploy-win.ps1
+
+# 3. Open in browser
+Start-Process http://localhost:7654
+```
+
+The setup wizard runs on first launch — create an admin account and confirm your config.
+
+### Deploy to a Raspberry Pi (Windows → Pi)
+
+No Docker Desktop needed on your workstation for Pi deploys — just OpenSSH.
+
+```powershell
+# Full deploy — builds natively on the Pi, restarts container
+npm run deploy
+
+# Or using the PowerShell script directly:
+.\scripts\windows\deploy-pi.ps1
+
+# Quick deploy — skips Docker rebuild, syncs only server/ files (~5 s)
+npm run deploy:quick
+
+# Skip build — restart the container using the image already on the Pi
+npm run deploy:skip-build
+```
+
+### Development (Windows)
+
+```powershell
+npm install
+npm run dev        # hot-reload frontend + backend
+npm test           # run test suite
+npm run build      # production build
+```
+
+---
+
+## macOS
+
+### Prerequisites
+
+| Tool | How to get it | Notes |
+|---|---|---|
+| **Docker Desktop** | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) | Required to run Claudette locally and for Pi cross-compilation. |
+| **Docker Buildx** | Included with Docker Desktop | Verify: `docker buildx version` |
+| **OpenSSH client** | Built into macOS | Run `ssh -V` to verify. |
+| **Node.js 22+** | [nodejs.org](https://nodejs.org) or `brew install node` | Only needed for development. |
+
+### Run locally (macOS)
+
+```bash
+# 1. Copy the example config and edit it
+cp config.example.yaml config.yaml
+# Edit config.yaml — set your subnet, ISP details, etc.
+
+# 2. Build and start the container
+./scripts/linux/restart.sh
+
+# 3. Open in browser
+open http://localhost:7654
+```
+
+### Deploy to a Raspberry Pi (macOS → Pi)
+
+The macOS deploy script cross-compiles a `linux/arm64` image on your Mac via Docker Buildx, then ships it to the Pi.
+
+```bash
+chmod +x scripts/linux/deploy-pi.sh   # one-time
+
+# Full build + deploy
+./scripts/linux/deploy-pi.sh
+
+# Skip the Docker build (reuse last image tarball)
+./scripts/linux/deploy-pi.sh --skip-build
+
+# Override the Pi address for a one-off deploy
+./scripts/linux/deploy-pi.sh --host 192.168.1.50
+```
+
+Or via npm scripts:
+
+```bash
+npm run deploy           # full deploy
+npm run deploy:quick     # server-only sync (~5 s)
+npm run deploy:skip-build
+```
+
+### Development (macOS)
+
+```bash
+npm install
+npm run dev     # hot-reload frontend + backend
+npm test        # run test suite
+npm run build   # production build
+```
+
+---
+
+## Linux / Raspberry Pi
+
+### Prerequisites
+
+#### Workstation (Linux desktop / laptop)
+
+| Tool | How to get it | Notes |
+|---|---|---|
+| **Docker Engine** | `curl -fsSL https://get.docker.com \| sudo sh` | Required to run Claudette locally. |
+| **Docker Buildx** | Included with Docker Engine 23+ | Verify: `docker buildx version` |
+| **OpenSSH client** | `sudo apt install openssh-client` | Usually pre-installed. |
+| **Node.js 22+** | [nodejs.org](https://nodejs.org) or `nvm` | Only needed for development. |
+
+#### Raspberry Pi (deploy target)
 
 | Requirement | Notes |
 |---|---|
 | **Raspberry Pi OS or Ubuntu** | 64-bit (arm64). Pi 4 (2 GB+) recommended; Pi 3B+ works. |
-| **Docker on the Pi** | Must be installed on the Pi before the first deploy — see [Pi setup](#pi-setup) below. |
-| **OpenSSH client** | Built into Windows 10+, macOS, and all Linux distros. Used for SSH and SCP transfers. |
-| **Key-based SSH auth** | Required — the deploy scripts use `BatchMode=yes` and will not prompt for a password. |
-| **Docker Buildx** *(Linux / macOS → Pi only)* | Included with Docker Desktop; on standalone Docker Engine: `docker buildx version`. Used for ARM64 cross-compilation. *Not required from Windows* — the Windows script builds natively on the Pi. |
+| **Docker on the Pi** | Install once — see [Pi first-time setup](#pi-first-time-setup) below. |
+| **Key-based SSH auth** | Required — deploy scripts use `BatchMode=yes` and will not prompt for a password. |
 
-### Local development
-
-| Tool | Notes |
-|---|---|
-| Node.js 20+ | Only needed for working on the source code. `node --version` to check. |
-
-The app runs well on a Raspberry Pi 4 (2 GB+) or any x86-64 Linux host.
-
----
-
-## Quick start — Docker (local machine)
-
-```bash
-# 1. Copy and edit the example config
-cp config.example.yaml config.yaml   # Linux / macOS
-# Windows: copy config.example.yaml config.yaml
-# Edit config.yaml with your subnet, services, ISP details, etc.
-
-# 2. Build and run
-.\scripts\windows\deploy-win.ps1     # Windows
-./scripts/linux/restart.sh           # Linux / macOS
-
-# 3. Open in browser
-http://localhost:7654
-```
-
-On first launch the setup wizard runs — create an admin account and confirm your config.
-
-> **Windows note:** Docker Desktop on Windows runs containers inside a WSL2 VM,
-> which means two things behave differently from a native Linux install:
-> - **Speedtest results** will read roughly 40–60% of your actual line speed due to VM networking overhead.
-> - **Device vendor/hostname info** from nmap is limited — ARP scanning only reaches the VM's virtual NIC, not your physical LAN.
->
-> Neither of these affect internet connectivity monitoring, outage detection, or service health checks — those all work fully. For accurate speed and device data, running on a Raspberry Pi or Linux machine is recommended.
-
----
-
-## Deploy to a Raspberry Pi
-
-The recommended setup is to run Claudette on a Pi that stays on 24/7.
-
-### Pi setup
-
-Before running any deploy script for the first time, your Pi needs Docker installed and SSH key access configured.
+### Pi first-time setup
 
 **1. Install Docker on the Pi**
 
-SSH into the Pi and run one of the following:
+SSH into the Pi and run:
 
 ```bash
 # Option A — official Docker install script (recommended)
@@ -133,7 +224,7 @@ curl -fsSL https://get.docker.com | sudo sh
 sudo apt update && sudo apt install -y docker.io
 ```
 
-Add your user to the `docker` group so the deploy scripts can run `docker` without a full sudo password:
+Add your user to the `docker` group so deploy scripts can run `docker` without a full sudo password:
 
 ```bash
 sudo usermod -aG docker $USER
@@ -143,16 +234,14 @@ docker run --rm hello-world   # verify it works
 
 **2. Set up SSH key access**
 
-The deploy scripts use `BatchMode=yes` — they will not stop to prompt for a password. Key-based authentication is required.
-
 ```bash
 # Generate a key on your workstation if you don't have one
 ssh-keygen -t ed25519 -C "claudette-deploy"
 
-# Copy the public key to the Pi
-ssh-copy-id ubuntu@<pi-ip>                          # Linux / macOS / WSL
+# Copy the public key to the Pi (Linux / macOS)
+ssh-copy-id ubuntu@<pi-ip>
 
-# Windows PowerShell alternative (no ssh-copy-id):
+# Windows PowerShell alternative:
 # Get-Content ~/.ssh/id_ed25519.pub | ssh ubuntu@<pi-ip> "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
 ```
 
@@ -164,7 +253,7 @@ ssh ubuntu@<pi-ip> echo ok
 
 **3. Configure `config.yaml`**
 
-The deploy scripts read the Pi address and SSH user automatically from `config.yaml`:
+The deploy scripts read the Pi address and SSH user from `config.yaml`:
 
 ```yaml
 pi:
@@ -173,36 +262,7 @@ pi:
   # ssh_key: ~/.ssh/id_ed25519  # Optional — omit to use ssh-agent
 ```
 
----
-
-### Windows → Pi
-
-```powershell
-# Full deploy — packages source, uploads to Pi, builds image natively on Pi, restarts container
-.\scripts\windows\deploy-pi.ps1
-
-# Server-only update — skip Docker rebuild, sync only server/ files into running container (~5 s)
-.\scripts\windows\deploy-pi.ps1 -Quick
-
-# Skip the Docker build — just restart the container using the image already on the Pi
-.\scripts\windows\deploy-pi.ps1 -SkipBuild
-
-# Override the Pi address for a one-off deploy
-.\scripts\windows\deploy-pi.ps1 -PiHost 192.168.1.50
-```
-
-**What the full deploy does:**
-
-1. Packages the project source (frontend + backend + Dockerfile) into a tarball on your workstation
-2. Uploads the tarball to the Pi via SCP
-3. SSHs into the Pi and runs `docker build` natively — the Pi builds its own ARM64 image directly, no cross-compilation
-4. Stops the old container and starts a fresh one with `--network host`, `--restart unless-stopped`, and the correct Linux capabilities
-
-> **Requirements on your workstation:** OpenSSH client and `scp` — both built into Windows 10 and later. Docker Desktop is *not* required for a full Pi deploy.
-
----
-
-### Linux / macOS → Pi
+### Deploy to Pi (Linux → Pi)
 
 ```bash
 chmod +x scripts/linux/deploy-pi.sh   # one-time
@@ -210,24 +270,49 @@ chmod +x scripts/linux/deploy-pi.sh   # one-time
 # Full build + deploy
 ./scripts/linux/deploy-pi.sh
 
-# Skip the Docker build (reuse last image tarball)
+# Skip the Docker build
 ./scripts/linux/deploy-pi.sh --skip-build
 
 # Override the Pi address
 ./scripts/linux/deploy-pi.sh --host 192.168.1.50
 ```
 
-**What it does:**
+Or via npm:
 
-1. Cross-compiles a `linux/arm64` Docker image on your machine via `docker buildx`
-2. Saves the image as a tarball and copies it to the Pi over SCP
-3. Loads the image on the Pi and restarts the container
+```bash
+npm run deploy
+npm run deploy:quick
+npm run deploy:skip-build
+```
 
-> **Requirements on your workstation:** Docker with Buildx (included in Docker Desktop; on standalone Engine: `docker buildx version`), OpenSSH client, `scp`.
+**What the deploy does:**
 
----
+1. Cross-compiles a `linux/arm64` Docker image via `docker buildx` (Linux/macOS workstation builds)  
+   *— or —* packages the source as a tarball, uploads it via SCP, and builds natively on the Pi (Windows)
+2. Stops the old container and starts a fresh one with `--network host`, `--restart unless-stopped`, and the correct Linux capabilities (`NET_ADMIN`, `NET_RAW`)
+3. Persistent data lives in `/app/data` on the Pi — it survives container updates
 
-The container always runs with `--network host` so nmap can reach every device on your LAN. Persistent data (SQLite database and backups) lives in the Docker volume `claudette-data`, mounted at `/app/data` inside the container — it survives container restarts and image updates.
+### Run locally on Linux
+
+```bash
+# 1. Copy and edit the config
+cp config.example.yaml config.yaml
+
+# 2. Build and start
+./scripts/linux/restart.sh
+
+# 3. Open in browser
+xdg-open http://localhost:7654
+```
+
+### Development (Linux)
+
+```bash
+npm install
+npm run dev     # hot-reload frontend + backend
+npm test        # run test suite
+npm run build   # production build
+```
 
 ### SSH config tip
 
@@ -240,7 +325,7 @@ Host pi
   IdentityFile ~/.ssh/id_ed25519
 ```
 
-Then use `-PiHost pi` (Windows) or `--host pi` (Linux/macOS) when calling the deploy scripts.
+Then use `--host pi` (Linux/macOS) or `-PiHost pi` (Windows) in the deploy scripts.
 
 ---
 
@@ -314,7 +399,7 @@ Services are configured through the UI (Settings → Services) or directly in th
 
 ## Data & backups
 
-All data lives in a SQLite database at `/app/data/state.db` inside the container. The Docker volume `claudette-data` persists this across container restarts.
+All data lives in a SQLite database at `/app/data/claudette.db` inside the container. The Docker volume `claudette-data` persists this across container restarts.
 
 **Manual backup**: Settings → Backup & Restore → *Backup Now* — downloads a `.claudette.gz` file (gzip-compressed JSON bundle containing the config YAML and base64-encoded SQLite binary; typically 85–90% smaller than the raw data).
 
@@ -363,7 +448,7 @@ npm run build
 | Layer | Technology |
 |---|---|
 | Frontend | React 18, Vite 5, Tailwind CSS, Recharts, Lucide icons |
-| Backend | Node.js 20, Express 4, ESM modules |
+| Backend | Node.js 22, Express 4, ESM modules |
 | Database | SQLite via `node-sqlite3-wasm` (no native bindings — works on any arch) |
 | Auth | bcryptjs passwords, JWT session cookies, rate-limited login |
 | Container | Docker, multi-stage build (`linux/amd64` locally; `linux/arm64` on Pi natively or via buildx) |
@@ -393,8 +478,9 @@ npm run build
 │   ├── components/       Page components (Dashboard, NetworkScan, etc.)
 │   └── lib/
 │       ├── api.js        Fetch wrappers + SSE helper
-│       ├── themes.js     Theme definitions
-│       └── threatMatch.js CVE keyword matching
+│       ├── themes.js     Theme definitions, persistence helpers
+│       ├── threatMatch.js CVE keyword matching
+│       └── uiPrefs.js    UI preference helpers
 ├── tests/                Vitest test suite
 │   ├── server/           Server-side unit tests
 │   └── lib/              Frontend utility tests
@@ -403,8 +489,7 @@ npm run build
 │   ├── windows/          PowerShell deploy scripts
 │   └── linux/            Bash deploy scripts
 ├── Dockerfile            Multi-stage Docker build
-├── config.example.yaml   Config template (commit this, not config.yaml)
-└── scripts/windows/      PowerShell deploy scripts (see scripts/README.md)
+└── config.example.yaml   Config template (commit this, not config.yaml)
 ```
 
 ### Tests
@@ -413,7 +498,7 @@ npm run build
 npm test
 ```
 
-Tests live in `tests/` and are run with Vitest. Coverage includes auth middleware, config sanitisation, IP utilities, outage pairing, report helpers, threat matching, and theme utilities.
+Tests live in `tests/` and are run with Vitest. The suite covers auth middleware logic, config sanitisation, IP utilities, outage pairing, report helpers, schedule utilities, threat matching, theme definitions and persistence helpers, accent presets, background dim helpers, and UI preferences — 241+ tests across 10 suites.
 
 ---
 
@@ -422,10 +507,10 @@ Tests live in `tests/` and are run with Vitest. Coverage includes auth middlewar
 - **No cloud dependency** — everything runs on your own hardware
 - Passwords are hashed with bcrypt (cost factor 12)
 - JWTs are `httpOnly` + `sameSite: strict` cookies — not accessible from JavaScript
-- Login is rate-limited (20 attempts / 15 min per IP)
+- nginx rate-limits the login endpoint to 5 attempts/min per IP; fail2ban bans after 8 failures
 - All API routes except `/auth/*` require a valid session
 - `config.yaml` is excluded from Git — never contains committed secrets
-- The container uses `--network host` which is required for raw socket scanning; do not expose port 7654 to the internet
+- The container uses `--network host` which is required for raw socket scanning; do not expose port 7654 directly to the internet — put it behind a reverse proxy (nginx, Caddy, etc.)
 
 ---
 
