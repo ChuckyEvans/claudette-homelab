@@ -50,7 +50,7 @@ export default function Incidents() {
 
   const exportCsv = () => {
     if (!data) return
-    const rows = []
+    const rows = [];
     (data.persisted || []).forEach((r) => rows.push([r.type, r.key, r.count, r.first_seen, r.last_seen]))
     const csv = ['Type,Key,Count,FirstSeen,LastSeen', ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
