@@ -11,6 +11,7 @@ export default function Incidents() {
   const [age, setAge] = useState('7')
   const [page, setPage] = useState(0)
   const containerRef = useRef(null)
+  const [toast, setToast] = useState(null)
 
   useEffect(() => {
     const load = async () => {
