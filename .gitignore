@@ -18,3 +18,8 @@ requirements.txt
 
 # Copilot conversation logs
 .copilot/
+# Local diagnostics scripts (private)
+tools/reports/
+scripts/screenshot-reports.mjs
+scripts/dump-reports.mjs
+scripts/ufw.sh
