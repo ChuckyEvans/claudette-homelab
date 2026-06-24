@@ -137,6 +137,7 @@ export function getHistory() {
 
 let _prevInternetOk    = null
 let _internetResults   = []
+let _internetAttempts  = [] // array of attempt arrays for double-check evidence
 let _vpnUp             = false
 let _vpnOk             = null
 let _vpnResults        = []
@@ -322,15 +323,35 @@ export async function checkConnectivity(broadcast) {
     console.log(`[internet] VPN (${VPN_IFACE}) active — binding direct pings to ${physIface}`)
   }
 
-  const pingResults = await Promise.all(
-    pingHosts.map(h => physIface ? pingHostVia(h, physIface) : pingHost(h))
-  )
-  const httpResult  = physIface
+  // First attempt
+  const attempt1Ping = await Promise.all(pingHosts.map(h => physIface ? pingHostVia(h, physIface) : pingHost(h)))
+  const attempt1Http  = physIface
     ? await checkHttpHeadVia('http://connectivity-check.ubuntu.com', physIface)
     : await checkHttpHead('http://connectivity-check.ubuntu.com')
-  _internetResults  = [...pingResults, httpResult]
+  const attempt1 = [...attempt1Ping, attempt1Http]
 
-  const ok = _internetResults.some(r => r.ok)
+  // Double-check attempts (configurable)
+  const doubleCheckAttempts = Number(cfg?.schedule?.outage_double_check_attempts ?? 2)
+  const doubleCheckInterval = Number(cfg?.schedule?.outage_double_check_interval_seconds ?? 30)
+  const attempts = [attempt1]
+
+  if (!attempt1.some(r => r.ok) && doubleCheckAttempts > 1) {
+    for (let i = 1; i < doubleCheckAttempts; i++) {
+      // wait configured interval (bounded)
+      const waitMs = Math.max(1000, Math.min(60000, doubleCheckInterval * 1000))
+      await new Promise(r => setTimeout(r, waitMs))
+      const p = await Promise.all(pingHosts.map(h => physIface ? pingHostVia(h, physIface) : pingHost(h)))
+      const hres = physIface
+        ? await checkHttpHeadVia('http://connectivity-check.ubuntu.com', physIface)
+        : await checkHttpHead('http://connectivity-check.ubuntu.com')
+      attempts.push([...p, hres])
+    }
+  }
+
+  // Merge last attempt into canonical results for callers; keep attempts for evidence
+  _internetAttempts = attempts
+  _internetResults  = attempts[attempts.length - 1]
+  const ok = attempts.some(at => at.some(r => r.ok))
 
   if (_vpnUp) {
     _vpnResults = await Promise.all(pingHosts.map(h => pingHostVia(h, VPN_IFACE)))
@@ -377,6 +398,8 @@ export async function checkConnectivity(broadcast) {
     const nowTs = Date.now()
     audit(ok ? 'internet.up' : 'internet.down', {
       results:     _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
+      attempt_count: attempts.length,
+      attempts:     attempts.map(a => a.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))),
       outage_type: ok ? null : outageType,
       gateway_ok:  ok ? null : gatewayOk,
     })
@@ -404,6 +427,7 @@ export async function checkConnectivity(broadcast) {
   audit('internet.check', {
     ok,
     results:          _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
+    attempts:         _internetAttempts.map(a => a.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))),
     outage_type:      ok ? null : outageType,
     gateway_ok:       ok ? null : gatewayOk,
     gateway:          gateway ?? null,
@@ -425,19 +449,27 @@ export async function checkConnectivity(broadcast) {
     _stopOutagePoll()
   }
 
-  if (broadcast) broadcast('internet', { results: _internetResults, ok, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults, vpn_meta: _vpnMeta, ts: Date.now() })
+  if (broadcast) broadcast('internet', { results: _internetResults, attempts: _internetAttempts, ok, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults, vpn_meta: _vpnMeta, ts: Date.now() })
   if (broadcast) broadcast('job_done', { job: 'internet', ts: Date.now() })
   return _internetResults
 }
 
 export function getInternetStatus() {
-  return { results: _internetResults, ok: _internetResults.length ? _internetResults.some(r => r.ok) : null, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults, vpn_meta: _vpnMeta }
+  return {
+    results:  _internetResults,
+    attempts: _internetAttempts,
+    ok:       _internetResults.length ? _internetResults.some(r => r.ok) : null,
+    vpn_up:   _vpnUp,
+    vpn_ok:   _vpnOk,
+    vpn_results: _vpnResults,
+    vpn_meta: _vpnMeta,
+  }
 }
 
 router.get('/internet', async (req, res) => {
   try {
     const results = await checkConnectivity(null)
-    res.json({ results, ok: results.some(r => r.ok), vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_meta: _vpnMeta, ts: Date.now() })
+    res.json({ results, attempts: _internetAttempts, ok: results.some(r => r.ok), vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_meta: _vpnMeta, ts: Date.now() })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

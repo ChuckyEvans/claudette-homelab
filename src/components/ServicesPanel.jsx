@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { api } from '../lib/api.js'
 import { CheckCircle, XCircle, RefreshCw, ChevronDown, ChevronUp, Search } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
@@ -98,6 +99,7 @@ export default function ServicesPanel({ services, onRefreshServices }) {
   const { results = [], history = {} } = services
   const okCount = results.filter(r => r.ok).length
   const [refreshing, setRefreshing] = useState(false)
+  const [internetModal, setInternetModal] = useState({ open: false, data: null, loading: false })
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
 
@@ -129,6 +131,23 @@ export default function ServicesPanel({ services, onRefreshServices }) {
         >
           <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           Refresh
+        </button>
+        <button
+          onClick={async () => {
+            setInternetModal({ open: true, data: null, loading: true })
+            try {
+              await api.services.runInternet()
+            } catch { /* ignore */ }
+            try {
+              const res = await api.services.internet()
+              setInternetModal({ open: true, data: res, loading: false })
+            } catch (e) {
+              setInternetModal({ open: true, data: { error: e.message }, loading: false })
+            }
+          }}
+          className="ml-2 flex items-center gap-2 px-3 py-2 bg-[#0f1724] hover:bg-[#0b1220] text-slate-300 rounded-lg text-sm transition-colors"
+        >
+          More info
         </button>
       </div>
 
@@ -172,6 +191,50 @@ export default function ServicesPanel({ services, onRefreshServices }) {
           ))
         )}
       </div>
+
+      {/* Internet modal */}
+      {internetModal.open && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4" onClick={() => setInternetModal({ open: false, data: null })}>
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative bg-[#0d0d1a] border border-[#1a1a35] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto" onClick={event => event.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#1a1a30]">
+              <h3 className="text-sm font-semibold text-white">Internet Check — More info</h3>
+              <button onClick={() => setInternetModal({ open: false, data: null })} className="text-slate-500 hover:text-slate-300">Close</button>
+            </div>
+            <div className="p-4 text-sm">
+              {internetModal.loading && <p className="text-slate-400">Running checks…</p>}
+              {internetModal.data?.error && <p className="text-red-400">Error: {internetModal.data.error}</p>}
+              {internetModal.data?.attempts && internetModal.data.attempts.map((attempt, idx) => (
+                <div key={idx} className="mb-4">
+                  <p className="text-xs text-slate-400 mb-2">Attempt {idx + 1}</p>
+                  <div className="rounded-lg overflow-hidden border border-[#1a1a30]">
+                    <table className="w-full text-[12px]">
+                      <thead>
+                        <tr className="bg-[#0a0a18] border-b border-[#1a1a30]">
+                          <th className="px-3 py-2 text-left text-slate-500">Host</th>
+                          <th className="px-3 py-2 text-center text-slate-500">Status</th>
+                          <th className="px-3 py-2 text-right text-slate-500">Latency</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {attempt.map((h, i) => (
+                          <tr key={i} className="border-b border-[#1a1a30] last:border-0">
+                            <td className="px-3 py-2 text-slate-300 font-mono">{h.host}</td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${h.ok ? 'text-emerald-400 bg-emerald-500/10' : 'text-red-400 bg-red-500/10'}`}>{h.ok ? 'OK' : 'FAIL'}</span>
+                            </td>
+                            <td className="px-3 py-2 text-right text-slate-400 font-mono">{h.ms != null ? `${h.ms} ms` : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
