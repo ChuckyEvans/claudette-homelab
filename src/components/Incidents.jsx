@@ -12,18 +12,19 @@ export default function Incidents() {
   const [page, setPage] = useState(0)
   const containerRef = useRef(null)
 
-  const load = async () => {
-    setLoading(true)
-    try {
-      const qs = new URLSearchParams({ filter, sort, age, page })
-      const r = await fetch(`/api/incidents?${qs.toString()}`)
-      const j = await r.json()
-      setData(j)
-    } catch (err) { setData({ error: err.message }) }
-    finally { setLoading(false) }
-  }
-
-  useEffect(() => { load() }, [filter, sort, age, page])
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true)
+      try {
+        const qs = new URLSearchParams({ filter, sort, age, page })
+        const r = await fetch(`/api/incidents?${qs.toString()}`)
+        const j = await r.json()
+        setData(j)
+      } catch (err) { setData({ error: err.message }) }
+      finally { setLoading(false) }
+    }
+    load()
+  }, [filter, sort, age, page])
 
   useEffect(() => {
     // persist UI prefs in a cookie forever
@@ -41,7 +42,7 @@ export default function Incidents() {
         if (p.sort) setSort(p.sort)
         if (p.age) setAge(p.age)
         if (p.page) setPage(Number(p.page))
-      } catch (e) {
+      } catch {
         // ignore
       }
     }
