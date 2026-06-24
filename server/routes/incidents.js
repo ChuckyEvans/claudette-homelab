@@ -1,16 +1,19 @@
 import express from 'express'
 import detectors from '../lib/detectors.js'
+import alerts from '../lib/alerts.js'
 
 const router = express.Router()
 
 // Incidents endpoint: aggregate a few cheap detectors
 router.get('/', async (req, res) => {
   try {
-    const [clashes, churn, portScans, beacons] = await Promise.all([
+    // Run detectors and also return latest persisted alerts
+    const [clashes, churn, portScans, beacons, persisted] = await Promise.all([
       detectors.detectIpClashes(100),
       detectors.detectMacIpChurn(100),
       detectors.detectPortScans(50),
       detectors.detectBeacons(100),
+      alerts.listAlerts(200, 0),
     ])
     res.json({ clashes, churn, portScans, beacons })
   } catch (err) {

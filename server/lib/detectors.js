@@ -1,4 +1,5 @@
 import db from '../db.js'
+import alerts from './alerts.js'
 
 // Very small, cheap detectors using recent ip_history rows.
 export async function detectIpClashes(limit = 100) {
@@ -11,6 +12,15 @@ export async function detectIpClashes(limit = 100) {
     LIMIT ?
   `, [limit])
   return rows.map(r => ({ ip: r.ip, macs: r.macs ? r.macs.split(',') : [], mac_count: r.mac_count, last_seen: r.last_seen }))
+}
+
+// Persist simple IP clash alerts
+export async function persistIpClashes(limit = 100) {
+  const clashes = await detectIpClashes(limit)
+  for (const c of clashes) {
+    alerts.upsertAlert('ip_clash', c.ip, c)
+  }
+  return clashes
 }
 
 export async function detectMacIpChurn(limit = 100) {

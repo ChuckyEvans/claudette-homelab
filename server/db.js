@@ -294,6 +294,21 @@ export function getDb() {
       outage_type TEXT,
       captured_at INTEGER NOT NULL
     );
+
+  // Alerts table: aggregated detector findings
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS alerts (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      type       TEXT NOT NULL,
+      key        TEXT NOT NULL,
+      payload    TEXT NOT NULL DEFAULT '{}',
+      first_seen INTEGER NOT NULL,
+      last_seen  INTEGER NOT NULL,
+      count      INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(type, key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_alerts_lastseen ON alerts (last_seen DESC);
+  `)
   `)
 
   // VPN exit-node metadata — single row, upserted whenever VPN info is detected
