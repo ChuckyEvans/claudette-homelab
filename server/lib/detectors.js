@@ -23,6 +23,30 @@ export async function persistIpClashes(limit = 100) {
   return clashes
 }
 
+export async function persistMacIpChurn(limit = 100) {
+  const churn = await detectMacIpChurn(limit)
+  for (const c of churn) {
+    alerts.upsertAlert('mac_ip_churn', c.mac, c)
+  }
+  return churn
+}
+
+export async function persistPortScans(limit = 100) {
+  const scans = await detectPortScans(limit)
+  for (const s of scans) {
+    alerts.upsertAlert('port_scan', s.ip, s)
+  }
+  return scans
+}
+
+export async function persistBeacons(limit = 100) {
+  const beacons = await detectBeacons(limit)
+  for (const b of beacons) {
+    alerts.upsertAlert('beacon', b.mac, b)
+  }
+  return beacons
+}
+
 export async function detectMacIpChurn(limit = 100) {
   const rows = await db.all(`
     SELECT mac, COUNT(DISTINCT ip) as ip_count, GROUP_CONCAT(DISTINCT ip) as ips, MAX(ts) as last_seen
@@ -69,4 +93,4 @@ export async function detectBeacons(limit = 100) {
   }
 }
 
-export default { detectIpClashes, detectMacIpChurn, detectPortScans, detectBeacons }
+export default { detectIpClashes, detectMacIpChurn, detectPortScans, detectBeacons, persistIpClashes, persistMacIpChurn, persistPortScans, persistBeacons }

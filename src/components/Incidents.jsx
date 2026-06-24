@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import ReportsIPClashes from './ReportsIPClashes'
+import Toast from './Toast'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 
@@ -11,7 +12,7 @@ export default function Incidents() {
   const [age, setAge] = useState('7')
   const [page, setPage] = useState(0)
   const containerRef = useRef(null)
-  // transient UI toast removed for lint stability; using alert() instead
+  const [toast, setToast] = useState(null)
 
   useEffect(() => {
     const load = async () => {
@@ -113,11 +114,12 @@ export default function Incidents() {
         <button className="btn" onClick={async () => {
           try {
             const r = await fetch('/api/incidents/run', { method: 'POST' })
-            if (r.ok) window.alert('Detectors scheduled')
-            else window.alert('Failed to schedule')
+            if (r.ok) setToast('Detectors scheduled')
+            else setToast('Failed to schedule')
           } catch {
-            window.alert('Network error')
+            setToast('Network error')
           }
+          setTimeout(() => setToast(null), 4000)
         }}>Run detectors now</button>
       </div>
 
@@ -146,7 +148,7 @@ export default function Incidents() {
           </table>
         </div>
       </div>
-      {/* toast removed for lint stability */}
+      {toast && <Toast>{toast}</Toast>}
     </div>
   )
 }

@@ -228,9 +228,11 @@ function scheduleJobs() {
     console.log(`[jobs] detectors persistence every ${detectorsMin} minutes`)
     _tasks.push(cron.schedule(minutesToCron(detectorsMin), () => enqueue('detectors', async () => {
       try {
-        // persist IP clashes; other persisters may be added later
         const detectors = await import('./lib/detectors.js')
         if (detectors.persistIpClashes) await detectors.persistIpClashes(200)
+        if (detectors.persistMacIpChurn) await detectors.persistMacIpChurn(200)
+        if (detectors.persistPortScans) await detectors.persistPortScans(200)
+        if (detectors.persistBeacons) await detectors.persistBeacons(200)
       } catch (e) { console.error('[jobs] detectors:', e.message) }
     })))
   }
