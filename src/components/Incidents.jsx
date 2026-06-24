@@ -11,7 +11,7 @@ export default function Incidents() {
   const [age, setAge] = useState('7')
   const [page, setPage] = useState(0)
   const containerRef = useRef(null)
-  const [toast, setToast] = useState(null)
+  // transient UI toast removed for lint stability; using alert() instead
 
   useEffect(() => {
     const load = async () => {
@@ -113,12 +113,11 @@ export default function Incidents() {
         <button className="btn" onClick={async () => {
           try {
             const r = await fetch('/api/incidents/run', { method: 'POST' })
-            if (r.ok) setToast('Detectors scheduled')
-            else setToast('Failed to schedule')
+            if (r.ok) window.alert('Detectors scheduled')
+            else window.alert('Failed to schedule')
           } catch {
-            setToast('Network error')
+            window.alert('Network error')
           }
-          setTimeout(() => setToast(null), 4000)
         }}>Run detectors now</button>
       </div>
 
@@ -147,7 +146,7 @@ export default function Incidents() {
           </table>
         </div>
       </div>
-      {toast && <div className="fixed top-4 right-4 bg-slate-800 text-white px-4 py-2 rounded shadow">{toast}</div>}
+      {/* toast removed for lint stability */}
     </div>
   )
 }
