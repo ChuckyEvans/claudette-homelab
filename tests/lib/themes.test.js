@@ -156,7 +156,7 @@ describe('loadTheme() / saveTheme()', () => {
       set cookie(v) {
         // Real browsers accumulate name=value pairs; simulate that
         const [pair] = v.split(';')
-        const [name, val] = pair.split('=')
+        const [name, _val] = pair.split('=')
         const existing = cookieJar
           .split(';')
           .filter(c => !c.trim().startsWith(name.trim() + '='))
