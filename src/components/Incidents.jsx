@@ -50,8 +50,8 @@ export default function Incidents() {
 
   const exportCsv = () => {
     if (!data) return
-    const rows = [];
-    (data.persisted || []).forEach((r) => rows.push([r.type, r.key, r.count, r.first_seen, r.last_seen]))
+    const items = data.persisted || []
+    const rows = items.map((r) => [r.type, r.key, r.count, r.first_seen, r.last_seen])
     const csv = ['Type,Key,Count,FirstSeen,LastSeen', ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -109,6 +109,18 @@ export default function Incidents() {
         </label>
         <button className="ml-auto btn" onClick={exportCsv}>Export CSV</button>
         <button className="btn" onClick={exportPdf}>Export PDF</button>
+        <button className="btn" onClick={async () => {
+          try {
+            const r = await fetch('/api/incidents/run', { method: 'POST' })
+            if (r.ok) {
+              alert('Detectors scheduled')
+            } else {
+              alert('Failed to schedule')
+            }
+          } catch {
+            alert('Network error')
+          }
+        }}>Run detectors now</button>
       </div>
 
       <div className="mb-6">
