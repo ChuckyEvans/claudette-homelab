@@ -1,5 +1,4 @@
 import express from 'express'
-import db from '../db.js'
 import detectors from '../lib/detectors.js'
 
 const router = express.Router()

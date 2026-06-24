@@ -5,17 +5,17 @@ export default function Incidents() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => { load() }, [])
-
-  async function load() {
+  const load = async () => {
     setLoading(true)
     try {
       const r = await fetch('/api/incidents')
       const j = await r.json()
       setData(j)
-    } catch (e) { setData({ error: e.message }) }
+    } catch (err) { setData({ error: err.message }) }
     finally { setLoading(false) }
   }
+
+  useEffect(() => { load() }, [])
 
   if (loading) return <div className="p-6 text-slate-300">Loading incidents…</div>
   if (!data) return <div className="p-6 text-slate-300">No data</div>

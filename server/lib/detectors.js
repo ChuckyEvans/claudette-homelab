@@ -37,7 +37,7 @@ export async function detectPortScans(limit = 100) {
       LIMIT ?
     `, [limit])
     return rows.map(r => ({ ip: r.ip, port_count: r.port_count, ports: r.ports ? r.ports.split(',') : [] }))
-  } catch (e) {
+  } catch (_) {
     return []
   }
 }
@@ -54,7 +54,7 @@ export async function detectBeacons(limit = 100) {
       LIMIT ?
     `, [limit])
     return rows.map(r => ({ mac: r.mac, hits: r.hits, last_seen: r.last_seen }))
-  } catch (e) {
+  } catch (_) {
     return []
   }
 }
