@@ -208,6 +208,7 @@ function scheduleJobs() {
   const deepHour    = cfg?.schedule?.deep_scan_hour           ?? 4
   const backupDays  = cfg?.schedule?.backup_interval_days     ?? 0
   const retainDays  = cfg?.retention?.days                    ?? 365
+  const detectorsMin = cfg?.schedule?.detectors_interval_minutes ?? 5
 
   console.log(`[jobs] Scheduled: services=${minutesToCron(checkMin)} internet=${minutesToCron(internetMin)} ping=${minutesToCron(pingMin)} speedtest=${hoursToCron(speedtestHr)} threats=${hoursToCron(threatHr)} deep-scan=0 ${deepHour} * * *`)
 
@@ -221,6 +222,18 @@ function scheduleJobs() {
     _tasks.push(cron.schedule(hoursToCron(vpnSpeedtestHr), () => enqueue('vpn-speedtest', () => runVpnSpeedTest(broadcast).catch(() => {}))))
   }
   _tasks.push(cron.schedule(hoursToCron(threatHr),      () => enqueue('threats',   () => refreshThreats(broadcast))))
+
+  // Run detectors persistence on a configurable interval
+  if (detectorsMin > 0) {
+    console.log(`[jobs] detectors persistence every ${detectorsMin} minutes`)
+    _tasks.push(cron.schedule(minutesToCron(detectorsMin), () => enqueue('detectors', async () => {
+      try {
+        // persist IP clashes; other persisters may be added later
+        const detectors = await import('./lib/detectors.js')
+        if (detectors.persistIpClashes) await detectors.persistIpClashes(200)
+      } catch (e) { console.error('[jobs] detectors:', e.message) }
+    })))
+  }
 
   // Baseline mtr — runs on a configurable schedule when internet is healthy
   const mtrBaselineHrs = cfg?.schedule?.mtr_baseline_hours ?? 1
