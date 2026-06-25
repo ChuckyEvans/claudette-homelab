@@ -263,6 +263,18 @@ export function exportToCsv(data, filename = 'export.csv') {
   URL.revokeObjectURL(link.href)
 }
 
+// Backwards-compatible default export used by some components (legacy)
+export default {
+  get: (path, opts = {}) => fetch(path, { credentials: 'include', ...opts }),
+  post: (path, body, opts = {}) => fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    credentials: 'include',
+    ...opts,
+  }),
+}
+
 
 /**
  * Data-driven PDF export — professional layout for ISP dispute and service quality documentation.

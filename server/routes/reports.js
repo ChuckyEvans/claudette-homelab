@@ -66,15 +66,19 @@ router.get('/', (req, res) => {
     let total   = 0
 
     if (wantDevice && wantSystem && !macFilter) {
-      // UNION both tables — sort and paginate in JS (fine for home-scale datasets)
-      const dq = buildDeviceEventsQuery(from, to, eventFilter, null, subnetPrefix, 10000, 0)
-      const aq = buildAuditLogQuery(from, to, eventFilter, 10000, 0)
-      const devRows = db.all(dq.rows, dq.params)
-      const sysRows = db.all(aq.rows, aq.params)
-      allRows = [...devRows, ...sysRows]
-        .sort((a, b) => b.ts - a.ts)
-        .slice(offset, offset + limit)
-      total = db.get(dq.count, dq.params).n + db.get(aq.count, aq.params).n
+      // Use SQL UNION to let SQLite sort and limit efficiently server-side
+      const unionRowsSql = `
+        SELECT ts, event, mac, ip, hostname, payload, 'device' AS source FROM device_events WHERE ts >= ? AND ts <= ?
+        UNION ALL
+        SELECT ts, event, NULL AS mac, NULL AS ip, NULL AS hostname, payload, 'system' AS source FROM audit_log WHERE ts >= ? AND ts <= ? AND ${"event NOT IN ('service.check','config.saved')"}
+        ORDER BY ts DESC
+        LIMIT ? OFFSET ?
+      `
+      const unionCountSql = `SELECT (SELECT COUNT(*) FROM device_events WHERE ts >= ? AND ts <= ?) + (SELECT COUNT(*) FROM audit_log WHERE ts >= ? AND ts <= ? AND ${"event NOT IN ('service.check','config.saved')"}) AS n`
+      const paramsRows = [from, to, from, to, limit, offset]
+      const paramsCount = [from, to, from, to]
+      allRows = db.all(unionRowsSql, paramsRows)
+      total = db.get(unionCountSql, paramsCount).n
     } else if (wantDevice) {
       const dq = buildDeviceEventsQuery(from, to, eventFilter, macFilter, subnetPrefix, limit, offset)
       allRows = db.all(dq.rows, dq.params)
@@ -114,20 +118,33 @@ router.get('/chart', (req, res) => {
     const to   = req.query.to   ? parseInt(req.query.to)   : Date.now()
     const from = req.query.from ? parseInt(req.query.from) : to - SEVEN_DAYS
 
-    // Daily device event counts
-    const devRows = db.all(`SELECT ts, event FROM device_events WHERE ts >= ? AND ts <= ?`, [from, to])
-    const byDay = new Map()
-    for (const r of devRows) {
-      const d   = new Date(r.ts)
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-      if (!byDay.has(key)) byDay.set(key, { date: key, new: 0, online: 0, offline: 0, ports: 0 })
-      const day = byDay.get(key)
-      if      (r.event === 'device.new')        day.new++
-      else if (r.event === 'device.online')     day.online++
-      else if (r.event === 'device.offline')    day.offline++
-      else if (r.event === 'device.port.open')  day.ports++
+    // Daily device event counts — prefer precomputed summary when available
+    let daily = []
+    try {
+      const startDay = new Date(from).toISOString().slice(0,10)
+      const endDay = new Date(to).toISOString().slice(0,10)
+      // If range is at least 1 day, use daily_event_summary
+      const summaryRows = db.all(`SELECT day, new_devices, online_events, offline_events, port_finds FROM daily_event_summary WHERE day >= ? AND day <= ? ORDER BY day ASC`, [startDay, endDay])
+      if (summaryRows && summaryRows.length > 0) {
+        daily = summaryRows.map(r => ({ date: r.day, new: r.new_devices, online: r.online_events, offline: r.offline_events, ports: r.port_finds }))
+      } else {
+        const devRows = db.all(`SELECT ts, event FROM device_events WHERE ts >= ? AND ts <= ?`, [from, to])
+        const byDay = new Map()
+        for (const r of devRows) {
+          const d   = new Date(r.ts)
+          const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+          if (!byDay.has(key)) byDay.set(key, { date: key, new: 0, online: 0, offline: 0, ports: 0 })
+          const day = byDay.get(key)
+          if      (r.event === 'device.new')        day.new++
+          else if (r.event === 'device.online')     day.online++
+          else if (r.event === 'device.offline')    day.offline++
+          else if (r.event === 'device.port.open')  day.ports++
+        }
+        daily = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date))
+      }
+    } catch {
+      daily = []
     }
-    const daily = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date))
 
     // Top ports
     const portRows = db.all(`SELECT payload FROM device_events WHERE ts >= ? AND ts <= ? AND event = 'device.port.open'`, [from, to])
@@ -332,12 +349,14 @@ router.get('/outages', (req, res) => {
     // Attach stored diagnostics (traceroute + ping detail) if available
     const diagRows = db.all(`SELECT outage_ts, traceroute, ping_detail, gateway, captured_at FROM outage_diagnostics`)
     const diagMap  = new Map(diagRows.map(r => [r.outage_ts, r]))
+    const cfg = loadConfig()
     const windowedWithDiag = windowed.map(o => {
       const d = diagMap.get(o.start)
       if (!d) return o
       let pingDetail = null
       try { pingDetail = JSON.parse(d.ping_detail) } catch {}
-      return { ...o, diagnostics: { traceroute: d.traceroute, ping_detail: pingDetail, gateway: d.gateway, captured_at: d.captured_at } }
+      const pingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
+      return { ...o, diagnostics: { traceroute: d.traceroute, ping_detail: pingDetail, gateway: d.gateway, ping_hosts: pingHosts, captured_at: d.captured_at } }
     })
 
     res.json({

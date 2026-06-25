@@ -48,6 +48,11 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_audit_ts    ON audit_log (ts DESC);
     CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log (event);
 
+    -- Indexes to speed report queries
+    CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log (ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_device_events_ts ON device_events (ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_device_events_event ON device_events (event);
+
     CREATE TABLE IF NOT EXISTS users (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       username      TEXT UNIQUE NOT NULL,
@@ -340,8 +345,125 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_mtr_ts ON mtr_snapshots (ts DESC);
   `)
 
+  // Additional indexes to support report queries and faster lookups
+  _db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_mtr_type        ON mtr_snapshots (type);
+    CREATE INDEX IF NOT EXISTS idx_outage_captured ON outage_diagnostics (captured_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_speedtest_provider ON speedtest_results (provider);
+    CREATE INDEX IF NOT EXISTS idx_speedtest_via      ON speedtest_results (via);
+    CREATE INDEX IF NOT EXISTS idx_alerts_type        ON alerts (type);
+  `)
+
   console.log(`[db] SQLite ready at ${DB_PATH}`)
   return _db
+}
+
+/**
+ * Create materialized summary table for internet checks and provide a backfill helper.
+ * Columns: day (YYYY-MM-DD), checks, ok_count, avg_ms, min_ms, max_ms
+ */
+export function ensureInternetSummary() {
+  const db = getDb()
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS internet_summary (
+      day TEXT PRIMARY KEY,
+      checks INTEGER NOT NULL DEFAULT 0,
+      ok_count INTEGER NOT NULL DEFAULT 0,
+      avg_ms REAL,
+      min_ms INTEGER,
+      max_ms INTEGER,
+      ts INTEGER DEFAULT (strftime('%s','now')),
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_internet_summary_day ON internet_summary (day);
+  `)
+}
+
+export function backfillInternetSummary(fromTs = 0, toTs = Date.now()) {
+  const db = getDb()
+  ensureInternetSummary()
+  // Aggregate from outage_diagnostics and mtr_snapshots/ speedtest may be used; here we aggregate from outage_diagnostics.ping_detail
+  const rows = db.all('SELECT outage_ts, ping_detail, captured_at FROM outage_diagnostics WHERE captured_at BETWEEN ? AND ?', [fromTs, toTs])
+  const byDay = new Map()
+  for (const r of rows) {
+    const day = new Date(r.captured_at).toISOString().slice(0,10)
+    try {
+      const ping = JSON.parse(r.ping_detail || '[]')
+      const msVals = ping.map(p => p.ms ?? null).filter(x => x != null)
+      const okCount = ping.filter(p => p.ok).length
+      const checks = ping.length
+      const avg = msVals.length ? (msVals.reduce((s,v)=>s+v,0)/msVals.length) : null
+      const min = msVals.length ? Math.min(...msVals) : null
+      const max = msVals.length ? Math.max(...msVals) : null
+      const existing = byDay.get(day) ?? { checks:0, ok_count:0, sum:0, cnt:0, min:null, max:null }
+      existing.checks += checks
+      existing.ok_count += okCount
+      if (avg != null) { existing.sum += avg * checks; existing.cnt += checks }
+      existing.min = existing.min === null ? min : (min !== null ? Math.min(existing.min, min) : existing.min)
+      existing.max = existing.max === null ? max : (max !== null ? Math.max(existing.max, max) : existing.max)
+      byDay.set(day, existing)
+    } catch { /* ignore parse errors */ }
+  }
+  const now = Date.now()
+  for (const [day, v] of byDay.entries()) {
+    const avgMs = v.cnt ? (v.sum / v.cnt) : null
+    db.run(`INSERT INTO internet_summary (day, checks, ok_count, avg_ms, min_ms, max_ms, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(day) DO UPDATE SET
+              checks = checks + excluded.checks,
+              ok_count = ok_count + excluded.ok_count,
+              avg_ms = COALESCE(excluded.avg_ms, avg_ms),
+              min_ms = COALESCE(excluded.min_ms, min_ms),
+              max_ms = COALESCE(excluded.max_ms, max_ms),
+              updated_at = ?`, [day, v.checks, v.ok_count, avgMs, v.min, v.max, now, now])
+  }
+  return Array.from(byDay.keys()).length
+}
+
+// Create daily events summary table and backfill helper
+export function ensureDailyEventSummary() {
+  const db = getDb()
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS daily_event_summary (
+      day TEXT PRIMARY KEY,
+      new_devices INTEGER NOT NULL DEFAULT 0,
+      online_events INTEGER NOT NULL DEFAULT 0,
+      offline_events INTEGER NOT NULL DEFAULT 0,
+      port_finds INTEGER NOT NULL DEFAULT 0,
+      ts INTEGER DEFAULT (strftime('%s','now')),
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_event_day ON daily_event_summary (day);
+  `)
+}
+
+export function backfillDailyEventSummary(fromTs = 0, toTs = Date.now()) {
+  const db = getDb()
+  ensureDailyEventSummary()
+  // Aggregate device_events by day
+  const rows = db.all('SELECT ts, event FROM device_events WHERE ts BETWEEN ? AND ?', [fromTs, toTs])
+  const byDay = new Map()
+  for (const r of rows) {
+    const day = new Date(r.ts).toISOString().slice(0,10)
+    const rec = byDay.get(day) ?? { new_devices:0, online:0, offline:0, ports:0 }
+    if (r.event === 'device.new') rec.new_devices++
+    else if (r.event === 'device.online') rec.online++
+    else if (r.event === 'device.offline') rec.offline++
+    else if (r.event === 'device.port.open') rec.ports++
+    byDay.set(day, rec)
+  }
+  const now = Date.now()
+  for (const [day, v] of byDay.entries()) {
+    db.run(`INSERT INTO daily_event_summary (day, new_devices, online_events, offline_events, port_finds, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(day) DO UPDATE SET
+              new_devices = new_devices + excluded.new_devices,
+              online_events = online_events + excluded.online_events,
+              offline_events = offline_events + excluded.offline_events,
+              port_finds = port_finds + excluded.port_finds,
+              updated_at = ?`, [day, v.new_devices, v.online, v.offline, v.ports, now, now])
+  }
+  return Array.from(byDay.keys()).length
 }
 
 /**
@@ -397,8 +519,16 @@ export function setVpnState(data) {
 
 /** Delete audit_log and device_events entries older than retentionDays. */
 export function pruneOldData(retentionDays) {
-  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+  // If a retention_until setting exists, use that instead of retentionDays
   const db = getDb()
+  const row = db.prepare(`SELECT v FROM retention_settings WHERE k = 'retention_until'`).get()
+  let cutoff
+  if (row && row.v) {
+    const until = new Date(row.v).getTime()
+    cutoff = until
+  } else {
+    cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+  }
   db.run('DELETE FROM audit_log    WHERE ts < ?', [cutoff])
   db.run('DELETE FROM device_events WHERE ts < ?', [cutoff])
   // Keep mtr_snapshots on the same retention window (they can be large)

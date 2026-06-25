@@ -1,5 +1,7 @@
-import db from '../db.js'
+import { getDb } from '../db.js'
 import alerts from './alerts.js'
+
+const db = getDb()
 
 // Very small, cheap detectors using recent ip_history rows.
 export async function detectIpClashes(limit = 100) {
@@ -91,6 +93,67 @@ export async function detectBeacons(limit = 100) {
   } catch {
     return []
   }
+}
+
+// Authentication failure detector: find usernames or IPs with many failed logins
+export async function detectAuthFailures(limit = 100, windowMinutes = 60, threshold = 5) {
+  try {
+    const cutoff = Date.now() - (Number(windowMinutes) || 60) * 60_000
+    const rows = await db.all(`
+      SELECT ip, event, actor, COUNT(*) as fails, MAX(ts) as last_seen
+      FROM audit_log
+      WHERE event = 'auth.login_failed' AND ts >= ?
+      GROUP BY ip
+      HAVING fails >= ?
+      ORDER BY last_seen DESC
+      LIMIT ?
+    `, [cutoff, threshold, limit])
+    return rows.map(r => ({ ip: r.ip, fails: r.fails, last_seen: r.last_seen }))
+  } catch {
+    return []
+  }
+}
+
+export async function persistAuthFailures(limit = 100) {
+  const fails = await detectAuthFailures(limit)
+  for (const f of fails) {
+    const key = f.ip || `user:${f.actor}`
+    await alerts.upsertAlert('auth_failed', key, f)
+  }
+  return fails
+}
+
+// Threat-feed matcher: find devices that mention a package/keyword from cached threats
+export async function detectThreatMatches(limit = 100) {
+  try {
+    // get cached threats dynamically to avoid circular import
+    const threatsModule = await import('../routes/threats.js')
+    const threats = threatsModule.getCachedThreats?.() ?? []
+    if (!threats.length) return []
+    const matches = []
+    for (const t of threats.slice(0, 200)) {
+      if (!t.package) continue
+      const like = `%${t.package.replace(/%/g, '')}%`
+      const rows = await db.all(`SELECT mac, ip, hostname, os FROM devices WHERE hostname LIKE ? OR os LIKE ? LIMIT ?`, [like, like, limit])
+      for (const r of rows) {
+        matches.push({ threat: t.id, package: t.package, mac: r.mac, ip: r.ip, hostname: r.hostname, os: r.os })
+        if (matches.length >= limit) break
+      }
+      if (matches.length >= limit) break
+    }
+    return matches
+  } catch {
+    return []
+  }
+}
+
+export async function persistThreatMatches(limit = 100) {
+  const matches = await detectThreatMatches(limit)
+  for (const m of matches) {
+    const key = `${m.threat}:${m.mac ?? m.ip}`
+    await alerts.upsertAlert('threat_match', key, m)
+  }
+  return matches
 }
 
 export default { detectIpClashes, detectMacIpChurn, detectPortScans, detectBeacons, persistIpClashes, persistMacIpChurn, persistPortScans, persistBeacons }

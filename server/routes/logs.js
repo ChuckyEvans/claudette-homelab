@@ -17,8 +17,10 @@ router.get('/', (req, res) => {
     const page     = Math.max(1, parseInt(req.query.page)     || 1)
     const pageSize = Math.min(500, Math.max(10, parseInt(req.query.pageSize) || 100))
     const order    = req.query.order === 'desc' ? 'desc' : 'asc'
+    const from     = req.query.from ? Date.parse(req.query.from) || parseInt(req.query.from) : null
+    const to       = req.query.to   ? (Date.parse(req.query.to) || parseInt(req.query.to)) + 86_399_000 : null // treat date as full day if ISO date
 
-    res.json(getLogs({ levels, search, page, pageSize, order }))
+    res.json(getLogs({ levels, search, page, pageSize, order, from, to }))
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

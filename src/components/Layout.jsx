@@ -4,12 +4,12 @@ import { getUIPref, setUIPref } from '../lib/uiPrefs.js'
 import ClaudetteLogo from './ClaudetteLogo.jsx'
 
 const NAV = [
-  { id: 'network',   label: 'Network',   icon: Network,         hint: 'Scan & map all devices on your LAN' },
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, hint: 'Live status overview of all monitored services' },
+  { id: 'network',   label: 'Network',   icon: Network,         hint: 'Scan & map all devices on your LAN' },
   { id: 'threats',   label: 'Exposure',  icon: ShieldAlert,     hint: 'Open port risk assessment per device' },
   { id: 'system',    label: 'System',    icon: Cpu,             hint: 'CPU, memory, temperature & Pi hardware stats' },
   { id: 'reports',   label: 'Reports',   icon: BarChart2,       hint: 'Speed tests, uptime history & charts' },
-  { id: 'incidents', label: 'Incidents', icon: ClipboardList,   hint: 'Merged incidents and IP conflict reports' },
+  // Incidents merged into Dashboard — navigation entry removed
   { id: 'audit',     label: 'Audit Log', icon: ClipboardList,   hint: 'Full record of events & configuration changes' },
   { id: 'logs',      label: 'Logs',      icon: ScrollText,      hint: 'Live server console output with level filtering' },
   { id: 'settings',  label: 'Settings',  icon: Settings,        hint: 'Configure hosts, schedules, themes & services' },

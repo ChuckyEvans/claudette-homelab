@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import Layout from './components/Layout.jsx'
+import RetentionWarning from './components/RetentionWarning.jsx'
 import AuthModal from './components/AuthModal.jsx'
 import TopProgressBar from './components/TopProgressBar.jsx'
 import { createEventSource, api } from './lib/api.js'
 import { applyTheme, loadBgDim, loadTheme, loadApplyAccent } from './lib/themes.js'
-import { getUIPref, setUIPref } from './lib/uiPrefs.js'
+import { getUIPref, setUIPref, useUIPref } from './lib/uiPrefs.js'
 
 // Page-level components loaded on-demand to keep the initial bundle small
 const Dashboard    = lazy(() => import('./components/Dashboard.jsx'))
@@ -217,6 +218,12 @@ export default function App() {
     api.system.stats().then(setSystemStats).catch(console.error)
     api.config.get().catch(() => {})
   }, [auth.authenticated])
+
+  // Global theme preference persisted per-browser
+  const [themePref, _setThemePref] = useUIPref('theme', loadTheme() || 'dark')
+  useEffect(() => {
+    if (themePref) applyTheme(themePref)
+  }, [themePref])
 
   // System stats poll every 5s
   useEffect(() => {
@@ -436,6 +443,7 @@ export default function App() {
       {!auth.checking && auth.authenticated && (
         <>
       <TopProgressBar active={networkScan.scanning || slowRequestActive} progress={networkScan.scanning ? networkScan.progress : null} />
+        <RetentionWarning />
       {showWizard && (
         <Suspense fallback={null}>
           <WizardModal

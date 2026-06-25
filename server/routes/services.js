@@ -378,15 +378,23 @@ export async function checkConnectivity(broadcast) {
     _vpnMetaTs = 0
   }
 
-  // Gateway check for infra vs ISP failure classification
+  // Gateway check for infra vs ISP vs internal failure classification
   const gateway    = detectGateway()
   const gwResult   = (gateway && !ok) ? await pingHost(gateway) : null
   const gatewayOk  = gwResult ? gwResult.ok : null
-  // isp = external down but local gateway reachable; infra = gateway also unreachable
-  const outageType = ok ? null
-    : (gatewayOk === true  ? 'isp'
-    :  gatewayOk === false ? 'infra'
-    :  'unknown')
+
+  // Determine if failures are internal (LAN-only) by checking failed ping hosts
+  const attemptPing = await Promise.all(pingHosts.map(h => pingHost(h)))
+  const failedPrivate = attemptPing.filter(p => !p.ok && require('../utils/ip.js').isPrivateIP(p.host))
+
+  // outageType precedence: null (ok) -> internal -> isp -> infra -> unknown
+  let outageType = null
+  if (!ok) {
+    if (failedPrivate.length > 0 && gatewayOk === true) outageType = 'internal'
+    else if (gatewayOk === true) outageType = 'isp'
+    else if (gatewayOk === false) outageType = 'infra'
+    else outageType = 'unknown'
+  }
 
   // Track attempt count while in outage mode
   if (_outageMode) _outageAttemptCount++
@@ -406,16 +414,17 @@ export async function checkConnectivity(broadcast) {
     // Capture diagnostics in the background when going down (traceroute takes time)
     if (!ok) {
       const outageTsCapture = nowTs
-      const pingDetail      = _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))
-      const gatewayCapture  = gateway ?? null
-      const typeCapture     = outageType
+        const pingDetail      = _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))
+        const gatewayCapture  = gateway ?? null
+        const typeCapture     = outageType
+        // pingHosts are available via config; ping_detail stores per-host results
       exec('mtr --report --no-dns --report-cycles 5 8.8.8.8 2>&1', { timeout: 120000 }, (err, stdout) => {
         try {
           getDb().run(
             `INSERT OR REPLACE INTO outage_diagnostics (outage_ts, traceroute, ping_detail, gateway, outage_type, captured_at)
              VALUES (?, ?, ?, ?, ?, ?)`,
-            [outageTsCapture, stdout || (err?.message ?? 'traceroute unavailable'),
-             JSON.stringify(pingDetail), gatewayCapture, typeCapture, Date.now()]
+              [outageTsCapture, stdout || (err?.message ?? 'traceroute unavailable'),
+               JSON.stringify(pingDetail), gatewayCapture, typeCapture, Date.now()]
           )
         } catch (e) {
           console.error('[outage-diag] store failed:', e.message)

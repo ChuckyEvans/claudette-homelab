@@ -825,6 +825,10 @@ export default function Reports() {
   const [running,       setRunning]       = useState(false)
   const [runningVpn,    setRunningVpn]    = useState(false)
   const [outageData,    setOutageData]    = useState(null)
+  const [outageLogPage, setOutageLogPage] = useState(1)
+  const [outageLog,     setOutageLog]     = useState([])
+  const [outageLogTotal, setOutageLogTotal] = useState(0)
+  const [_outageLogLoading, setOutageLogLoading] = useState(false)
   const [copiedIsp,     setCopiedIsp]     = useState(false)
   const [networkConfig, setNetworkConfig] = useState({})
   const [speedtestProvider, setSpeedtestProvider] = useState('cloudflare')
@@ -910,6 +914,20 @@ export default function Reports() {
       console.error('[Reports/outages]', e)
     }
   }, [range, customRange])
+
+  const loadOutageLog = useCallback(async (page = 1) => {
+    setOutageLogLoading(true)
+    try {
+      const res = await fetch(`/api/paginate?table=outage_diagnostics&page=${page}&limit=25&order=captured_at&dir=desc`).then(r=>r.json())
+      setOutageLog(res.rows || [])
+      setOutageLogTotal(res.total || 0)
+      setOutageLogPage(res.page || page)
+    } catch (e) {
+      console.error('[Reports/outageLog]', e)
+    } finally {
+      setOutageLogLoading(false)
+    }
+  }, [])
 
   const loadDdns = useCallback(async () => {
     try {
@@ -2203,17 +2221,17 @@ export default function Reports() {
                         <th className="px-4 py-2 text-right text-slate-500 font-medium">Last hop</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#0f0f1c]">
-                      {outageData.outages.map((o, i) => (
+                      <tbody className="divide-y divide-[#0f0f1c]">
+                      {outageLog.map((o, i) => (
                         <tr key={i}
                           onClick={() => setSelectedOutage(o)}
                           className={`cursor-pointer hover:bg-red-950/30 transition-colors ${o.ongoing ? 'bg-red-950/20' : ''}`}>
                           <td className="px-4 py-2 text-slate-500 tabular-nums">{i + 1}</td>
-                          <td className="px-4 py-2 text-red-300 tabular-nums whitespace-nowrap">{new Date(o.start).toLocaleString('en-GB')}</td>
+                          <td className="px-4 py-2 text-red-300 tabular-nums whitespace-nowrap">{new Date(o.outage_ts || o.captured_at || o.start).toLocaleString('en-GB')}</td>
                           <td className="px-4 py-2 tabular-nums whitespace-nowrap">
                             {o.ongoing
                               ? <span className="text-red-400 font-semibold">&#9888; Still offline</span>
-                              : <span className="text-emerald-400">{new Date(o.end).toLocaleString('en-GB')}</span>}
+                              : <span className="text-emerald-400">{new Date(o.captured_at || o.end).toLocaleString('en-GB')}</span>}
                           </td>
                           <td className="px-4 py-2">
                             {o.outage_type === 'isp'
@@ -2242,6 +2260,14 @@ export default function Reports() {
                       ))}
                     </tbody>
                   </table>
+                  <div className="px-4 py-2 flex items-center justify-between">
+                    <div className="text-xs text-slate-400">{outageLogTotal} rows</div>
+                    <div className="flex items-center gap-2">
+                      <button disabled={outageLogPage<=1} onClick={() => loadOutageLog(outageLogPage-1)} className="px-2 py-1 border rounded">Prev</button>
+                      <div className="text-xs">Page {outageLogPage}</div>
+                      <button disabled={outageLogPage*25>=outageLogTotal} onClick={() => loadOutageLog(outageLogPage+1)} className="px-2 py-1 border rounded">Next</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

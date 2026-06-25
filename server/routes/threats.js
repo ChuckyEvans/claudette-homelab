@@ -55,6 +55,8 @@ const SEVERITY_ORDER = { critical: 4, high: 3, medium: 2, low: 1 }
 
 let _cachedThreats = []
 let _lastRefresh = null
+// Track consecutive failures and cooldown per feed in-memory
+const _feedState = new Map()
 
 function ensureDataDir() {
   const dir = path.dirname(STATE_FILE)
@@ -109,8 +111,31 @@ export async function refreshThreats(broadcast) {
   const newThreats = []
 
   for (const feed of FEEDS) {
+    const state = _feedState.get(feed.url) || { failures: 0, disabledUntil: 0 }
+    const now = Date.now()
+    if (state.disabledUntil && state.disabledUntil > now) {
+      console.error(`[threats] Skipping ${feed.name}: in cooldown until ${new Date(state.disabledUntil).toISOString()}`)
+      continue
+    }
     try {
-      const parsed = await parser.parseURL(feed.url)
+      // Fetch with retries to handle transient 502/502 from upstream
+      let txt = null
+      const maxAttempts = 3
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const resp = await fetch(feed.url, { timeout: 15000 })
+          if (!resp.ok) throw new Error(`Status code ${resp.status}`)
+          txt = await resp.text()
+          break
+        } catch (e) {
+          const wait = 200 * Math.pow(2, attempt)
+          console.error(`[threats] fetch attempt ${attempt} for ${feed.name} failed: ${e.message}`)
+          if (attempt < maxAttempts) await new Promise(r => setTimeout(r, wait))
+          else throw e
+        }
+      }
+      if (!txt) throw new Error('Empty response body')
+      const parsed = await parser.parseString(txt)
       for (const item of parsed.items ?? []) {
         const id = item.guid || item.link || item.title
         if (!id || seen.has(id)) continue
@@ -133,8 +158,21 @@ export async function refreshThreats(broadcast) {
         seen.add(id)
       }
       console.log(`[threats] ${feed.name}: +${newThreats.length} fetched`)
+      // success: reset failures
+      state.failures = 0
+      state.disabledUntil = 0
+      _feedState.set(feed.url, state)
     } catch (err) {
       console.error(`[threats] Failed to fetch ${feed.name}: ${err.message}`)
+      // increment failure counter; if threshold reached, set cooldown
+      state.failures = (state.failures || 0) + 1
+      const failureThreshold = 3
+      const cooldownMin = (loadConfig()?.threats?.feed_cooldown_minutes) || 30
+      if (state.failures >= failureThreshold) {
+        state.disabledUntil = Date.now() + cooldownMin * 60_000
+        console.error(`[threats] Disabling ${feed.name} for ${cooldownMin} minutes after ${state.failures} failures`)
+      }
+      _feedState.set(feed.url, state)
     }
   }
 

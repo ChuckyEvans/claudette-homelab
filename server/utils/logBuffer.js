@@ -47,7 +47,7 @@ export function getLogCounts(since = 0) {
  * @param {{ levels?: string[], search?: string, page?: number, pageSize?: number, order?: 'asc'|'desc' }} opts
  * @returns {{ logs: object[], total: number, page: number, pageSize: number, totalPages: number }}
  */
-export function getLogs({ levels = [], search = '', page = 1, pageSize = 100, order = 'asc' } = {}) {
+export function getLogs({ levels = [], search = '', page = 1, pageSize = 100, order = 'asc', from = null, to = null } = {}) {
   let entries = [..._buffer]  // copy so we can mutate safely
 
   if (levels.length > 0) {
@@ -56,6 +56,12 @@ export function getLogs({ levels = [], search = '', page = 1, pageSize = 100, or
   if (search) {
     const q = search.toLowerCase()
     entries = entries.filter(e => e.message.toLowerCase().includes(q))
+  }
+  if (from !== null) {
+    entries = entries.filter(e => e.ts >= from)
+  }
+  if (to !== null) {
+    entries = entries.filter(e => e.ts <= to)
   }
 
   // _buffer is already oldest-first (push to tail). Reverse for desc order.

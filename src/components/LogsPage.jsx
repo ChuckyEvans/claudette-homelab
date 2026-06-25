@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../lib/api.js'
+import { useUIPref } from '../lib/uiPrefs.js'
 import { RefreshCw, Search, X, ChevronLeft, ChevronRight, Terminal } from 'lucide-react'
 
 const LEVELS = ['info', 'warn', 'error', 'debug']
@@ -15,11 +16,11 @@ const PAGE_SIZES = [50, 100, 200, 500]
 
 export default function LogsPage() {
   // ── Filter state ────────────────────────────────────────────────────────
-  const [selectedLevels, setSelectedLevels] = useState(['warn', 'error'])
+  const [selectedLevels, setSelectedLevels] = useUIPref('logs.selectedLevels', ['warn','error'])
   const [search,         setSearch]         = useState('')
   const [searchInput,    setSearchInput]    = useState('')
-  const [pageSize,       setPageSize]       = useState(100)
-  const [order,          setOrder]          = useState('asc')   // 'asc' = oldest first
+  const [pageSize,       setPageSize]       = useUIPref('logs.pageSize', 100)
+  const [order,          setOrder]          = useUIPref('logs.order', 'desc')   // 'desc' = newest first
   const [page,           setPage]           = useState(1)
 
   // ── Data state ──────────────────────────────────────────────────────────
@@ -27,9 +28,16 @@ export default function LogsPage() {
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState(null)
 
-  // ── Auto-refresh ────────────────────────────────────────────────────────
-  const [autoRefresh, setAutoRefresh] = useState(false)
+  // ── Auto-refresh ───────────────────────────────────────────────────────
+  const [autoRefresh, setAutoRefresh] = useUIPref('logs.autoRefresh', false)
+  const [autoInterval, setAutoInterval] = useUIPref('logs.autoInterval', 5000)
   const timerRef = useRef(null)
+
+  // ── Date filters ───────────────────────────────────────────────────────
+  const toISODate = (d) => d.toISOString().slice(0,10)
+  const today = toISODate(new Date())
+  const [dateStart, setDateStart] = useState(today)
+  const [dateEnd, setDateEnd] = useState(today)
 
   // ── Fetch ────────────────────────────────────────────────────────────────
   const fetchLogs = useCallback(async (resetPage = false) => {
@@ -63,15 +71,15 @@ export default function LogsPage() {
     if (data !== null) fetchLogs(false)
   }, [page]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh every 5 s
+  // Auto-refresh with selectable interval
   useEffect(() => {
     if (autoRefresh) {
-      timerRef.current = setInterval(() => fetchLogs(false), 5000)
+      timerRef.current = setInterval(() => fetchLogs(false), autoInterval)
     } else {
       clearInterval(timerRef.current)
     }
     return () => clearInterval(timerRef.current)
-  }, [autoRefresh, fetchLogs])
+  }, [autoRefresh, autoInterval, fetchLogs])
 
   // ── Handlers ─────────────────────────────────────────────────────────────
   function toggleLevel(level) {
@@ -95,6 +103,17 @@ export default function LogsPage() {
     const style = LEVEL_STYLES[entry.level] ?? LEVEL_STYLES.info
     const time  = new Date(entry.ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const date  = new Date(entry.ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+    const copyRow = () => navigator.clipboard.writeText(`${date} ${time} [${entry.level}] ${entry.message}`)
+    const saveRow = () => {
+      const blob = new Blob([`${date} ${time} [${entry.level}] ${entry.message}\n`], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `log-${entry.seq}.txt`
+      a.click()
+      URL.revokeObjectURL(url)
+    }
+
     return (
       <div className="flex items-start gap-2 py-1.5 px-3 border-b border-[#1a1a30] hover:bg-[#0d0d20] text-[11px] font-mono">
         <span className="text-slate-400 flex-shrink-0 tabular-nums whitespace-nowrap">{date} {time}</span>
@@ -103,6 +122,10 @@ export default function LogsPage() {
           {entry.level}
         </span>
         <span className="text-slate-300 whitespace-pre-wrap break-all leading-relaxed">{entry.message}</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={copyRow} className="text-[11px] text-slate-500 hover:text-slate-300">Copy</button>
+          <button onClick={saveRow} className="text-[11px] text-slate-500 hover:text-slate-300">Save</button>
+        </div>
       </div>
     )
   }
@@ -110,6 +133,50 @@ export default function LogsPage() {
   const logs       = data?.logs       ?? []
   const total      = data?.total      ?? 0
   const totalPages = data?.totalPages ?? 1
+
+  function exportLogs(format = 'txt') {
+    // Build content from current logs view
+    const rows = logs.map(e => `${new Date(e.ts).toISOString()}\t${e.level}\t${e.message}`)
+    if (format === 'csv') {
+      const csv = ['timestamp,level,message', ...logs.map(e => `"${new Date(e.ts).toISOString()}","${e.level}","${(e.message || '').replace(/"/g,'""')}"`)].join('\n')
+      const blob = new Blob([csv], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `logs-${dateStart}-${dateEnd}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      return
+    }
+    if (format === 'pdf') {
+      import('jspdf').then(({ jsPDF }) => {
+        const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+        const pageW = 190
+        let y = 10
+        doc.setFontSize(10)
+        doc.text(`Logs ${dateStart} → ${dateEnd}`, 10, y)
+        y += 8
+        doc.setFontSize(8)
+        for (const r of rows) {
+          if (y > 285) { doc.addPage(); y = 10 }
+          const lines = doc.splitTextToSize(r, pageW)
+          doc.text(lines, 10, y)
+          y += lines.length * 4.5
+        }
+        doc.save(`logs-${dateStart}-${dateEnd}.pdf`)
+      }).catch(() => alert('Failed to generate PDF'))
+      return
+    }
+    // default txt
+    const txt = rows.join('\n')
+    const blob = new Blob([txt], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `logs-${dateStart}-${dateEnd}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="p-6 space-y-4 max-w-screen-2xl mx-auto">
@@ -179,6 +246,14 @@ export default function LogsPage() {
         {/* Divider */}
         <span className="w-px h-5 bg-[#1a1a30] hidden sm:block" />
 
+        {/* Date filters */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-500 uppercase tracking-wide">From</span>
+          <input type="date" value={dateStart} onChange={e=>{setDateStart(e.target.value); setPage(1)}} className="bg-[#080812] border border-[#1a1a30] rounded-lg px-2 py-1 text-xs text-slate-300" />
+          <span className="text-[10px] text-slate-500 uppercase tracking-wide">To</span>
+          <input type="date" value={dateEnd} onChange={e=>{setDateEnd(e.target.value); setPage(1)}} className="bg-[#080812] border border-[#1a1a30] rounded-lg px-2 py-1 text-xs text-slate-300" />
+        </div>
+
         {/* Order toggle */}
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-slate-500 uppercase tracking-wide">Order</span>
@@ -208,6 +283,7 @@ export default function LogsPage() {
         <span className="w-px h-5 bg-[#1a1a30] hidden sm:block" />
 
         {/* Auto-refresh toggle */}
+        <div className="flex items-center gap-2">
         <button
           onClick={() => setAutoRefresh(v => !v)}
           className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs transition-colors ${
@@ -219,6 +295,14 @@ export default function LogsPage() {
           <RefreshCw className={`w-3 h-3 ${autoRefresh ? 'animate-spin' : ''}`} style={autoRefresh ? { animationDuration: '3s' } : {}} />
           Auto
         </button>
+        <select value={autoInterval} onChange={e=>setAutoInterval(Number(e.target.value))} className="bg-[#080812] border border-[#1a1a30] rounded-lg px-2 py-1 text-xs text-slate-300">
+          <option value={30000}>30s</option>
+          <option value={20000}>20s</option>
+          <option value={10000}>10s</option>
+          <option value={5000}>5s</option>
+          <option value={1000}>1s</option>
+        </select>
+        </div>
 
         {/* Manual refresh */}
         <button
@@ -235,6 +319,12 @@ export default function LogsPage() {
           {total.toLocaleString()} result{total !== 1 ? 's' : ''}
           {search && <span className="text-amber-500/80"> · filtered</span>}
         </span>
+        {/* Exports */}
+        <div className="ml-3 flex items-center gap-2">
+          <button onClick={() => exportLogs('txt')} className="px-2 py-1 rounded-lg border border-[#1a1a30] text-xs text-slate-500">Export TXT</button>
+          <button onClick={() => exportLogs('csv')} className="px-2 py-1 rounded-lg border border-[#1a1a30] text-xs text-slate-500">Export CSV</button>
+          <button onClick={() => exportLogs('pdf')} className="px-2 py-1 rounded-lg border border-[#1a1a30] text-xs text-slate-500">Export PDF</button>
+        </div>
       </div>
 
       {/* ── Log output ── */}

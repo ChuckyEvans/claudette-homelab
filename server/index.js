@@ -22,10 +22,13 @@ import { doAutoBackup } from './routes/system.js'
 import configRouter from './routes/config.js'
 import auditRouter from './routes/audit.js'
 import reportsRouter from './routes/reports.js'
+import paginateRouter from './routes/paginate.js'
 import authRouter from './routes/auth.js'
 import themesRouter from './routes/themes.js'
 import ddnsRouter from './routes/ddns.js'
 import logsRouter from './routes/logs.js'
+import debugRouter from './routes/debug.js'
+import retentionRouter from './routes/retention.js'
 import { checkAndUpdateDdns } from './utils/ddns.js'
 import { pruneOldData, getDataDir } from './db.js'
 import { requireAuth } from './middleware/auth.js'
@@ -126,9 +129,12 @@ app.use('/api/system', systemRouter)
 app.use('/api/config', configRouter)
 app.use('/api/audit', auditRouter)
 app.use('/api/reports', reportsRouter)
+app.use('/api/paginate', paginateRouter)
 app.use('/api/themes', themesRouter)
 app.use('/api/ddns', ddnsRouter)
 app.use('/api/logs', logsRouter)
+app.use('/api/debug', debugRouter)
+app.use('/api/retention', retentionRouter)
 
 // ── Static (production) ───────────────────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
@@ -233,6 +239,8 @@ function scheduleJobs() {
         if (detectors.persistMacIpChurn) await detectors.persistMacIpChurn(200)
         if (detectors.persistPortScans) await detectors.persistPortScans(200)
         if (detectors.persistBeacons) await detectors.persistBeacons(200)
+          if (detectors.persistAuthFailures) await detectors.persistAuthFailures(200)
+          if (detectors.persistThreatMatches) await detectors.persistThreatMatches(200)
       } catch (e) { console.error('[jobs] detectors:', e.message) }
     })))
   }
@@ -254,6 +262,34 @@ function scheduleJobs() {
   _tasks.push(cron.schedule('0 3 * * *', () => {
     console.log(`[jobs] Pruning data older than ${retainDays} days...`)
     pruneOldData(retainDays)
+  }))
+
+  // Backup 24h before retention_until if configured
+  _tasks.push(cron.schedule('0 2 * * *', () => {
+    try {
+      const db = require('./db.js')
+      const conn = db.getDb()
+      const row = conn.prepare(`SELECT v FROM retention_settings WHERE k = 'retention_until'`).get()
+      if (!row || !row.v) return
+      const until = new Date(row.v).getTime()
+      const now = Date.now()
+      const msUntil = until - now
+      const oneDay = 24 * 60 * 60 * 1000
+      if (msUntil > 0 && msUntil <= oneDay) {
+        // Check if we've already created backup for this retention_until
+        const existing = conn.prepare(`SELECT v FROM retention_settings WHERE k = 'backup_done_for_until'`).get()
+        if (existing && existing.v === row.v) return
+        console.log('[jobs] Retention deadline approaching — creating DB backup')
+        const { doAutoBackup } = require('./routes/system.js')
+        doAutoBackup()
+        try {
+          // notify connected clients that a retention backup was created
+          app.locals.broadcast && app.locals.broadcast('retention.backup', { retentionUntil: row.v, ts: Date.now() })
+        } catch (e) { console.error('[jobs] retention-sse:', e.message) }
+        conn.run(`CREATE TABLE IF NOT EXISTS retention_settings (k TEXT PRIMARY KEY, v TEXT)`)
+        conn.run(`INSERT OR REPLACE INTO retention_settings (k,v) VALUES ('backup_done_for_until',?)`, [row.v])
+      }
+    } catch (e) { console.error('[jobs] retention-backup:', e.message) }
   }))
 
   if (backupDays > 0) {

@@ -1,4 +1,5 @@
 import { CheckCircle, XCircle, Shield, Activity, Server, AlertTriangle, ArrowRight } from 'lucide-react'
+// no hooks required here
 import { LineChart, Line, ResponsiveContainer, Tooltip } from 'recharts'
 
 function StatCard({ title, value, sub, icon: Icon, accent, onClick }) {
@@ -214,6 +215,8 @@ export default function Dashboard({ services, threats, systemStats, setPage }) {
           </div>
         </div>
       )}
+
+      {/* Incidents removed — dashboard contains summary cards now */}
     </div>
   )
 }

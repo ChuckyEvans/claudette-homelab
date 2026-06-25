@@ -50,6 +50,8 @@ const param = (k, fb = '') => {
 const quick     = flag('quick')
 const preBuilt  = flag('pre-built')
 const skipBuild = flag('skip-build')
+const skipLint  = flag('skip-lint')
+const skipTests = flag('skip-tests')
 let piHost      = param('pi-host')
 let piUser      = param('pi-user')
 let sshKey      = param('ssh-key')
@@ -118,6 +120,22 @@ const mkTar   = (file, ...items) => run('tar',  ['-cf', file, '-C', ROOT, ...ite
 console.log()
 log(`Deploying Claudette to ${piUser}@${piHost}`)
 log('─────────────────────────────────────────────', 'gray')
+
+// Optional pre-deploy checks: lint + tests (can be skipped with flags)
+if (!skipLint) {
+  log('\n→ Running eslint...')
+  run('npm', ['run', 'lint'])
+  info('eslint passed.')
+} else {
+  info('Skipping eslint (flag: --skip-lint)')
+}
+if (!skipTests) {
+  log('\n→ Running unit tests...')
+  run('npm', ['run', 'test'])
+  info('Tests passed.')
+} else {
+  info('Skipping tests (flag: --skip-tests)')
+}
 
 // ── Quick path: sync server/ into running container ───────────────────────────
 if (quick) {
