@@ -27,4 +27,21 @@ router.post('/backfill/internet-summary', (req, res) => {
   }
 })
 
+// Run detectors persistence once (for debugging)
+router.post('/run-detectors', async (req, res) => {
+  try {
+    const detectors = await import('../lib/detectors.js')
+    const results = {}
+    if (detectors.persistIpClashes) results.ipClashes = await detectors.persistIpClashes(200)
+    if (detectors.persistMacIpChurn) results.macIpChurn = await detectors.persistMacIpChurn(200)
+    if (detectors.persistPortScans) results.portScans = await detectors.persistPortScans(200)
+    if (detectors.persistBeacons) results.beacons = await detectors.persistBeacons(200)
+    if (detectors.persistAuthFailures) results.authFailures = await detectors.persistAuthFailures(200)
+    if (detectors.persistThreatMatches) results.threatMatches = await detectors.persistThreatMatches(200)
+    res.json({ ok: true, results })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 export default router

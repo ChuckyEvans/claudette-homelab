@@ -9,6 +9,7 @@ const NAV = [
   { id: 'threats',   label: 'Exposure',  icon: ShieldAlert,     hint: 'Open port risk assessment per device' },
   { id: 'system',    label: 'System',    icon: Cpu,             hint: 'CPU, memory, temperature & Pi hardware stats' },
   { id: 'reports',   label: 'Reports',   icon: BarChart2,       hint: 'Speed tests, uptime history & charts' },
+  { id: 'users',     label: 'Users',     icon: ShieldAlert,     hint: 'Manage user accounts and roles' },
   // Incidents merged into Dashboard — navigation entry removed
   { id: 'audit',     label: 'Audit Log', icon: ClipboardList,   hint: 'Full record of events & configuration changes' },
   { id: 'logs',      label: 'Logs',      icon: ScrollText,      hint: 'Live server console output with level filtering' },

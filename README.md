@@ -80,6 +80,7 @@ Jump to your platform:
 > **WSL2 note:** Docker Desktop on Windows runs containers inside a WSL2 VM. Two things behave differently from a native Linux install:
 > - **Speedtest results** read ~40–60% of your actual line speed due to VM networking overhead.
 > - **Device vendor/hostname info** from nmap is limited — ARP scanning only reaches the VM's virtual NIC, not your physical LAN.
+ - **Speedtest provider**: Claudette prefers the Ookla Speedtest CLI by default (it selects the best test server by ping time). You can change this in `config.yaml` (`schedule.speedtest_provider`: `ookla` or `cloudflare`). The Docker image installs the Ookla CLI so scheduled tests work out-of-the-box.
 >
 > For accurate speed and full device discovery, deploy to a Raspberry Pi or Linux machine.
 
@@ -91,7 +92,7 @@ copy config.example.yaml config.yaml
 # Edit config.yaml — set your subnet, ISP details, etc.
 
 # 2. Build and start the container
-.\scripts\windows\deploy-win.ps1
+.\scripts\windows\deploy-win.mjs
 
 # 3. Open in browser
 Start-Process http://localhost:7654
@@ -110,7 +111,7 @@ No Docker Desktop needed on your workstation for Pi deploys — just OpenSSH.
 npm run deploy
 
 # Or using the PowerShell script directly:
-.\scripts\windows\deploy-pi.ps1
+.\scripts\windows\deploy-pi.mjs
 
 # Quick deploy — skips Docker rebuild, syncs only server/ files (~5 s)
 npm run deploy:quick

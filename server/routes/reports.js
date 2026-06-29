@@ -1,12 +1,77 @@
 import { Router } from 'express'
+import express from 'express'
 import { exec } from 'child_process'
 import { getDb } from '../db.js'
+// PDF generation is required lazily where used
 import { runSpeedTest, runVpnSpeedTest, getSpeedTestHistory, isInterfaceUp } from '../utils/speedtest.js'
 import { loadConfig } from '../config.js'
 
 const router = Router()
 
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
+
+// Compute outages given DB and range. Returns array of outage objects.
+function computeOutages(db, from, to) {
+  // Pull ALL down/up transitions (not windowed) so we can pair them correctly
+  let events = db.all(
+    `SELECT ts, event, payload FROM audit_log WHERE event IN ('internet.down','internet.up') ORDER BY ts ASC`
+  )
+
+  // Normalize timestamps: some environments store ts in seconds instead of ms.
+  // If the first timestamp looks like seconds (less than 1e12), convert all to ms.
+  if (events && events.length > 0 && events[0].ts && events[0].ts < 1e12) {
+    events = events.map(e => ({ ...e, ts: Number(e.ts) * 1000 }))
+  }
+
+  const outages = []
+  let downTs = null
+  let downType = null
+  let lastUpTs = null
+
+  if (!events || events.length === 0) {
+    const checks = db.all(`SELECT ts, payload FROM audit_log WHERE event = 'internet.check' ORDER BY ts ASC`)
+    for (const c of checks) {
+      let p = null
+      try { p = JSON.parse(c.payload) } catch { p = null }
+      const ok = p ? Boolean(p.ok) : false
+      if (!ok && downTs === null) {
+        downTs = c.ts
+        downType = p?.outage_type ?? null
+      } else if (ok && downTs !== null) {
+        const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
+        outages.push({ start: downTs, end: c.ts, durationMs: c.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
+        lastUpTs = c.ts
+        downTs = null
+        downType = null
+      } else if (ok) {
+        lastUpTs = c.ts
+      }
+    }
+  } else {
+    for (const e of events) {
+      if (e.event === 'internet.down' && downTs === null) {
+        downTs = e.ts
+        try { const p = JSON.parse(e.payload); downType = p.outage_type ?? null } catch { downType = null }
+      } else if (e.event === 'internet.up' && downTs !== null) {
+        const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
+        outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
+        lastUpTs = e.ts
+        downTs = null
+        downType = null
+      } else if (e.event === 'internet.up') {
+        lastUpTs = e.ts
+      }
+    }
+  }
+  if (downTs !== null) {
+    const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
+    outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, uptimeBeforeMs, outage_type: downType, ongoing: true })
+  }
+
+  // Filter to outages that overlap the requested window — newest first
+  const windowed = outages.filter(o => (!o.end || o.end >= from) && o.start <= to).reverse()
+  return windowed
+}
 
 // ── Event category → which table(s) to query ─────────────────────────────────
 // 'device' prefix → device_events only
@@ -312,45 +377,26 @@ router.get('/outages', (req, res) => {
     const to   = req.query.to   ? parseInt(req.query.to)   : Date.now()
     const from = req.query.from ? parseInt(req.query.from) : to - SEVEN_DAYS
 
-    // Pull ALL down/up transitions (not windowed) so we can pair them correctly
-    const events = db.all(
-      `SELECT ts, event, payload FROM audit_log WHERE event IN ('internet.down','internet.up') ORDER BY ts ASC`
-    )
-
-    const outages = []
-    let downTs       = null
-    let downType     = null  // outage_type from the internet.down event
-    let lastUpTs     = null  // timestamp of last internet.up (or null = never seen one)
-    for (const e of events) {
-      if (e.event === 'internet.down' && downTs === null) {
-        downTs   = e.ts
-        try { const p = JSON.parse(e.payload); downType = p.outage_type ?? null } catch { downType = null }
-      } else if (e.event === 'internet.up' && downTs !== null) {
-        const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-        outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
-        lastUpTs = e.ts
-        downTs   = null
-        downType = null
-      } else if (e.event === 'internet.up') {
-        lastUpTs = e.ts
-      }
-    }
-    // Still offline?
-    if (downTs !== null) {
-      const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-      outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, uptimeBeforeMs, outage_type: downType, ongoing: true })
-    }
-
-    // Filter to outages that overlap the requested window — newest first
-    const windowed = outages.filter(o => (!o.end || o.end >= from) && o.start <= to).reverse()
+    const windowed = computeOutages(db, from, to)
     const totalDowntimeMs = windowed.reduce((s, o) => s + o.durationMs, 0)
     const longestMs = windowed.length ? Math.max(...windowed.map(o => o.durationMs)) : 0
 
+    // Server-side pagination support for large outage lists
+    const page = Math.max(1, parseInt(req.query.page || '1'))
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit || '50')), 1000)
+    const offset = (page - 1) * limit
+
     // Attach stored diagnostics (traceroute + ping detail) if available
-    const diagRows = db.all(`SELECT outage_ts, traceroute, ping_detail, gateway, captured_at FROM outage_diagnostics`)
+    let diagRows = []
+    try {
+      diagRows = db.all(`SELECT outage_ts, traceroute, ping_detail, gateway, captured_at FROM outage_diagnostics`)
+    } catch (e) {
+      // table missing or archived — continue without diagnostics
+      diagRows = []
+    }
     const diagMap  = new Map(diagRows.map(r => [r.outage_ts, r]))
     const cfg = loadConfig()
-    const windowedWithDiag = windowed.map(o => {
+    let windowedWithDiag = windowed.map(o => {
       const d = diagMap.get(o.start)
       if (!d) return o
       let pingDetail = null
@@ -359,30 +405,155 @@ router.get('/outages', (req, res) => {
       return { ...o, diagnostics: { traceroute: d.traceroute, ping_detail: pingDetail, gateway: d.gateway, ping_hosts: pingHosts, captured_at: d.captured_at } }
     })
 
+    // If there are no paired outages but there are stored diagnostics (e.g. heartbeats or captured traces),
+    // surface them as diagnostic-only entries so the UI isn't empty.
+    if ((!windowedWithDiag || windowedWithDiag.length === 0) && diagRows && diagRows.length > 0) {
+      console.debug('[reports/outages] No paired outages found — falling back to diagnostic-only entries', { diagCount: diagRows.length, from, to })
+      windowedWithDiag = diagRows
+        .filter(d => d.outage_ts >= from && d.outage_ts <= to)
+        .map(d => {
+          let pingDetail = null
+          try { pingDetail = JSON.parse(d.ping_detail) } catch {}
+          const pingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
+          return { start: d.outage_ts, end: d.captured_at ?? null, durationMs: d.captured_at ? (d.captured_at - d.outage_ts) : 0, uptimeBeforeMs: null, outage_type: d.outage_type ?? null, ongoing: false, diagnostics: { traceroute: d.traceroute, ping_detail: pingDetail, gateway: d.gateway, ping_hosts: pingHosts, captured_at: d.captured_at } }
+        }).reverse()
+    }
+
+    // Apply pagination to the returned outages
+    const paged = windowedWithDiag.slice(offset, offset + limit)
     res.json({
-      outages: windowedWithDiag,
+      outages: paged,
       totalOutages: windowed.length,
       totalDowntimeMs,
       longestMs,
+      page,
+      limit,
     })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })
 
-// GET /api/reports/outages/:ts — diagnostics for a specific outage (by start timestamp)
+// GET /api/reports/outages.csv?from=&to=
+router.get('/outages.csv', (req, res) => {
+  try {
+    const db   = getDb()
+    const to   = req.query.to   ? parseInt(req.query.to)   : Date.now()
+    const from = req.query.from ? parseInt(req.query.from) : to - SEVEN_DAYS
+    const rows = computeOutages(db, from, to)
+    res.setHeader('Content-Type', 'text/csv')
+    res.setHeader('Content-Disposition', `attachment; filename="outages_${new Date().toISOString().slice(0,10)}.csv"`)
+    const header = 'start,end,duration_ms,uptime_before_ms,outage_type,ongoing\n'
+    const body = rows.map(o => `${o.start},${o.end ?? ''},${o.durationMs},${o.uptimeBeforeMs ?? ''},${o.outage_type ?? ''},${o.ongoing ? '1' : '0'}`).join('\n')
+    res.send(header + body)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/reports/outages.pdf?from=&to=
+router.get('/outages.pdf', (req, res) => {
+  try {
+    // Lazy require to avoid hard dependency if not used
+    const PDFDocument = require('pdfkit')
+    const db   = getDb()
+    const to   = req.query.to   ? parseInt(req.query.to)   : Date.now()
+    const from = req.query.from ? parseInt(req.query.from) : to - SEVEN_DAYS
+    const rows = computeOutages(db, from, to)
+
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Disposition', `attachment; filename="outages_${new Date().toISOString().slice(0,10)}.pdf"`)
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40 })
+    doc.pipe(res)
+    doc.fontSize(14).text('Outage Log', { align: 'left' })
+    doc.moveDown(0.5)
+    doc.fontSize(10)
+    const cols = ['Start', 'End', 'Duration(s)', 'Type', 'Ongoing']
+    // header
+    doc.text(cols.join(' | '))
+    doc.moveDown(0.2)
+    for (const o of rows) {
+      const start = new Date(o.start).toLocaleString()
+      const end = o.end ? new Date(o.end).toLocaleString() : ''
+      const dur = Math.round((o.durationMs || 0) / 1000)
+      const type = o.outage_type || ''
+      const ong = o.ongoing ? 'yes' : 'no'
+      doc.text(`${start} | ${end} | ${dur} | ${type} | ${ong}`)
+    }
+    doc.end()
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// (CSV export handled earlier with /outages.csv)
+
+// (PDF export handled earlier with /outages.pdf)
+
+    // GET /api/reports/outages/:ts — diagnostics for a specific outage (by start timestamp)
 router.get('/outages/:ts', (req, res) => {
   try {
     const ts = parseInt(req.params.ts)
     if (!ts) return res.status(400).json({ error: 'invalid ts' })
-    const row = getDb().get(
-      `SELECT outage_ts, traceroute, ping_detail, gateway, outage_type, captured_at FROM outage_diagnostics WHERE outage_ts = ?`,
-      [ts]
-    )
+    let row = null
+    try {
+      row = getDb().get(`SELECT outage_ts, traceroute, ping_detail, gateway, outage_type, captured_at FROM outage_diagnostics WHERE outage_ts = ?`, [ts])
+    } catch (e) {
+      return res.status(404).json({ error: 'no diagnostics stored for this outage (archived or missing)' })
+    }
     if (!row) return res.status(404).json({ error: 'no diagnostics stored for this outage' })
     let pingDetail = null
     try { pingDetail = JSON.parse(row.ping_detail) } catch {}
     res.json({ ...row, ping_detail: pingDetail })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/reports/outages/:ts/evidence — attach an evidence file (base64 JSON)
+router.post('/outages/:ts/evidence', express.json({ limit: '20mb' }), (req, res) => {
+  try {
+    const ts = parseInt(req.params.ts)
+    if (!ts) return res.status(400).json({ error: 'invalid ts' })
+    const { filename, data } = req.body
+    if (!filename || !data) return res.status(400).json({ error: 'filename and data required' })
+    const db = getDb()
+    const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const dir = path.join(__dirname, '..', 'data', 'evidence')
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    const fname = `${ts}_${Date.now()}_${safeName}`
+    const fpath = path.join(dir, fname)
+    const buf = Buffer.from(data, 'base64')
+    fs.writeFileSync(fpath, buf)
+    db.run('INSERT INTO evidence_files (outage_ts, filename, path, uploaded_at) VALUES (?, ?, ?, ?)', [ts, filename, fpath, Date.now()])
+    audit('evidence.upload', { outage_ts: ts, filename }, req.user?.sub ?? 'system')
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/reports/outages/:ts/evidence — list attached files
+router.get('/outages/:ts/evidence', (req, res) => {
+  try {
+    const ts = parseInt(req.params.ts)
+    if (!ts) return res.status(400).json({ error: 'invalid ts' })
+    const rows = getDb().all('SELECT id, filename, uploaded_at FROM evidence_files WHERE outage_ts = ? ORDER BY uploaded_at DESC', [ts])
+    res.json({ files: rows })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/reports/outages/:ts/evidence/:id — download file
+router.get('/outages/:ts/evidence/:id/download', (req, res) => {
+  try {
+    const id = parseInt(req.params.id)
+    const row = getDb().get('SELECT filename, path FROM evidence_files WHERE id = ?', [id])
+    if (!row) return res.status(404).json({ error: 'not found' })
+    if (!fs.existsSync(row.path)) return res.status(404).json({ error: 'file missing' })
+    res.download(row.path, row.filename)
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

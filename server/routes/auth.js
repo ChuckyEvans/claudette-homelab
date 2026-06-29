@@ -37,6 +37,20 @@ router.get('/status', (req, res) => {
   res.json({ registered, authenticated, username })
 })
 
+// GET /api/auth/me - return authenticated user's details (username + role)
+router.get('/me', (req, res) => {
+  const token = req.cookies?.[COOKIE_NAME]
+  if (!token) return res.status(401).json({ error: 'Not authenticated' })
+  try {
+    const payload = jwt.verify(token, getJwtSecret())
+    const user = findUserByUsername(payload.username)
+    if (!user) return res.status(404).json({ error: 'User not found' })
+    res.json({ username: user.username, role: user.role || 'user' })
+  } catch {
+    res.status(401).json({ error: 'Session expired' })
+  }
+})
+
 // POST /api/auth/register — public, but blocked after the first account is created
 router.post('/register', async (req, res) => {
   if (userExists()) {

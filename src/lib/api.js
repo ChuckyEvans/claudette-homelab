@@ -18,7 +18,8 @@ async function request(path, options = {}) {
   let fired = false
   const timer = setTimeout(() => { fired = true; _nudgeSlow(+1) }, 5000)
   try {
-  const res = await fetch(`${BASE}${path}`, options)
+  const opts = { credentials: 'include', ...options }
+  const res = await fetch(`${BASE}${path}`, opts)
   if (res.status === 401 && !path.startsWith('/auth/')) {
     notifySessionExpired()
     const err = await res.json().catch(() => ({ error: res.statusText }))
@@ -206,6 +207,14 @@ export const api = {
     update:   () => request('/ddns/update',   { method: 'POST' }),
     history:  () => request('/ddns/history'),
     portscan: () => request('/ddns/portscan', { method: 'POST' }),
+  },
+  pis: {
+    get: (id) => request(`/pis/${id}`),
+    update: (id, data) => request(`/pis/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
   },
   logs: {
     get: (params = {}) => {

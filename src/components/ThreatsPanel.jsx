@@ -295,7 +295,7 @@ export default function ThreatsPanel({ networkScan, onRefreshThreats }) {
         </div>
       ) : (
         <div className="space-y-2">
-          {devicesWithPorts.map(d => <DeviceRow key={d.mac ?? d.ip} device={d} />)}
+          {devicesWithPorts.map((d, i) => <DeviceRow key={`${d.mac ?? d.ip}-${d.ip ?? i}`} device={d} />)}
         </div>
       )}
 

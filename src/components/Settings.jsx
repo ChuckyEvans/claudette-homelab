@@ -746,6 +746,8 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
   const [services,              setServices]              = useState([])
   const [backupIntervalDays,        setBackupIntervalDays]        = useState(0)
   const [backupKeepDays,             setBackupKeepDays]             = useState(7)
+  const [piConfig, setPiConfig] = useState(null)
+  const [piSaving, setPiSaving] = useState(false)
   const [internetOutageCheckSecs,    setInternetOutageCheckSecs]    = useState(10)
   const [mtrBaselineHours,           setMtrBaselineHours]           = useState(1)
   const [mtrOutageRepeatMin,         setMtrOutageRepeatMin]         = useState(15)
@@ -797,6 +799,8 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
         setServices(cfg.services ?? [])
         setBackupIntervalDays(cfg.schedule?.backup_interval_days ?? 0)
         setBackupKeepDays(cfg.schedule?.backup_keep_days ?? 7)
+        // load Pi config (assume id=1)
+        api.pis.get(1).then(cfg => setPiConfig(cfg)).catch(() => setPiConfig(null))
         setInternetOutageCheckSecs(cfg.schedule?.internet_outage_check_seconds ?? 10)
         setMtrBaselineHours(cfg.schedule?.mtr_baseline_hours ?? 1)
         setMtrOutageRepeatMin(cfg.schedule?.mtr_outage_repeat_minutes ?? 15)
@@ -1912,6 +1916,41 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                 </button>
               </div>
               <p className="text-[11px] text-slate-600">Backup files (.claudette.gz) are gzip-compressed and contain the full database and config. Keep them somewhere safe.</p>
+            </div>
+            <div className="mt-6">
+              <SectionHeading>Pi Backups</SectionHeading>
+              <div className="space-y-3 max-w-lg">
+                <div className="max-w-xs">
+                  <label className="block text-xs font-medium text-slate-400">Retention (days)</label>
+                  <input type="number" min="0" value={piConfig?.retention_days ?? ''} onChange={e => setPiConfig(p => ({ ...(p||{}), retention_days: e.target.value }))}
+                    className="w-32 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors" />
+                  <p className="text-[11px] text-slate-600 mt-1">0 = keep forever. Applies to Pi backups created by the backup manager.</p>
+                </div>
+                <div className="max-w-lg">
+                  <label className="block text-xs font-medium text-slate-400">External paths</label>
+                  <p className="text-[11px] text-slate-500 mb-2">JSON array or newline-separated list of absolute paths to include in the companion files archive.</p>
+                  <textarea rows={4} value={Array.isArray(piConfig?.external_paths) ? piConfig.external_paths.join('\n') : (piConfig?.external_paths ?? '')}
+                    onChange={e => setPiConfig(p => ({ ...(p||{}), external_paths: e.target.value }))}
+                    className="w-full bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors" />
+                </div>
+                <div className="flex justify-end">
+                  <button disabled={!piConfig || piSaving} onClick={async () => {
+                    if (!piConfig) return
+                    setPiSaving(true)
+                    try {
+                      const ext = typeof piConfig.external_paths === 'string'
+                        ? (function(){ try { return JSON.parse(piConfig.external_paths) } catch { return piConfig.external_paths.split('\n').map(s=>s.trim()).filter(Boolean) } })()
+                        : piConfig.external_paths
+                      await api.pis.update(1, { retention_days: parseInt(piConfig.retention_days) || 0, external_paths: ext })
+                      showToast('Pi backup settings saved')
+                    } catch (e) { showToast(e.message, 'error') }
+                    finally { setPiSaving(false) }
+                  }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm">
+                    {piSaving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Save Pi settings
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
           </>)}

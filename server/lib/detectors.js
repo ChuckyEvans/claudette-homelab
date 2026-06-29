@@ -1,10 +1,9 @@
 import { getDb } from '../db.js'
 import alerts from './alerts.js'
 
-const db = getDb()
-
 // Very small, cheap detectors using recent ip_history rows.
 export async function detectIpClashes(limit = 100) {
+  const db = getDb()
   const rows = await db.all(`
     SELECT ip, GROUP_CONCAT(DISTINCT mac) as macs, COUNT(DISTINCT mac) as mac_count, MAX(ts) as last_seen
     FROM ip_history
@@ -50,6 +49,7 @@ export async function persistBeacons(limit = 100) {
 }
 
 export async function detectMacIpChurn(limit = 100) {
+  const db = getDb()
   const rows = await db.all(`
     SELECT mac, COUNT(DISTINCT ip) as ip_count, GROUP_CONCAT(DISTINCT ip) as ips, MAX(ts) as last_seen
     FROM ip_history
@@ -64,6 +64,7 @@ export async function detectMacIpChurn(limit = 100) {
 // Port-scan detector: find IPs with many distinct ports seen in recent scans table (if exists)
 export async function detectPortScans(limit = 100) {
   try {
+    const db = getDb()
     const rows = await db.all(`
       SELECT ip, COUNT(DISTINCT port) as port_count, GROUP_CONCAT(DISTINCT port) as ports
       FROM port_scans
@@ -81,6 +82,7 @@ export async function detectPortScans(limit = 100) {
 // Beacon detector: devices that pinged many times recently (simple heuristic)
 export async function detectBeacons(limit = 100) {
   try {
+    const db = getDb()
     const rows = await db.all(`
       SELECT mac, COUNT(*) as hits, MAX(ts) as last_seen
       FROM ip_history
@@ -99,6 +101,7 @@ export async function detectBeacons(limit = 100) {
 export async function detectAuthFailures(limit = 100, windowMinutes = 60, threshold = 5) {
   try {
     const cutoff = Date.now() - (Number(windowMinutes) || 60) * 60_000
+    const db = getDb()
     const rows = await db.all(`
       SELECT ip, event, actor, COUNT(*) as fails, MAX(ts) as last_seen
       FROM audit_log
@@ -134,6 +137,7 @@ export async function detectThreatMatches(limit = 100) {
     for (const t of threats.slice(0, 200)) {
       if (!t.package) continue
       const like = `%${t.package.replace(/%/g, '')}%`
+      const db = getDb()
       const rows = await db.all(`SELECT mac, ip, hostname, os FROM devices WHERE hostname LIKE ? OR os LIKE ? LIMIT ?`, [like, like, limit])
       for (const r of rows) {
         matches.push({ threat: t.id, package: t.package, mac: r.mac, ip: r.ip, hostname: r.hostname, os: r.os })

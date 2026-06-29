@@ -3,6 +3,7 @@ import { execSync, exec } from 'child_process'
 import { NodeSSH } from 'node-ssh'
 import { loadConfig } from '../config.js'
 import { audit, getDb, getVpnState, setVpnState } from '../db.js'
+import { isPrivateIP } from '../utils/ip.js'
 import { getClientMetaVia } from '../utils/speedtest.js'
 
 const router = Router()
@@ -138,6 +139,16 @@ export function getHistory() {
 let _prevInternetOk    = null
 let _internetResults   = []
 let _internetAttempts  = [] // array of attempt arrays for double-check evidence
+
+// Initialize previous internet status from the most-recent persisted check so first real transition is detected
+try {
+  const last = getDb().get(`SELECT payload FROM audit_log WHERE event = 'internet.check' ORDER BY ts DESC LIMIT 1`)
+  if (last && last.payload) {
+    try { const p = JSON.parse(last.payload); _prevInternetOk = !!p.ok } catch { _prevInternetOk = null }
+  }
+  } catch {
+  // ignore - DB may not be ready in some test contexts
+}
 let _vpnUp             = false
 let _vpnOk             = null
 let _vpnResults        = []
@@ -385,7 +396,7 @@ export async function checkConnectivity(broadcast) {
 
   // Determine if failures are internal (LAN-only) by checking failed ping hosts
   const attemptPing = await Promise.all(pingHosts.map(h => pingHost(h)))
-  const failedPrivate = attemptPing.filter(p => !p.ok && require('../utils/ip.js').isPrivateIP(p.host))
+  const failedPrivate = attemptPing.filter(p => !p.ok && isPrivateIP(p.host))
 
   // outageType precedence: null (ok) -> internal -> isp -> infra -> unknown
   let outageType = null
@@ -430,6 +441,26 @@ export async function checkConnectivity(broadcast) {
           console.error('[outage-diag] store failed:', e.message)
         }
       })
+      // Also attempt to import any external evidence files configured in `pis.external_paths`
+      try {
+        const db = getDb()
+        const pis = db.all('SELECT id, external_paths, retention_days FROM pis')
+        const evDir = path.join(__dirname, '..', 'data', 'evidence')
+        if (!fs.existsSync(evDir)) fs.mkdirSync(evDir, { recursive: true })
+        for (const p of pis) {
+          let paths = []
+          try { paths = JSON.parse(p.external_paths || '[]') } catch { paths = [] }
+          for (const src of paths) {
+            try {
+              if (!fs.existsSync(src)) continue
+              const base = path.basename(src)
+              const dest = path.join(evDir, `${outageTsCapture}_${Date.now()}_${base}`)
+              try { fs.copyFileSync(src, dest) } catch { continue }
+              db.run('INSERT INTO evidence_files (outage_ts, filename, path, uploaded_at) VALUES (?, ?, ?, ?)', [outageTsCapture, base, dest, Date.now()])
+            } catch (e) { console.warn('[evidence-import] failed', e.message) }
+          }
+        }
+      } catch (e) { console.warn('[evidence-import] failed', e.message) }
     }
   }
 

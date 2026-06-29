@@ -29,3 +29,15 @@ export function requireAuth(req, res, next) {
     res.status(401).json({ error: 'Session expired — please log in again', code: 'SESSION_EXPIRED' })
   }
 }
+
+export function requireRole(role) {
+  return (req, res, next) => {
+    const user = req.user
+    if (!user) return res.status(401).json({ error: 'Not authenticated' })
+    if (!user.role) return res.status(403).json({ error: 'Role not set' })
+    if (Array.isArray(role) ? !role.includes(user.role) : user.role !== role) {
+      return res.status(403).json({ error: 'Insufficient role' })
+    }
+    next()
+  }
+}

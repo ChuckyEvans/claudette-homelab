@@ -1,0 +1,73 @@
+
+Deploying Claudette to ubuntu@192.168.8.10
+---------------------------------------------
+
+[1/2] Uploading source + building on Pi (native ARM64)...
+      Tarball: 16.9 MB
+      Uploaded. Building on Pi (this takes a few minutes)...
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon  17.75MB
+
+Step 1/20 : FROM node:22-alpine AS builder
+ ---> 6c45ee1be58c
+Step 2/20 : WORKDIR /app
+ ---> Using cache
+ ---> 6213b8eb0ade
+Step 3/20 : COPY package*.json ./
+ ---> Using cache
+ ---> 2b46f6315afa
+Step 4/20 : RUN npm install --no-audit --no-fund --loglevel=error
+ ---> Using cache
+ ---> a985ba1205a0
+Step 5/20 : COPY . .
+ ---> Using cache
+ ---> 6b14ff37d477
+Step 6/20 : RUN npm run build
+ ---> Running in ed331f4a74a7
+
+> claudette-ui@0.2.0 build
+> eslint . && vite build
+
+
+/app/server/db.js
+  37:12  error  'err' is defined but never used  no-unused-vars
+
+/app/server/routes/services.js
+  149:10  error  'e' is defined but never used        no-unused-vars
+  458:57  error  'copyErr' is defined but never used  no-unused-vars
+
+/app/src/components/Reports.jsx
+  1039:6  warning  React Hook useCallback has missing dependencies: 'outageData.outages', 'outageLogOrderColumn', and 'outageLogOrderDir'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+Γ£û 4 problems (3 errors, 1 warning)
+
+The command '/bin/sh -c npm run build' returned a non-zero code: 1
+      Built.
+
+[2/2] Restarting container on Pi...
+      DHCP leases: /etc/pihole/dhcp.leases will be mounted.
+      DNS: using 1.1.1.1 from host resolv.conf
+      DNS: using 192.168.8.2 from host resolv.conf
+      DNS: using 192.168.68.1 from host resolv.conf
+docker: Error response from daemon: Conflict. The container name "/claudette" is already in use by container "99813d83df9b880bdb392c9ec5b6422a196c8a1efe993f0940630035868b05c8". You have to remove (or rename) that container to be able to reuse that name.
+See 'docker run --help'.
+SSH command failed (exit 125): sudo docker run -d --init --name claudette 
+--restart unless-stopped --cap-add NET_ADMIN --cap-add NET_RAW --network 
+host --dns 1.1.1.1 --dns 192.168.8.2 --dns 192.168.68.1 -v 
+/etc/pihole/dhcp.leases:/data/dhcp.leases:ro -v claudette-data:/app/data 
+claudette:latest
+At C:\Development\Claudette\scripts\windows\deploy-pi.ps1:82 char:32
++ ... CODE -ne 0) { throw "SSH command failed (exit $LASTEXITCODE): $cmd" 
+}
++                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (SSH command fai...laudet 
+   te:latest:String) [], RuntimeException
+    + FullyQualifiedErrorId : SSH command failed (exit 125): sudo docker  
+   run -d --init --name claudette --restart unless-stopped --cap-add NET  
+  _ADMIN --cap-add NET_RAW --network host --dns 1.1.1.1 --dns 192.168.8   
+ .2 --dns 192.168.68.1 -v /etc/pihole/dhcp.leases:/data/dhcp.leases:ro    
+ -v claudette-data:/app/data claudette:latest
+ 

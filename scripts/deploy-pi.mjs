@@ -47,11 +47,30 @@ const param = (k, fb = '') => {
   return i !== -1 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : fb
 }
 
+// Help
+if (flag('help') || argv.includes('-h')) {
+  console.log('\nUsage: node scripts/deploy-pi.mjs [options]\n')
+  console.log('Options:')
+  console.log('  --quick             Quick sync (server files only)')
+  console.log('  --pre-built         Upload pre-built dist and skip npm build on Pi')
+  console.log('  --skip-build        Skip building image on Pi (use existing image)')
+  console.log('  --skip-lint         Skip eslint checks')
+  console.log('  --skip-tests        Skip unit tests')
+  console.log('  --no-progress       Disable live progress viewer')
+  console.log('  --pi-host <host>    Target Pi host (overrides config)')
+  console.log('  --pi-user <user>    SSH username for Pi (overrides config)')
+  console.log('  --ssh-key <path>    SSH private key file to use')
+  console.log('  --kodi-host <host>  Deploy Kodi addon to this host')
+  console.log('  -h, --help          Show this help')
+  process.exit(0)
+}
+
 const quick     = flag('quick')
 const preBuilt  = flag('pre-built')
 const skipBuild = flag('skip-build')
 const skipLint  = flag('skip-lint')
 const skipTests = flag('skip-tests')
+const noProgress = flag('no-progress')
 let piHost      = param('pi-host')
 let piUser      = param('pi-user')
 let sshKey      = param('ssh-key')
@@ -100,19 +119,66 @@ const SSH_OPTS  = [
   ...(sshKey ? ['-i', sshKey] : []),
 ]
 
+// Spawn optional progress reader (default ON). Use --no-progress to disable.
+let progressChild = null
+if (!noProgress) {
+  try {
+    const progPath = join(ROOT, 'scripts', 'deploy-progress-read.mjs')
+    if (existsSync(progPath)) {
+      const { spawn } = await import('node:child_process')
+      progressChild = spawn(process.execPath, [progPath], { stdio: 'inherit', shell: false })
+      progressChild.unref && progressChild.unref()
+    }
+  } catch (e) {
+    /* non-fatal */
+  }
+}
+
+// Ensure progress reader is killed on exit
+process.on('exit', () => {
+  try { progressChild && progressChild.kill() } catch (e) {}
+})
+
+// Progress emitter (writes JSON to a temp file for external readers)
+const PROGRESS_FILE = join(tmpdir(), 'claudette-deploy-progress.json')
+function emitProgress(obj) {
+  const base = {
+    timestamp: Date.now(),
+    startTime: startTime || Date.now(),
+    message: '',
+  }
+  try {
+    writeFileSync(PROGRESS_FILE, JSON.stringify(Object.assign(base, obj), null, 2), 'utf8')
+  } catch (e) {
+    /* ignore write errors */
+  }
+}
+
+let startTime = Date.now()
+emitProgress({ step: 'init', progress: 0, message: 'starting deploy' })
+
 // ── Shell helpers ─────────────────────────────────────────────────────────────
 function run(cmd, args, { silent = false, noThrow = false, cwd = ROOT } = {}) {
   const r = spawnSync(cmd, args, {
     stdio:    silent ? 'pipe' : 'inherit',
     encoding: 'utf8',
     cwd,
+    shell: process.platform === 'win32',
   })
   if (r.error) die(`Cannot run '${cmd}': ${r.error.message}`)
   if (!noThrow && r.status !== 0) die(`${cmd} failed (exit ${r.status})`)
   return (r.stdout ?? '').trim()
 }
 
-const remote  = (cmd, opts = {}) => run('ssh',  [...SSH_OPTS, `${piUser}@${piHost}`, cmd], opts)
+// On Windows, prefer npm.cmd to ensure child processes resolve correctly
+const NPM_CMD = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+
+// Run remote commands via 'bash -lc' to avoid local Windows cmd.exe quoting issues.
+const remote  = (cmd, opts = {}) => {
+  console.log('\n[REMOTE CMD]');
+  console.log(cmd);
+  return run('ssh', [...SSH_OPTS, `${piUser}@${piHost}`, 'bash', '-lc', cmd], opts)
+}
 const scpTo   = (src, dst)       => run('scp',  [...SSH_OPTS, src, dst])
 const mkTar   = (file, ...items) => run('tar',  ['-cf', file, '-C', ROOT, ...items])
 
@@ -124,18 +190,20 @@ log('─────────────────────────
 // Optional pre-deploy checks: lint + tests (can be skipped with flags)
 if (!skipLint) {
   log('\n→ Running eslint...')
-  run('npm', ['run', 'lint'])
+  run(NPM_CMD, ['run', 'lint'])
   info('eslint passed.')
 } else {
   info('Skipping eslint (flag: --skip-lint)')
 }
 if (!skipTests) {
   log('\n→ Running unit tests...')
-  run('npm', ['run', 'test'])
+  run(NPM_CMD, ['run', 'test'])
   info('Tests passed.')
 } else {
   info('Skipping tests (flag: --skip-tests)')
 }
+
+emitProgress({ step: 'prechecks', progress: 0.05, message: 'pre-deploy checks complete' })
 
 // ── Quick path: sync server/ into running container ───────────────────────────
 if (quick) {
@@ -143,6 +211,7 @@ if (quick) {
   const tar = join(tmpdir(), 'claudette-quick.tar')
   mkTar(tar, 'server')
   info(`Tarball: ${(statSync(tar).size / 1e6).toFixed(1)} MB`)
+  emitProgress({ step: 'pack', progress: 0.15, message: 'created quick tarball' })
   scpTo(tar, `${piUser}@${piHost}:/tmp/claudette-quick.tar`)
   unlinkSync(tar)
   info('Uploaded.')
@@ -154,6 +223,7 @@ if (quick) {
     ` && rm /tmp/claudette-quick.tar && sudo docker restart ${CONTAINER}`
   )
   info('Done.')
+  emitProgress({ step: 'quick-deploy', progress: 0.95, message: 'quick deploy complete' })
   console.log()
   log(`Claudette is running at http://${piHost}:7654`, 'green')
   info(`Logs: ssh ${piUser}@${piHost} 'docker logs -f ${CONTAINER}'`)
@@ -198,7 +268,7 @@ if (preBuilt) {
   info('Uploaded. Building on Pi (no npm build)...')
   remote(
     `rm -rf /tmp/claudette-build && mkdir -p /tmp/claudette-build` +
-    ` && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm /tmp/claudette-src.tar` +
+    ` && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm -f /tmp/claudette-src.tar` +
     ` && mv /tmp/claudette-Dockerfile /tmp/claudette-build/Dockerfile` +
     ` && cd /tmp/claudette-build && sudo docker build --build-arg CACHEBUST=${cacheBust} -t ${IMAGE} .` +
     ` && cd / && rm -rf /tmp/claudette-build`
@@ -215,17 +285,33 @@ if (preBuilt) {
   ].filter(f => existsSync(join(ROOT, f)))
   mkTar(tar, ...includes)
   info(`Tarball: ${(statSync(tar).size / 1e6).toFixed(1)} MB`)
+  emitProgress({ step: 'pack', progress: 0.2, message: 'created source tarball' })
   scpTo(tar, `${piUser}@${piHost}:/tmp/claudette-src.tar`)
   unlinkSync(tar)
 
   info('Uploaded. Building on Pi (this takes a few minutes)...')
-  remote(
-    `rm -rf /tmp/claudette-build && mkdir -p /tmp/claudette-build` +
-    ` && tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build && rm /tmp/claudette-src.tar` +
-    ` && cd /tmp/claudette-build && sudo docker build --build-arg CACHEBUST=${cacheBust} -t ${IMAGE} .` +
-    ` && cd / && rm -rf /tmp/claudette-build`
-  )
+  // Create a small remote script to run the build steps (avoids local quoting issues)
+  const remoteScript = [
+    '#!/bin/sh',
+    'set -e',
+    'rm -rf /tmp/claudette-build',
+    'mkdir -p /tmp/claudette-build',
+    'tar -xf /tmp/claudette-src.tar -C /tmp/claudette-build || true',
+    'rm -f /tmp/claudette-src.tar',
+    'mv /tmp/claudette-Dockerfile /tmp/claudette-build/Dockerfile || true',
+    `cd /tmp/claudette-build && sudo docker build --build-arg CACHEBUST=${cacheBust} -t ${IMAGE} .`,
+    'cd /',
+    'rm -rf /tmp/claudette-build',
+  ].join('\n')
+  const tmpScript = join(tmpdir(), 'claudette-deploy.sh')
+  writeFileSync(tmpScript, remoteScript, 'utf8')
+  scpTo(tmpScript, `${piUser}@${piHost}:/tmp/claudette-deploy.sh`)
+  unlinkSync(tmpScript)
+  emitProgress({ step: 'remote-build', progress: 0.4, message: 'starting remote build' })
+  remote('bash /tmp/claudette-deploy.sh')
+  remote('rm -f /tmp/claudette-deploy.sh')
   info('Built.')
+  emitProgress({ step: 'remote-build', progress: 0.85, message: 'remote build finished' })
 
 } else {
   info('[1/2] Skipping build — reusing existing image on Pi.')
@@ -233,6 +319,8 @@ if (preBuilt) {
 
 // ── 2. Restart container on Pi ────────────────────────────────────────────────
 log('\n[2/2] Restarting container on Pi...')
+
+emitProgress({ step: 'restart', progress: 0.9, message: 'stopping and starting container' })
 
 remote(`sudo docker stop ${CONTAINER} 2>/dev/null || true`, { noThrow: true })
 remote(`sudo docker rm   ${CONTAINER} 2>/dev/null || true`, { noThrow: true })
@@ -280,6 +368,7 @@ remote([
 ].filter(Boolean).join(' '))
 
 info('Container started.')
+emitProgress({ step: 'done', progress: 1, message: 'deploy complete' })
 console.log()
 log(`Claudette is running at http://${piHost}:7654`, 'green')
 info(`Logs: ssh ${piUser}@${piHost} 'docker logs -f ${CONTAINER}'`)

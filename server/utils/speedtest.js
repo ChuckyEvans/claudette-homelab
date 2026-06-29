@@ -351,7 +351,7 @@ async function runOoklaSpeedTest(iface, clientIsp = null) {
 }
 
 /** Persist a speed test row and write an audit entry */
-function persistSpeedTestRow(row) {
+export function persistSpeedTestRow(row) {
   try {
     getDb().run(`
       INSERT INTO speedtest_results
@@ -405,6 +405,14 @@ export async function runSpeedTest(broadcast) {
     console.log(`[speedtest] VPN (${VPN_IFACE}) is active — binding direct test to physical interface: ${physIface}`)
   } else if (vpnActive) {
     console.warn(`[speedtest] VPN (${VPN_IFACE}) is active but could not detect physical interface — direct test may measure VPN throughput`)
+    try {
+      const linkOut = execSync('ip link show', { timeout: 2000 }).toString()
+      const routeOut = execSync('ip route show default', { timeout: 2000 }).toString()
+      console.warn('[speedtest] ip link show:\n' + linkOut.split('\n').slice(0,50).join('\n'))
+      console.warn('[speedtest] ip route show default:\n' + routeOut.split('\n').slice(0,50).join('\n'))
+    } catch (e) {
+      console.warn('[speedtest] additional interface debugging failed:', e.message)
+    }
   }
 
   // When VPN hijacks the default route, curl --interface only sets the source IP — the kernel

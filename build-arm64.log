@@ -1,0 +1,135 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 2.44kB 0.1s done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/node:22-alpine
+#2 ...
+
+#3 [auth] library/node:pull token for registry-1.docker.io
+#3 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/node:22-alpine
+#2 DONE 3.2s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 100B 0.0s done
+#4 DONE 0.1s
+
+#5 [internal] load build context
+#5 DONE 0.0s
+
+#6 [builder 1/6] FROM docker.io/library/node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+#6 resolve docker.io/library/node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+#6 resolve docker.io/library/node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 0.1s done
+#6 DONE 0.1s
+
+#5 [internal] load build context
+#5 transferring context: 45.90kB 0.2s done
+#5 DONE 0.3s
+
+#7 [builder 2/6] WORKDIR /app
+#7 CACHED
+
+#8 [builder 3/6] COPY package*.json ./
+#8 CACHED
+
+#9 [stage-1  4/10] COPY package*.json ./
+#9 CACHED
+
+#10 [stage-1  6/10] COPY server/ ./server/
+#10 CACHED
+
+#11 [stage-1  7/10] COPY server/conn_check.js /opt/conn_check.js
+#11 CACHED
+
+#12 [stage-1  2/10] RUN apk add --no-cache nmap tcpdump curl  && ARCH="$(uname -m)"  && case "$ARCH" in       aarch64) ST_ARCH="aarch64" ;;       armv7l)  ST_ARCH="armhf"   ;;       x86_64)  ST_ARCH="x86_64"  ;;       *)        echo "[docker] Ookla speedtest: unsupported arch $ARCH, skipping"; exit 0 ;;     esac  && curl -fsSL "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${ST_ARCH}.tgz" -o /tmp/st.tgz  && tar -xzf /tmp/st.tgz -C /tmp  && find /tmp -type f -name speedtest -exec mv -f {} /usr/local/bin/speedtest ;  && if [ -f /usr/local/bin/speedtest ]; then chmod +x /usr/local/bin/speedtest; else echo '[docker] speedtest binary not found after extraction'; fi  && rm -rf /tmp/ookla-speedtest-* /tmp/st.tgz  && (command -v speedtest >/dev/null 2>&1 && speedtest --accept-license --accept-gdpr --version 2>&1 || echo '[docker] speedtest binary installed')
+#12 CACHED
+
+#13 [stage-1  3/10] WORKDIR /app
+#13 CACHED
+
+#14 [stage-1  5/10] RUN npm ci --omit=dev --no-audit --no-fund --loglevel=error
+#14 CACHED
+
+#15 [builder 4/6] RUN npm install --no-audit --no-fund --loglevel=error
+#15 CACHED
+
+#16 [stage-1  8/10] RUN chmod +x /opt/conn_check.js || true
+#16 CACHED
+
+#17 [builder 5/6] COPY . .
+#17 DONE 1.5s
+
+#18 [builder 6/6] RUN npm run build:skip-tests
+#18 18.00 
+#18 18.00 > claudette-ui@0.2.0 build:skip-tests
+#18 18.00 > vite build
+#18 18.00 
+#18 41.42 vite v5.4.21 building for production...
+#18 44.53 transforming...
+#18 339.6 Γ£ô 2680 modules transformed.
+#18 358.0 rendering chunks...
+#18 366.5 computing gzip size...
+#18 367.1 dist/index.html                            0.49 kB Γöé gzip:   0.33 kB
+#18 367.1 dist/assets/index-CTRg8WLP.css            73.47 kB Γöé gzip:  12.90 kB
+#18 367.1 dist/assets/check-bek9janE.js              0.29 kB Γöé gzip:   0.24 kB
+#18 367.1 dist/assets/chevron-down-D1xOBSMi.js       0.30 kB Γöé gzip:   0.24 kB
+#18 367.1 dist/assets/plus-INViGamU.js               0.32 kB Γöé gzip:   0.25 kB
+#18 367.1 dist/assets/search-Ckq39omt.js             0.34 kB Γöé gzip:   0.27 kB
+#18 367.1 dist/assets/clock-B9k01amN.js              0.35 kB Γöé gzip:   0.28 kB
+#18 367.1 dist/assets/activity-1u5RKtgn.js           0.40 kB Γöé gzip:   0.30 kB
+#18 367.1 dist/assets/zap-DLyZpZvV.js                0.43 kB Γöé gzip:   0.31 kB
+#18 367.1 dist/assets/triangle-alert-CRvxzBLD.js     0.43 kB Γöé gzip:   0.31 kB
+#18 367.1 dist/assets/shield-PkGwMJCi.js             0.44 kB Γöé gzip:   0.33 kB
+#18 367.1 dist/assets/wifi-UhKRU-Pw.js               0.45 kB Γöé gzip:   0.31 kB
+#18 367.1 dist/assets/refresh-cw-Bdq6Fesa.js         0.49 kB Γöé gzip:   0.33 kB
+#18 367.1 dist/assets/server-BZ7Q-gAI.js             0.51 kB Γöé gzip:   0.32 kB
+#18 367.1 dist/assets/trash-2-3-GrVbmE.js            0.53 kB Γöé gzip:   0.35 kB
+#18 367.1 dist/assets/wand-sparkles-CXlfzq76.js      0.68 kB Γöé gzip:   0.40 kB
+#18 367.1 dist/assets/circle-x-DPn0e65V.js           0.68 kB Γöé gzip:   0.35 kB
+#18 367.1 dist/assets/loader-circle-D8l_4-Pq.js      0.69 kB Γöé gzip:   0.37 kB
+#18 367.1 dist/assets/monitor-y0al-VDt.js            0.79 kB Γöé gzip:   0.40 kB
+#18 367.1 dist/assets/Pagination-DBNg2VN2.js         2.10 kB Γöé gzip:   0.90 kB
+#18 367.1 dist/assets/Users-Bq63jfNY.js              2.43 kB Γöé gzip:   0.99 kB
+#18 367.1 dist/assets/tag-ByNty-uR.js                2.59 kB Γöé gzip:   0.83 kB
+#18 367.1 dist/assets/AboutPage-DJ9umrJ8.js          5.50 kB Γöé gzip:   2.13 kB
+#18 367.1 dist/assets/SystemStats-C5uOiEu0.js        6.76 kB Γöé gzip:   1.99 kB
+#18 367.1 dist/assets/AuditLog-D_WgJkv_.js           7.51 kB Γöé gzip:   2.67 kB
+#18 367.1 dist/assets/Dashboard-C_jDsKLB.js          7.58 kB Γöé gzip:   2.79 kB
+#18 367.1 dist/assets/ServicesPanel-M9e7US04.js      8.21 kB Γöé gzip:   3.03 kB
+#18 367.1 dist/assets/LogsPage-DMlvKSsG.js          12.32 kB Γöé gzip:   3.78 kB
+#18 367.1 dist/assets/ThreatsPanel-D5Qy-rVx.js      13.54 kB Γöé gzip:   4.44 kB
+#18 367.1 dist/assets/purify.es-BG-cG56M.js         26.07 kB Γöé gzip:   9.86 kB
+#18 367.1 dist/assets/YAxis-Bz_t8gEt.js             27.30 kB Γöé gzip:   7.53 kB
+#18 367.1 dist/assets/WizardModal-CeJZtIlg.js       39.99 kB Γöé gzip:   8.14 kB
+#18 367.1 dist/assets/NetworkScan-BLUJ7ah1.js       63.98 kB Γöé gzip:  18.08 kB
+#18 367.1 dist/assets/Settings-CfkYS-vA.js          91.60 kB Γöé gzip:  24.08 kB
+#18 367.1 dist/assets/index.es-DOaTY14Y.js         150.73 kB Γöé gzip:  51.57 kB
+#18 367.1 dist/assets/Reports-B2I9GNU4.js          175.40 kB Γöé gzip:  39.89 kB
+#18 367.1 dist/assets/html2canvas.esm-CBrSDip1.js  201.42 kB Γöé gzip:  48.03 kB
+#18 367.1 dist/assets/index-CHGeRJlW.js            220.20 kB Γöé gzip:  70.30 kB
+#18 367.1 dist/assets/LineChart-YTmB4crb.js        327.14 kB Γöé gzip: 100.34 kB
+#18 367.1 dist/assets/jspdf.es.min-DXEXBDQ_.js     390.24 kB Γöé gzip: 128.71 kB
+#18 367.2 Γ£ô built in 5m 25s
+#18 DONE 367.9s
+
+#19 [stage-1  9/10] COPY --from=builder /app/dist ./dist/
+#19 DONE 0.2s
+
+#20 [stage-1 10/10] RUN mkdir -p /app/data
+#20 DONE 0.6s
+
+#21 exporting to image
+#21 exporting layers
+#21 exporting layers 10.4s done
+#21 exporting manifest sha256:971c886ab5ddac47142a91c65f709ef8ad20d536f64d45bc02e1740bb0da23c4 0.0s done
+#21 exporting config sha256:23c976d2813c3fc016d8170c094eda21a0e54714a44a96c49d948dc4a6e25de0 0.0s done
+#21 exporting attestation manifest sha256:d28362226519b7f423032e0366c4816d84d0d91c6724942cdc543456a4252c14 0.1s done
+#21 exporting manifest list sha256:48cec1d34c052114942f4e19ed864b2dbe9c851375470296ecb29b992ce8c65c
+#21 exporting manifest list sha256:48cec1d34c052114942f4e19ed864b2dbe9c851375470296ecb29b992ce8c65c 0.0s done
+#21 naming to docker.io/library/claudette:local-build done
+#21 DONE 10.7s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/m6fq0xqw26176jolgknbr19zx

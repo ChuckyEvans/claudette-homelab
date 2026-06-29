@@ -3,10 +3,24 @@ const { Database } = pkg
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { loadConfig } from './config.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, '..', 'data')
-const DB_PATH = path.join(DATA_DIR, 'claudette.db')
+
+// Allow overriding DB path via config.yaml `dbPath` entry. Falling back to data/claudette.db.
+let configuredPath = null
+try {
+  const cfg = loadConfig()
+  if (cfg && cfg.dbPath) configuredPath = cfg.dbPath
+} catch (e) {
+  // ignore — we'll use defaults
+}
+
+// Use a per-process test DB when running under Vitest to avoid cross-worker locks
+const DB_PATH = (process.env.VITEST || process.env.NODE_ENV === 'test')
+  ? (configuredPath ? configuredPath.replace(/\.db$/, `.test.${process.pid}.db`) : path.join(DATA_DIR, `claudette.test.${process.pid}.db`))
+  : (configuredPath ? configuredPath : path.join(DATA_DIR, 'claudette.db'))
 
 export function getDbPath()   { return DB_PATH }
 export function getDataDir()  { return DATA_DIR }
@@ -29,7 +43,19 @@ export function getDb() {
 
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
 
-  _db = new Database(DB_PATH)
+  try {
+    _db = new Database(DB_PATH)
+  } catch {
+  // On some test worker environments the file may not be creatable by Database directly.
+  // Ensure parent dir exists and touch the file then retry once.
+  try {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
+      fs.closeSync(fs.openSync(DB_PATH, 'a'))
+      _db = new Database(DB_PATH)
+    } catch (err2) {
+      throw err2
+    }
+  }
 
   _db.exec(`
     PRAGMA journal_mode = WAL;
@@ -48,17 +74,15 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_audit_ts    ON audit_log (ts DESC);
     CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log (event);
 
-    -- Indexes to speed report queries
-    CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log (ts DESC);
-    CREATE INDEX IF NOT EXISTS idx_device_events_ts ON device_events (ts DESC);
-    CREATE INDEX IF NOT EXISTS idx_device_events_event ON device_events (event);
-
     CREATE TABLE IF NOT EXISTS users (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       username      TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       created_at    INTEGER NOT NULL
     );
+
+    -- Ensure role column exists for RBAC
+    -- (role column handled by migrations further down)
 
     CREATE TABLE IF NOT EXISTS device_labels (
       mac        TEXT PRIMARY KEY,
@@ -237,6 +261,27 @@ export function getDb() {
     if (migrated > 0) console.log(`[db] Migrated ${migrated} device flag(s) to device_flags table.`)
   }
 
+  // Ensure users table has a role column and backfill defaults
+  try {
+    const userCols = _db.all('PRAGMA table_info(users)').map(c => c.name)
+    if (!userCols.includes('role')) {
+      console.log('[db] Adding role column to users table')
+      _db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+      _db.exec("UPDATE users SET role = 'user' WHERE role IS NULL")
+    }
+    // Ensure at least one admin exists; if none, promote the first user found
+    const adminCount = _db.get("SELECT COUNT(*) as c FROM users WHERE role = 'admin'").c || 0
+    if (adminCount === 0) {
+      const first = _db.get('SELECT username FROM users ORDER BY created_at LIMIT 1')
+      if (first && first.username) {
+        console.log('[db] No admin found — promoting first user to admin:', first.username)
+        _db.exec("UPDATE users SET role = 'admin' WHERE username = '" + first.username.replace(/'/g, "''") + "'")
+      }
+    }
+  } catch (e) {
+    console.log('[db] Failed to ensure users.role column:', e.message)
+  }
+
   // Device lifecycle events (online/offline/new device/port discovery)
   _db.exec(`
     CREATE TABLE IF NOT EXISTS device_events (
@@ -289,16 +334,18 @@ export function getDb() {
     console.log('[db] Added provider column to speedtest_results.')
   }
 
-  // Outage diagnostics — traceroute + ping detail captured at the moment of internet.down
+  // Outage diagnostics table has been archived/removed in recent versions.
+  // Historical data is preserved via migration scripts that rename the table to outage_diagnostics_archived.
+
+  // IP history for detectors and auditing
   _db.exec(`
-    CREATE TABLE IF NOT EXISTS outage_diagnostics (
-      outage_ts   INTEGER PRIMARY KEY,
-      traceroute  TEXT,
-      ping_detail TEXT,
-      gateway     TEXT,
-      outage_type TEXT,
-      captured_at INTEGER NOT NULL
+    CREATE TABLE IF NOT EXISTS ip_history (
+      ip   TEXT,
+      mac  TEXT,
+      ts   INTEGER
     );
+    CREATE INDEX IF NOT EXISTS idx_ip_hist_ip  ON ip_history (ip);
+    CREATE INDEX IF NOT EXISTS idx_ip_hist_mac ON ip_history (mac);
   `)
 
   // Alerts table: aggregated detector findings
@@ -348,10 +395,22 @@ export function getDb() {
   // Additional indexes to support report queries and faster lookups
   _db.exec(`
     CREATE INDEX IF NOT EXISTS idx_mtr_type        ON mtr_snapshots (type);
-    CREATE INDEX IF NOT EXISTS idx_outage_captured ON outage_diagnostics (captured_at DESC);
+    -- idx_outage_captured removed; archived diagnostics use outage_diagnostics_archived if present
     CREATE INDEX IF NOT EXISTS idx_speedtest_provider ON speedtest_results (provider);
     CREATE INDEX IF NOT EXISTS idx_speedtest_via      ON speedtest_results (via);
     CREATE INDEX IF NOT EXISTS idx_alerts_type        ON alerts (type);
+  `)
+
+  // Evidence files attached to outages
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS evidence_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      outage_ts INTEGER NOT NULL,
+      filename TEXT NOT NULL,
+      path TEXT NOT NULL,
+      uploaded_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_evidence_outage ON evidence_files (outage_ts);
   `)
 
   console.log(`[db] SQLite ready at ${DB_PATH}`)
@@ -382,8 +441,15 @@ export function ensureInternetSummary() {
 export function backfillInternetSummary(fromTs = 0, toTs = Date.now()) {
   const db = getDb()
   ensureInternetSummary()
-  // Aggregate from outage_diagnostics and mtr_snapshots/ speedtest may be used; here we aggregate from outage_diagnostics.ping_detail
-  const rows = db.all('SELECT outage_ts, ping_detail, captured_at FROM outage_diagnostics WHERE captured_at BETWEEN ? AND ?', [fromTs, toTs])
+  // Aggregate from mtr_snapshots/ speedtest or archived outage diagnostics when present.
+  let rows = []
+  try {
+    rows = db.all('SELECT outage_ts, ping_detail, captured_at FROM outage_diagnostics WHERE captured_at BETWEEN ? AND ?', [fromTs, toTs])
+  } catch (e) {
+    try {
+      rows = db.all('SELECT outage_ts, ping_detail, captured_at FROM outage_diagnostics_archived WHERE captured_at BETWEEN ? AND ?', [fromTs, toTs])
+    } catch (e2) { rows = [] }
+  }
   const byDay = new Map()
   for (const r of rows) {
     const day = new Date(r.captured_at).toISOString().slice(0,10)
@@ -533,6 +599,14 @@ export function pruneOldData(retentionDays) {
   db.run('DELETE FROM device_events WHERE ts < ?', [cutoff])
   // Keep mtr_snapshots on the same retention window (they can be large)
   db.run('DELETE FROM mtr_snapshots WHERE ts < ?', [cutoff])
+  // Prune evidence files older than cutoff
+  try {
+    const evRows = db.all('SELECT id, path FROM evidence_files WHERE uploaded_at < ?', [cutoff])
+    for (const r of evRows) {
+      try { if (r.path && fs.existsSync(r.path)) fs.unlinkSync(r.path) } catch {}
+      db.run('DELETE FROM evidence_files WHERE id = ?', [r.id])
+    }
+  } catch (e) { console.error('[prune] evidence prune failed', e.message) }
 }
 
 export function upsertDevice(device) {

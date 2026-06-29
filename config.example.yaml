@@ -35,7 +35,7 @@ schedule:
   ping_interval_minutes: 5             # Ping sweep frequency (same options)
   speedtest_interval_hours: 4          # Direct speed test frequency: 1, 2, 3, 4, 6, 12, or 24
   vpn_speedtest_interval_hours: 4      # VPN speed test frequency (same options; 0 = disabled)
-  speedtest_provider: cloudflare       # Speed test backend: cloudflare or ookla
+  speedtest_provider: ookla            # Speed test backend: cloudflare or ookla (preferred: ookla — selects best server by ping)
   threat_interval_hours: 6             # CVE / threat intelligence refresh frequency (same options)
   deep_scan_hour: 4                    # Hour (0-23) for the nightly deep port scan — e.g. 4 = 4:00 AM
   backup_interval_days: 0              # Auto-backup frequency in days (0 = disabled)

@@ -19,6 +19,7 @@ const Settings      = lazy(() => import('./components/Settings.jsx'))
 const AboutPage     = lazy(() => import('./components/AboutPage.jsx'))
 const Reports       = lazy(() => import('./components/Reports.jsx'))
 const LogsPage      = lazy(() => import('./components/LogsPage.jsx'))
+const UsersPage      = lazy(() => import('./components/Users.jsx'))
 
 // Apply stored theme + bg brightness + accent immediately — before any React render — to avoid flash
 ;(function () {
@@ -386,6 +387,7 @@ export default function App() {
     audit: AuditLog,
     reports:  Reports,
     logs:     LogsPage,
+    users:    UsersPage,
     settings: Settings,
     about: AboutPage,
   }

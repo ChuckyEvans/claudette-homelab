@@ -42,6 +42,25 @@ function ToastStack({ toasts }) {
   )
 }
 
+function EvidenceList({ outage }) {
+  const [files, setFiles] = useState([])
+  useEffect(() => { if (!outage) return; fetch(`/api/reports/outages/${outage.start}/evidence`).then(r=>r.json()).then(j=>setFiles(j.files||[])).catch(()=>{}) }, [outage])
+  if (!outage) return null
+  return (
+    <div className="mt-2">
+      <div className="text-sm font-medium">Evidence</div>
+      <ul className="mt-1 space-y-1 text-sm">
+        {files.length === 0 ? <li className="text-slate-400">No files</li> : files.map(f => (
+          <li key={f.id} className="flex items-center gap-2">
+            <a className="text-sky-400 underline" href={`/api/reports/outages/${outage.start}/evidence/${f.id}/download`}>{f.filename}</a>
+            <span className="text-xs text-slate-400">{new Date(f.uploaded_at).toLocaleString()}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 const CHART_PALETTE = { new: '#10b981', online: '#38bdf8', offline: '#64748b', ports: '#818cf8' }
 
 // Known port → service name. Ports > 1024 get a "?" suffix (unofficial/common).
@@ -546,6 +565,7 @@ function OutageMtrPath({ hops, outageType }) {
             <div className="text-[10px] text-red-800">unreachable during outage</div>
           </div>
         </div>
+        
       </div>
     </div>
   )
@@ -829,6 +849,8 @@ export default function Reports() {
   const [outageLog,     setOutageLog]     = useState([])
   const [outageLogTotal, setOutageLogTotal] = useState(0)
   const [_outageLogLoading, setOutageLogLoading] = useState(false)
+  const [outageLogOrderColumn] = useState('captured_at')
+  const [outageLogOrderDir, setOutageLogOrderDir] = useState('desc')
   const [copiedIsp,     setCopiedIsp]     = useState(false)
   const [networkConfig, setNetworkConfig] = useState({})
   const [speedtestProvider, setSpeedtestProvider] = useState('cloudflare')
@@ -885,6 +907,51 @@ export default function Reports() {
     }
   }, [range, customRange])
 
+  // Export outage log as CSV
+  const exportOutageCSV = useCallback(() => {
+    if (!outageLog || !outageLog.length) return
+    const cols = ['outage_ts','captured_at','outage_type','gateway']
+    const rows = outageLog.map(o => cols.map(c => JSON.stringify(o[c] ?? '')).join(','))
+    const csv = [cols.join(','), ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `outage_log_${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [outageLog])
+
+  // Export outage log to PDF (simple table) using jspdf if available
+  const exportOutagePDF = useCallback(() => {
+    if (!outageLog || !outageLog.length) return
+    try {
+      // global jspdf import available in bundle as window.jspdf
+      const { jsPDF } = window.jspdf || {}
+      if (!jsPDF) return alert('PDF export unavailable')
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+      const cols = ['Outage start','Captured at','Type','Gateway']
+      const body = outageLog.map(o => [new Date(o.outage_ts||o.captured_at||0).toLocaleString(), new Date(o.captured_at||0).toLocaleString(), o.outage_type||'', o.gateway||''])
+      // simple table render
+      let y = 40
+      doc.setFontSize(12)
+      doc.text('Outage Log', 40, 30)
+      doc.setFontSize(10)
+      const colWidths = [140, 140, 80, 200]
+      // header
+      let x = 40
+      cols.forEach((h, i) => { doc.text(String(h), x, y); x += colWidths[i] })
+      y += 18
+      for (const r of body) {
+        x = 40
+        for (let i=0;i<r.length;i++) { doc.text(String(r[i]||''), x, y); x += colWidths[i] }
+        y += 14
+        if (y > 750) { doc.addPage(); y = 40 }
+      }
+      doc.save(`outage_log_${new Date().toISOString().slice(0,10)}.pdf`)
+    } catch (e) { console.error('PDF export failed', e); alert('PDF export failed') }
+  }, [outageLog])
+
   const loadInternet = useCallback(async () => {
     const to   = customRange?.to   ?? Date.now()
     const from = customRange?.from ?? (to - rangeMs(range))
@@ -909,25 +976,70 @@ export default function Reports() {
     const to   = customRange?.to   ?? Date.now()
     const from = customRange?.from ?? (to - rangeMs(range))
     try {
-      setOutageData(await api.reports.outages({ from, to }))
+      // Debug: log the query range sent to the server to help diagnose empty UI lists
+      console.debug('[Reports] loadOutages() requesting range', { from, to })
+      const od = await api.reports.outages({ from, to })
+      console.debug('[Reports] outages response', { count: (od?.outages?.length ?? 0), totalOutages: od?.totalOutages })
+      setOutageData(od)
     } catch (e) {
       console.error('[Reports/outages]', e)
     }
   }, [range, customRange])
 
+  async function uploadEvidence(outageTs, file) {
+    try {
+      const reader = new FileReader()
+      const p = new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result)
+        reader.onerror = reject
+      })
+      reader.readAsDataURL(file)
+      const dataUrl = await p
+      const base64 = dataUrl.split(',')[1]
+      await fetch(`/api/reports/outages/${outageTs}/evidence`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, data: base64 })
+      })
+      await loadOutages()
+      addToast('Evidence uploaded')
+    } catch (e) { console.error('[uploadEvidence]', e); addToast('Upload failed', 'error') }
+  }
+
+  
+
   const loadOutageLog = useCallback(async (page = 1) => {
     setOutageLogLoading(true)
     try {
-      const res = await fetch(`/api/paginate?table=outage_diagnostics&page=${page}&limit=25&order=captured_at&dir=desc`).then(r=>r.json())
-      setOutageLog(res.rows || [])
-      setOutageLogTotal(res.total || 0)
+      const res = await fetch(`/api/paginate?table=outage_diagnostics&page=${page}&limit=25&order=${outageLogOrderColumn || 'captured_at'}&dir=${outageLogOrderDir || 'desc'}`).then(r=>r.json()).catch(e => ({ error: e.message }))
+      let rows = (res && res.rows) ? res.rows : []
+      let total = (res && res.total) ? res.total : 0
+
+      // Fallback: if there are no diagnostic rows (or auth failed), use computed outages
+      if ((!rows || rows.length === 0) && outageData?.outages?.length > 0) {
+        rows = outageData.outages.map(o => ({
+          outage_ts: o.start,
+          captured_at: o.captured_at || o.end || o.start,
+          outage_type: o.outage_type || o.type || 'unknown',
+          gateway: o.diagnostics?.gateway ?? null,
+          durationMs: o.durationMs,
+          uptimeBeforeMs: o.uptimeBeforeMs,
+          diagnostics: o.diagnostics || null
+        }))
+        total = rows.length
+      }
+
+      setOutageLog(rows)
+      setOutageLogTotal(total)
       setOutageLogPage(res.page || page)
     } catch (e) {
       console.error('[Reports/outageLog]', e)
     } finally {
       setOutageLogLoading(false)
     }
-  }, [])
+  }, [outageData, outageLogOrderColumn, outageLogOrderDir])
+
+  // Ensure outage log loads on first render (default newest-first)
+  useEffect(() => { loadOutageLog(1) }, [loadOutageLog])
 
   const loadDdns = useCallback(async () => {
     try {
@@ -1244,6 +1356,7 @@ export default function Reports() {
     }
   }
 
+
   async function handleRunSpeedtest() {
     try {
       setRunning(true)
@@ -1489,6 +1602,17 @@ export default function Reports() {
                       <span className="text-slate-500 normal-case font-normal">captured {new Date(selectedOutage.diagnostics.captured_at).toLocaleString('en-GB')}</span>
                     </p>
                     <OutageMtrView output={selectedOutage.diagnostics.traceroute || ''} outageType={selectedOutage.outage_type} />
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-sm font-medium">Attach Evidence</div>
+                        <div>
+                          <label className="flex items-center gap-2 text-xs">
+                            <input type="file" onChange={e => e.target.files[0] && uploadEvidence(selectedOutage.start, e.target.files[0])} />
+                          </label>
+                        </div>
+                      </div>
+                      <EvidenceList outage={selectedOutage} />
+                    </div>
                   </div>
                 </>
               ) : (
@@ -2263,9 +2387,28 @@ export default function Reports() {
                   <div className="px-4 py-2 flex items-center justify-between">
                     <div className="text-xs text-slate-400">{outageLogTotal} rows</div>
                     <div className="flex items-center gap-2">
-                      <button disabled={outageLogPage<=1} onClick={() => loadOutageLog(outageLogPage-1)} className="px-2 py-1 border rounded">Prev</button>
-                      <div className="text-xs">Page {outageLogPage}</div>
-                      <button disabled={outageLogPage*25>=outageLogTotal} onClick={() => loadOutageLog(outageLogPage+1)} className="px-2 py-1 border rounded">Next</button>
+                        <label className="text-xs text-slate-400">Order:</label>
+                        <select value={outageLogOrderDir} onChange={e => { setOutageLogOrderDir(e.target.value); loadOutageLog(1) }} className="px-2 py-1 bg-[#071025] border border-[#1a1a30] rounded text-sm">
+                          <option value="desc">Newest first</option>
+                          <option value="asc">Oldest first</option>
+                        </select>
+                        <button onClick={exportOutageCSV} className="px-2 py-1 border rounded">Export CSV</button>
+                        <button onClick={exportOutagePDF} className="px-2 py-1 border rounded">Export PDF</button>
+                        <div className="flex items-center gap-1">
+                          <button disabled={outageLogPage<=1} onClick={() => loadOutageLog(1)} className="px-2 py-1 border rounded">First</button>
+                          {(() => {
+                            const per = 25
+                            const totalPages = Math.max(1, Math.ceil(outageLogTotal / per))
+                            const pages = []
+                            const start = Math.max(1, outageLogPage - 2)
+                            const end = Math.min(totalPages, start + 4)
+                            for (let p = start; p <= end; p++) pages.push(p)
+                            return pages.map(p => (
+                              <button key={p} onClick={() => loadOutageLog(p)} className={`px-2 py-1 border rounded ${p === outageLogPage ? 'bg-slate-700 text-white' : ''}`}>{p}</button>
+                            ))
+                          })()}
+                          <button disabled={outageLogPage*25>=outageLogTotal} onClick={() => loadOutageLog(Math.max(1, Math.ceil(outageLogTotal/25)))} className="px-2 py-1 border rounded">Last</button>
+                        </div>
                     </div>
                   </div>
                 </div>

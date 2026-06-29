@@ -28,7 +28,7 @@
 #
 # After running this script you still need to:
 #   - Place your config.yaml in /home/<user>/claudette/data/ (or let deploy create it)
-#   - Run the deploy script from your dev machine: npm run deploy (or deploy-pi.ps1)
+#   - Run the deploy script from your dev machine: npm run deploy (or node scripts/windows/deploy-pi.mjs)
 #
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -431,7 +431,7 @@ echo -e "       80  → Pi:80   (certbot renewal)"
 echo -e "       7443 → Pi:7443 (Claudette)"
 [[ $SETUP_HA -eq 1 ]] && echo -e "       8443 → Pi:8443 (Home Assistant)"
 echo -e "  3. Deploy Claudette from your dev machine:"
-echo -e "       ${BOLD}npm run deploy${RESET}   (or  scripts/windows/deploy-pi.ps1)"
+echo -e "       ${BOLD}npm run deploy${RESET}   (or  scripts/windows/deploy-pi.mjs)"
 echo ""
 [[ -n "$DOMAIN" ]] && echo -e "  Claudette will be live at: ${BOLD}https://${DOMAIN}:7443${RESET}"
 echo ""

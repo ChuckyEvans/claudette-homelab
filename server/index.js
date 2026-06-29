@@ -23,12 +23,16 @@ import configRouter from './routes/config.js'
 import auditRouter from './routes/audit.js'
 import reportsRouter from './routes/reports.js'
 import paginateRouter from './routes/paginate.js'
+import diagnosticsRouter from './routes/diagnostics.js'
 import authRouter from './routes/auth.js'
+import usersRouter from './routes/users.js'
 import themesRouter from './routes/themes.js'
 import ddnsRouter from './routes/ddns.js'
 import logsRouter from './routes/logs.js'
 import debugRouter from './routes/debug.js'
 import retentionRouter from './routes/retention.js'
+import healthRouter from './routes/health.js'
+import pisRouter from './routes/pis.js'
 import { checkAndUpdateDdns } from './utils/ddns.js'
 import { pruneOldData, getDataDir } from './db.js'
 import { requireAuth } from './middleware/auth.js'
@@ -43,6 +47,22 @@ app.set('trust proxy', 1)
 app.use(cors({ origin: true, credentials: true }))
 app.use(cookieParser())
 app.use(express.json())
+
+// Send COOP / Origin-Agent-Cluster headers only for secure or localhost origins.
+// Browsers refuse to apply COOP when origin is not potentially trustworthy (HTTP on LAN).
+app.use((req, res, next) => {
+  try {
+    const host = req.headers.host || ''
+    const isLocalhost = host.startsWith('localhost') || host.startsWith('127.0.0.1')
+    const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https'
+    if (isSecure || isLocalhost) {
+      // Request origin-keyed agent cluster
+      res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
+      res.setHeader('Origin-Agent-Cluster', '?1')
+    }
+  } catch { /* ignore */ }
+  next()
+})
 
 // ── Security headers (OWASP A05 Misconfiguration) ────────────────────────────
 app.use(helmet({
@@ -135,6 +155,10 @@ app.use('/api/ddns', ddnsRouter)
 app.use('/api/logs', logsRouter)
 app.use('/api/debug', debugRouter)
 app.use('/api/retention', retentionRouter)
+app.use('/api/diagnostics', diagnosticsRouter)
+app.use('/api/health', healthRouter)
+app.use('/api/pis', pisRouter)
+app.use('/api/users', usersRouter)
 
 // ── Static (production) ───────────────────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
@@ -245,6 +269,25 @@ function scheduleJobs() {
     })))
   }
 
+  // Schedule connectivity script if present at /tmp/conn_check.js (runs inside container)
+  try {
+    // dynamic import for ESM environments where `require` is not available
+    import('util').then(({ promisify }) => {
+      import('child_process').then(({ exec }) => {
+        const pe = promisify(exec)
+        // every 5 minutes — run the bundled conn_check in /opt
+        // (previously used /tmp/conn_check.js which could be missing)
+        _tasks.push(cron.schedule('*/5 * * * *', () => {
+          enqueue('conn-check', async () => {
+            try {
+              await pe('node /opt/conn_check.js')
+            } catch (e) { console.error('[jobs] conn-check:', e.message) }
+          })
+        }))
+      })
+    }).catch(() => { /* ignore on platforms without exec */ })
+  } catch { /* ignore on platforms without exec */ }
+
   // Baseline mtr — runs on a configurable schedule when internet is healthy
   const mtrBaselineHrs = cfg?.schedule?.mtr_baseline_hours ?? 1
   if (mtrBaselineHrs > 0) {
@@ -266,30 +309,33 @@ function scheduleJobs() {
 
   // Backup 24h before retention_until if configured
   _tasks.push(cron.schedule('0 2 * * *', () => {
-    try {
-      const db = require('./db.js')
-      const conn = db.getDb()
-      const row = conn.prepare(`SELECT v FROM retention_settings WHERE k = 'retention_until'`).get()
-      if (!row || !row.v) return
-      const until = new Date(row.v).getTime()
-      const now = Date.now()
-      const msUntil = until - now
-      const oneDay = 24 * 60 * 60 * 1000
-      if (msUntil > 0 && msUntil <= oneDay) {
-        // Check if we've already created backup for this retention_until
-        const existing = conn.prepare(`SELECT v FROM retention_settings WHERE k = 'backup_done_for_until'`).get()
-        if (existing && existing.v === row.v) return
-        console.log('[jobs] Retention deadline approaching — creating DB backup')
-        const { doAutoBackup } = require('./routes/system.js')
-        doAutoBackup()
-        try {
-          // notify connected clients that a retention backup was created
-          app.locals.broadcast && app.locals.broadcast('retention.backup', { retentionUntil: row.v, ts: Date.now() })
-        } catch (e) { console.error('[jobs] retention-sse:', e.message) }
-        conn.run(`CREATE TABLE IF NOT EXISTS retention_settings (k TEXT PRIMARY KEY, v TEXT)`)
-        conn.run(`INSERT OR REPLACE INTO retention_settings (k,v) VALUES ('backup_done_for_until',?)`, [row.v])
-      }
-    } catch (e) { console.error('[jobs] retention-backup:', e.message) }
+    // use dynamic import to access local modules in ESM
+    import('./db.js').then(db => {
+      try {
+        const conn = db.getDb()
+        const row = conn.prepare(`SELECT v FROM retention_settings WHERE k = 'retention_until'`).get()
+        if (!row || !row.v) return
+        const until = new Date(row.v).getTime()
+        const now = Date.now()
+        const msUntil = until - now
+        const oneDay = 24 * 60 * 60 * 1000
+        if (msUntil > 0 && msUntil <= oneDay) {
+          // Check if we've already created backup for this retention_until
+          const existing = conn.prepare(`SELECT v FROM retention_settings WHERE k = 'backup_done_for_until'`).get()
+          if (existing && existing.v === row.v) return
+          console.log('[jobs] Retention deadline approaching — creating DB backup')
+          import('./routes/system.js').then(system => {
+            try { system.doAutoBackup() } catch (e) { console.error('[jobs] retention-backup-auto:', e.message) }
+          })
+          try {
+            // notify connected clients that a retention backup was created
+            app.locals.broadcast && app.locals.broadcast('retention.backup', { retentionUntil: row.v, ts: Date.now() })
+          } catch (e) { console.error('[jobs] retention-sse:', e.message) }
+          conn.run(`CREATE TABLE IF NOT EXISTS retention_settings (k TEXT PRIMARY KEY, v TEXT)`)
+          conn.run(`INSERT OR REPLACE INTO retention_settings (k,v) VALUES ('backup_done_for_until',?)`, [row.v])
+        }
+      } catch (e) { console.error('[jobs] retention-backup:', e.message) }
+    }).catch(() => { /* ignore if db import fails */ })
   }))
 
   if (backupDays > 0) {
@@ -310,7 +356,14 @@ function scheduleJobs() {
 
 scheduleJobs()
 app.locals.reschedule = scheduleJobs
+// expose last-run map to routes for health checks
+app.locals.lastRun = _lastRun
 
-app.listen(PORT, () => {
-  console.log(`\n  Claudette UI  →  http://localhost:${PORT}\n`)
-})
+if (!process.env.VITEST) {
+  app.listen(PORT, () => {
+    console.log(`\n  Claudette UI  →  http://localhost:${PORT}\n`)
+  })
+}
+
+// Export the app for programmatic access (tests / scripts)
+export default app

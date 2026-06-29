@@ -1,0 +1,3 @@
+start,end,duration_ms,uptime_before_ms,outage_type,ongoing
+1782570462758,1782570674774,212016,49307668,unknown,0
+1782521095090,1782521155090,60000,,isp,0

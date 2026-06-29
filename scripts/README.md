@@ -9,11 +9,11 @@ scripts/
 ├── deploy-pi.mjs     — deploy to Raspberry Pi (all platforms)
 ├── run-docker.mjs    — build & run locally via Docker (all platforms)
 ├── windows/
-│   ├── deploy-pi.ps1   — PowerShell wrapper (calls deploy-pi.mjs)
-│   ├── deploy-win.ps1  — legacy: build & run locally on Windows (Docker Desktop)
-│   ├── run-local.ps1   — run locally on Windows without Docker (native Node.js + nmap)
-│   ├── kodi-setup.ps1  — install / configure the Kodi addon on a LibreELEC Pi
-│   └── kodi-check.ps1  — verify Kodi addon status via JSON-RPC
+│   ├── deploy-pi.mjs   — Node wrapper (calls deploy-pi.mjs)
+│   ├── deploy-win.mjs  — legacy: build & run locally on Windows (Docker Desktop)
+│   ├── run-local.mjs   — run locally on Windows without Docker (native Node.js + nmap)
+│   ├── kodi-setup.mjs  — install / configure the Kodi addon on a LibreELEC Pi
+│   └── kodi-check.mjs  — verify Kodi addon status via JSON-RPC
 └── linux/
     ├── deploy-pi.sh    — bash wrapper (calls deploy-pi.mjs)
     └── restart.sh      — legacy: build & run locally on Linux or macOS (Docker)
@@ -39,9 +39,9 @@ npm run local:rebuild:skip      # restart local container without rebuilding
 
 | Task | Any platform | Windows PowerShell | Linux / macOS |
 |---|---|---|---|
-| **Deploy to Pi (full)** | `node scripts/deploy-pi.mjs` | `.\scripts\windows\deploy-pi.ps1` | `./scripts/linux/deploy-pi.sh` |
-| **Deploy to Pi (quick)** | `node scripts/deploy-pi.mjs --quick` | `.\scripts\windows\deploy-pi.ps1 -Quick` | `./scripts/linux/deploy-pi.sh --quick` |
-| **Deploy to Pi (skip build)** | `node scripts/deploy-pi.mjs --skip-build` | `.\scripts\windows\deploy-pi.ps1 -SkipBuild` | `./scripts/linux/deploy-pi.sh --skip-build` |
+| **Deploy to Pi (full)** | `node scripts/deploy-pi.mjs` | `node scripts/windows/deploy-pi.mjs` | `./scripts/linux/deploy-pi.sh` |
+| **Deploy to Pi (quick)** | `node scripts/deploy-pi.mjs --quick` | `node scripts/windows/deploy-pi.mjs --quick` | `./scripts/linux/deploy-pi.sh --quick` |
+| **Deploy to Pi (skip build)** | `node scripts/deploy-pi.mjs --skip-build` | `node scripts/windows/deploy-pi.mjs --skip-build` | `./scripts/linux/deploy-pi.sh --skip-build` |
 | **Run locally (Docker)** | `node scripts/run-docker.mjs` | `.\scripts\windows\deploy-win.ps1` | `./scripts/linux/restart.sh` |
 | **Run locally (no Docker)** | `npm run dev` | `.\scripts\windows\run-local.ps1` | `npm run dev` |
 | Kodi addon setup | — | `.\scripts\windows\kodi-setup.ps1` | — |

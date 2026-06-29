@@ -12,6 +12,7 @@ export default function ReportsPage() {
   const [to, setTo] = useState(() => Date.now())
   const [limit, setLimit] = useUIPref('reports.limit', 50)
   const [offset, setOffset] = useState(0)
+  const [outageCount, setOutageCount] = useState(0)
   const [tab, setTab] = useUIPref('reports.tab', 'overview')
   const [showRetention, setShowRetention] = useUIPref('reports.showRetention', false)
   const [_chartData, setChartData] = useState(null)
@@ -24,6 +25,12 @@ export default function ReportsPage() {
     const r = await fetch(`/api/reports?${qs.toString()}`)
     const j = await r.json()
     setEvents(j.events || [])
+    try {
+      const oq = new URLSearchParams({ from: String(from), to: String(to) })
+      const or = await fetch(`/api/reports/outages?${oq.toString()}`)
+      const oj = await or.json()
+      setOutageCount(oj.totalOutages || 0)
+    } catch { setOutageCount(0) }
   }, [from, to, limit, offset])
 
   useEffect(() => {
@@ -154,18 +161,33 @@ export default function ReportsPage() {
             <label className="text-xs">To</label>
             <input type="datetime-local" value={new Date(to).toISOString().slice(0,16)} onChange={e => setTo(new Date(e.target.value).getTime())} />
             <button onClick={() => { setOffset(0); loadEvents() }}>Refresh</button>
+            <div className="ml-4 text-sm text-slate-400">Events: {events.length} · Outages: {outageCount}</div>
+            <button onClick={() => {
+              if (!events || events.length === 0) return
+              const cols = ['ts','source','event','mac','ip']
+              const rows = events.map(r => cols.map(c => JSON.stringify(r[c] ?? '')).join(','))
+              const csv = [cols.join(','), ...rows].join('\n')
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = `events_${new Date().toISOString().slice(0,10)}.csv`
+              a.click()
+              URL.revokeObjectURL(url)
+            }} className="px-2 py-1 border rounded ml-2 text-sm">Export Events CSV</button>
           </div>
           <div className="reports-table-wrapper">
             <table className="reports-table text-sm">
               <thead><tr><th>ts</th><th>source</th><th>event</th><th>mac</th><th>ip</th></tr></thead>
               <tbody>
-                {events.map((r,i) => <tr key={i}><td>{new Date(r.ts).toLocaleString()}</td><td>{r.source}</td><td>{r.event}</td><td>{r.mac}</td><td>{r.ip}</td></tr>)}
+                {events.map((r,i) => <tr key={i}><td>{new Date(r.ts).toLocaleString()}</td><td>{r.source}</td><td>{r.event}</td><td>{r.mac || ''}</td><td>{r.ip || ''}</td></tr>)}
               </tbody>
             </table>
           </div>
           <div className="flex gap-2 items-center mt-2">
-            <button onClick={() => { setOffset(Math.max(0, offset - limit)); loadEvents() }}>Prev</button>
-            <button onClick={() => { setOffset(offset + limit); loadEvents() }}>Next</button>
+            <button disabled={offset<=0} onClick={() => { setOffset(Math.max(0, offset - limit)); loadEvents() }} className="px-2 py-1 border rounded">Prev</button>
+            <div className="text-sm">Offset: {offset}</div>
+            <button onClick={() => { setOffset(offset + limit); loadEvents() }} className="px-2 py-1 border rounded">Next</button>
             <span className="text-xs ml-2">limit</span>
             <input type="number" value={limit} onChange={e => setLimit(Math.max(1, Math.min(200, parseInt(e.target.value||50,10))))} />
           </div>
