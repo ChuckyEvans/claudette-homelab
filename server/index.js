@@ -169,7 +169,11 @@ app.get('/api/reports/ookla/servers-local', async (req, res) => {
         const enriched = await listOoklaServersWithPing(req.query.interface ? req.query.interface : null)
         // Map by id for quick lookup
         const map = new Map(enriched.map(s => [String(s.id), s.last_ping_ms]))
-        const out = servers.map(s => ({ ...s, last_ping_ms: map.get(String(s.id)) ?? null }))
+        const out = servers.map(s => {
+          const ping = map.get(String(s.id)) ?? null
+          const nameWithPing = ping != null ? `${s.name} - ${ping}ms` : s.name
+          return { ...s, name: nameWithPing, last_ping_ms: ping }
+        })
         return res.json({ servers: out })
       } catch (e) {
         return res.json({ servers })

@@ -622,7 +622,7 @@ export function persistOutages() {
     const insert = db.prepare('INSERT OR REPLACE INTO network_outages (start,end,duration_ms,outage_type,ongoing,created_at) VALUES ($start,$end,$duration_ms,$outage_type,$ongoing,$created_at)')
     for (const o of outages) {
       // If payload provided a detected_at timestamp, prefer that as the start
-      const start = Number(o.start) || Date.now()
+        let start = Number(o.start) || Date.now()
       const end = o.end == null ? null : Number(o.end)
       // Defensive: compute duration from detected_at->end when available
       let duration = Number(o.durationMs)
