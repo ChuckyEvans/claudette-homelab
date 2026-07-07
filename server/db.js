@@ -13,13 +13,15 @@ let configuredPath = null
 try {
   const cfg = loadConfig()
   if (cfg && cfg.dbPath) configuredPath = cfg.dbPath
-} catch (e) {
+} catch {
   // ignore — we'll use defaults
 }
 
 // Use a per-process test DB when running under Vitest to avoid cross-worker locks
-const DB_PATH = (process.env.VITEST || process.env.NODE_ENV === 'test')
-  ? (configuredPath ? configuredPath.replace(/\.db$/, `.test.${process.pid}.db`) : path.join(DATA_DIR, `claudette.test.${process.pid}.db`))
+// Vitest sets VITEST_WORKER_ID (0,1,2...) — if absent but NODE_ENV==='test' use PID
+const vitestWorker = process.env.VITEST_WORKER_ID ?? (process.env.NODE_ENV === 'test' ? String(process.pid) : null)
+const DB_PATH = vitestWorker
+  ? (configuredPath ? configuredPath.replace(/\.db$/, `.test.${vitestWorker}.db`) : path.join(DATA_DIR, `claudette.test.${vitestWorker}.db`))
   : (configuredPath ? configuredPath : path.join(DATA_DIR, 'claudette.db'))
 
 export function getDbPath()   { return DB_PATH }
@@ -43,18 +45,44 @@ export function getDb() {
 
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
 
-  try {
-    _db = new Database(DB_PATH)
-  } catch {
-  // On some test worker environments the file may not be creatable by Database directly.
-  // Ensure parent dir exists and touch the file then retry once.
-  try {
+  // Try opening DB with retries (exponential backoff). This helps Vitest workers avoid
+  // transient file-lock / race conditions on CI and Windows filesystems.
+  const maxAttempts = 5
+  let attempt = 0
+  let lastErr = null
+  while (attempt < maxAttempts) {
+    try {
+      // Ensure directory exists and file touched before opening
       if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
-      fs.closeSync(fs.openSync(DB_PATH, 'a'))
-      _db = new Database(DB_PATH)
-    } catch (err2) {
-      throw err2
+      try {
+        const fd = fs.openSync(DB_PATH, 'a', 0o600)
+        fs.closeSync(fd)
+        try { fs.chmodSync(DB_PATH, 0o600) } catch {}
+      } catch (touchErr) {
+        // ignore touch errors but log
+        console.warn(`[db] could not touch DB file ${DB_PATH}: ${touchErr.message}`)
+      }
+      try {
+        _db = new Database(DB_PATH)
+      } catch (dbErr) {
+        // rethrow to be handled by outer retry loop
+        throw dbErr
+      }
+      lastErr = null
+      break
+    } catch (err) {
+      lastErr = err
+      attempt += 1
+      const waitMs = 50 * Math.pow(2, attempt) // 100ms,200,400,800...
+      console.warn(`[db] attempt ${attempt}/${maxAttempts} to open DB at ${DB_PATH} failed: ${err.message}; retrying in ${waitMs}ms`)
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs)
     }
+  }
+  if (!_db) {
+    // Give helpful diagnostics for CI and local debugging
+    const stat = (() => { try { return fs.statSync(DATA_DIR) } catch { return null } })()
+    const statMsg = stat ? `dir=${DATA_DIR} mode=${(stat.mode || 0).toString(8)}` : `dir_missing=${DATA_DIR}`
+    throw new Error(`Failed to open SQLite DB at ${DB_PATH} after ${maxAttempts} attempts; ${statMsg}; lastError=${lastErr?.message || 'unknown'}`)
   }
 
   _db.exec(`
@@ -94,7 +122,17 @@ export function getDb() {
       id         TEXT PRIMARY KEY,
       applied_at INTEGER NOT NULL
     );
+    
+    CREATE TABLE IF NOT EXISTS network_outages (
+      start       INTEGER PRIMARY KEY,
+      end         INTEGER,
+      duration_ms INTEGER NOT NULL,
+      outage_type TEXT,
+      ongoing     INTEGER NOT NULL DEFAULT 0,
+      created_at  INTEGER NOT NULL
+    );
   `)
+  
 
   // ── Devices table: MAC is the primary key ────────────────────────────────
   const tableExists = _db.all("SELECT name FROM sqlite_master WHERE type='table' AND name='devices'").length > 0
@@ -193,6 +231,20 @@ export function getDb() {
       console.log('[db] Added dormant column to devices.')
     }
   }
+
+    // Ensure network_outages table exists (idempotent)
+    try {
+      _db.exec(`
+        CREATE TABLE IF NOT EXISTS network_outages (
+          start       INTEGER PRIMARY KEY,
+          end         INTEGER,
+          duration_ms INTEGER NOT NULL,
+          outage_type TEXT,
+          ongoing     INTEGER NOT NULL DEFAULT 0,
+          created_at  INTEGER NOT NULL
+        );
+      `)
+    } catch { /* ignore */ }
 
   // ── Flags catalogue + device-flag junction table ────────────────────────────
   _db.exec(`
@@ -304,6 +356,7 @@ export function getDb() {
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
       ts               INTEGER NOT NULL,
       client_ip        TEXT,
+      server_id        TEXT,
       client_isp       TEXT,
       client_city      TEXT,
       client_country   TEXT,
@@ -333,6 +386,10 @@ export function getDb() {
     _db.exec("ALTER TABLE speedtest_results ADD COLUMN provider TEXT NOT NULL DEFAULT 'cloudflare'")
     console.log('[db] Added provider column to speedtest_results.')
   }
+  if (!stCols.includes('server_id')) {
+    _db.exec("ALTER TABLE speedtest_results ADD COLUMN server_id TEXT")
+    console.log('[db] Added server_id column to speedtest_results.')
+  }
 
   // Outage diagnostics table has been archived/removed in recent versions.
   // Historical data is preserved via migration scripts that rename the table to outage_diagnostics_archived.
@@ -361,6 +418,18 @@ export function getDb() {
       UNIQUE(type, key)
     );
     CREATE INDEX IF NOT EXISTS idx_alerts_lastseen ON alerts (last_seen DESC);
+  `)
+
+  // Pi devices table (management of Raspberry Pis for deployments)
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS pis (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT,
+      host TEXT,
+      ssh_user TEXT,
+      retention_days INTEGER DEFAULT 7,
+      external_paths TEXT DEFAULT '[]'
+    );
   `)
   
 
@@ -413,8 +482,180 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_evidence_outage ON evidence_files (outage_ts);
   `)
 
+  // Historical outage diagnostics tables (current + archived)
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS outage_diagnostics (
+      outage_ts INTEGER PRIMARY KEY,
+      traceroute TEXT,
+      ping_detail TEXT,
+      gateway TEXT,
+      outage_type TEXT,
+      captured_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS outage_diagnostics_archived (
+      outage_ts INTEGER PRIMARY KEY,
+      traceroute TEXT,
+      ping_detail TEXT,
+      gateway TEXT,
+      outage_type TEXT,
+      captured_at INTEGER
+    );
+    -- Network uptime/downtime persistence
+    CREATE TABLE IF NOT EXISTS network_check_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      iface TEXT,
+      total_targets INTEGER NOT NULL DEFAULT 0,
+      total_outages INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS network_checks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER NOT NULL,
+      target TEXT NOT NULL,
+      direct_ok INTEGER NOT NULL DEFAULT 0,
+      tun_ok INTEGER NOT NULL DEFAULT 0,
+      outage INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY(run_id) REFERENCES network_check_runs(id)
+    );
+  `)
+
+    // Backfill / migration: ensure legacy databases have the new columns with defaults.
+    try {
+      const cols = _db.prepare("PRAGMA table_info('network_check_runs')").all().map(r => r.name)
+      if (!cols.includes('total_targets')) {
+        _db.exec("ALTER TABLE network_check_runs ADD COLUMN total_targets INTEGER NOT NULL DEFAULT 0;")
+      }
+      if (!cols.includes('total_outages')) {
+        _db.exec("ALTER TABLE network_check_runs ADD COLUMN total_outages INTEGER NOT NULL DEFAULT 0;")
+      }
+    } catch (e) {
+      // best-effort migration; log and continue
+      console.warn('[db] network_check_runs migration warning:', e && e.message)
+    }
+
   console.log(`[db] SQLite ready at ${DB_PATH}`)
   return _db
+}
+
+// Helper: run DB statements with retry on busy/locked errors
+function runWithRetry(db, fn, maxAttempts = 6) {
+  let attempt = 0
+  while (true) {
+    try {
+      return fn()
+    } catch (err) {
+      attempt += 1
+      const msg = (err && err.message) || ''
+      if (attempt >= maxAttempts || !/locked|busy/i.test(msg)) throw err
+      const waitMs = 50 * Math.pow(2, attempt) // 100,200,400...
+      console.warn(`[db] transient DB lock detected, retry ${attempt}/${maxAttempts} after ${waitMs}ms: ${msg}`)
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs)
+    }
+  }
+}
+
+// Simple in-memory serialized writer queue to ensure single-writer semantics
+const writeQueue = []
+let writeRunning = false
+function enqueueWrite(task) {
+  return new Promise((resolve, reject) => {
+    writeQueue.push({ task, resolve, reject })
+    if (!writeRunning) processQueue()
+  })
+}
+function processQueue() {
+  if (writeRunning) return
+  const next = writeQueue.shift()
+  if (!next) return
+  writeRunning = true
+  Promise.resolve().then(() => {
+    try {
+      const res = runWithRetry(getDb(), next.task)
+      next.resolve(res)
+    } catch (e) { next.reject(e) }
+  }).finally(() => { writeRunning = false; setImmediate(processQueue) })
+}
+
+// Persist computed outages into network_outages table.
+// Scans audit_log for internet.down/internet.up and upserts incidents.
+export function persistOutages() {
+  const db = getDb()
+  try {
+    let events = db.all(`SELECT ts, event, payload FROM audit_log WHERE event IN ('internet.down','internet.up') ORDER BY ts ASC`)
+    if (events && events.length > 0 && events[0].ts && events[0].ts < 1e12) {
+      events = events.map(e => ({ ...e, ts: Number(e.ts) * 1000 }))
+    }
+    const outages = []
+    let downTs = null, downType = null, _lastUpTs = null
+    let _lastPayload = null
+    if (!events || events.length === 0) {
+      const checks = db.all(`SELECT ts, payload FROM audit_log WHERE event = 'internet.check' ORDER BY ts ASC`)
+      for (const c of checks) {
+        let p = null
+        try { p = JSON.parse(c.payload) } catch { p = null }
+        const ok = p ? Boolean(p.ok) : false
+        if (!ok && downTs === null) { downTs = c.ts; downType = p?.outage_type ?? null }
+        else if (ok && downTs !== null) { outages.push({ start: downTs, end: c.ts, durationMs: c.ts - downTs, outage_type: downType, ongoing: false }); _lastUpTs = c.ts; downTs = null; downType = null }
+        else if (ok) { _lastUpTs = c.ts }
+      }
+    } else {
+      for (const e of events) {
+        if (e.event === 'internet.down' && downTs === null) {
+          downTs = e.ts
+          try { const p = JSON.parse(e.payload); downType = p.outage_type ?? null; _lastPayload = p } catch { downType = null; _lastPayload = null }
+        }
+        else if (e.event === 'internet.up' && downTs !== null) {
+          let payload = null
+          try { payload = JSON.parse(e.payload) } catch { payload = null }
+          outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, outage_type: downType, ongoing: false, payload: _lastPayload })
+          _lastUpTs = e.ts; downTs = null; downType = null; _lastPayload = null
+        }
+        else if (e.event === 'internet.up') { _lastUpTs = e.ts }
+      }
+    }
+    if (downTs !== null) { outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, outage_type: downType, ongoing: true }) }
+
+    // Upsert into network_outages — prefer payload.detected_at when present so
+    // stored start/duration reflect detection -> discovery rather than pairing timestamps.
+    const now = Date.now()
+    // Use named parameters to avoid positional-binding issues with the wasm sqlite driver
+    const insert = db.prepare('INSERT OR REPLACE INTO network_outages (start,end,duration_ms,outage_type,ongoing,created_at) VALUES ($start,$end,$duration_ms,$outage_type,$ongoing,$created_at)')
+    for (const o of outages) {
+      // If payload provided a detected_at timestamp, prefer that as the start
+      const start = Number(o.start) || Date.now()
+      const end = o.end == null ? null : Number(o.end)
+      // Defensive: compute duration from detected_at->end when available
+      let duration = Number(o.durationMs)
+      if (o.payload && o.payload.detected_at) {
+        const det = Number(o.payload.detected_at)
+        if (isFinite(det) && det > 0) {
+          const basisEnd = end || Date.now()
+          duration = Math.round(basisEnd - det)
+        }
+      }
+      if (!isFinite(duration) || duration < 0) {
+        console.warn('[db] persistOutages: invalid duration, coercing to 0', o)
+        duration = 0
+      } else {
+        duration = Math.round(duration)
+      }
+      const type = o.outage_type ?? null
+      const ongoing = o.ongoing ? 1 : 0
+      try {
+        const bound = { $start: start, $end: end, $duration_ms: duration, $outage_type: type, $ongoing: ongoing, $created_at: now }
+        insert.run(bound)
+      } catch (e) {
+        // On failure, log details at error level to assist debugging
+        console.error('[db] persistOutages: insert failed for outage object:', JSON.stringify(o), e && e.message)
+        try { console.error('[db] persistOutages: bound params ->', JSON.stringify({ $start: start, $end: end, $duration_ms: duration, $outage_type: type, $ongoing: ongoing, $created_at: now })) } catch {}
+        throw e
+      }
+    }
+    return outages.length
+  } catch (err) {
+    console.error('[db] persistOutages failed:', err.message)
+    return 0
+  }
 }
 
 /**
@@ -445,10 +686,10 @@ export function backfillInternetSummary(fromTs = 0, toTs = Date.now()) {
   let rows = []
   try {
     rows = db.all('SELECT outage_ts, ping_detail, captured_at FROM outage_diagnostics WHERE captured_at BETWEEN ? AND ?', [fromTs, toTs])
-  } catch (e) {
+  } catch {
     try {
       rows = db.all('SELECT outage_ts, ping_detail, captured_at FROM outage_diagnostics_archived WHERE captured_at BETWEEN ? AND ?', [fromTs, toTs])
-    } catch (e2) { rows = [] }
+    } catch { rows = [] }
   }
   const byDay = new Map()
   for (const r of rows) {
@@ -541,24 +782,20 @@ export function backfillDailyEventSummary(fromTs = 0, toTs = Date.now()) {
  */
 export function audit(event, payload = {}, actor = 'system', ip = null) {
   try {
-    getDb().run(
-      'INSERT INTO audit_log (ts, event, actor, payload, ip) VALUES (?, ?, ?, ?, ?)',
-      [Date.now(), event, actor, JSON.stringify(payload), ip]
-    )
+    const db = getDb()
+    return enqueueWrite(() => runWithRetry(db, () => db.run('INSERT INTO audit_log (ts, event, actor, payload, ip) VALUES (?, ?, ?, ?, ?)', [Date.now(), event, actor, JSON.stringify(payload), ip])))
   } catch (err) {
-    console.error('[audit] write failed:', err.message)
+    console.error('[audit] write failed:', err && err.message)
   }
 }
 
 /** Record a device lifecycle event (online/offline/new/port change). */
 export function auditDevice(event, mac, ip, hostname, payload = {}) {
   try {
-    getDb().run(
-      'INSERT INTO device_events (ts, event, mac, ip, hostname, payload) VALUES (?, ?, ?, ?, ?, ?)',
-      [Date.now(), event, mac ?? null, ip ?? null, hostname ?? null, JSON.stringify(payload)]
-    )
+    const db = getDb()
+    return enqueueWrite(() => runWithRetry(db, () => db.run('INSERT INTO device_events (ts, event, mac, ip, hostname, payload) VALUES (?, ?, ?, ?, ?, ?)', [Date.now(), event, mac ?? null, ip ?? null, hostname ?? null, JSON.stringify(payload)])))
   } catch (err) {
-    console.error('[auditDevice] write failed:', err.message)
+    console.error('[auditDevice] write failed:', err && err.message)
   }
 }
 
@@ -570,16 +807,14 @@ export function getVpnState() {
 /** Persist VPN exit-node metadata (upsert, single row). */
 export function setVpnState(data) {
   try {
-    getDb().run(
-      `INSERT OR REPLACE INTO vpn_state
+    const db = getDb()
+    return enqueueWrite(() => runWithRetry(db, () => db.run(`INSERT OR REPLACE INTO vpn_state
          (id, iface, client_ip, client_isp, client_city, client_country, client_lat, client_lon, updated_at)
-       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [data.iface ?? null, data.client_ip ?? null, data.client_isp ?? null,
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`, [data.iface ?? null, data.client_ip ?? null, data.client_isp ?? null,
        data.client_city ?? null, data.client_country ?? null,
-       data.client_lat ?? null, data.client_lon ?? null, Date.now()]
-    )
+       data.client_lat ?? null, data.client_lon ?? null, Date.now()])))
   } catch (err) {
-    console.error('[vpn_state] write failed:', err.message)
+    console.error('[vpn_state] write failed:', err && err.message)
   }
 }
 
@@ -606,7 +841,7 @@ export function pruneOldData(retentionDays) {
       try { if (r.path && fs.existsSync(r.path)) fs.unlinkSync(r.path) } catch {}
       db.run('DELETE FROM evidence_files WHERE id = ?', [r.id])
     }
-  } catch (e) { console.error('[prune] evidence prune failed', e.message) }
+  } catch (_e) { console.error('[prune] evidence prune failed', _e.message) }
 }
 
 export function upsertDevice(device) {

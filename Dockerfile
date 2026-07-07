@@ -15,7 +15,7 @@ FROM node:22-alpine
 # nmap is required for network scanning; tcpdump for passive ARP gateway detection
 # curl is required for interface-bound speed tests (VPN/direct comparison)
 # Ookla speedtest CLI: downloaded directly as a static ARM64 binary (Alpine has no apt/deb)
-RUN apk add --no-cache nmap tcpdump curl \
+RUN apk add --no-cache nmap tcpdump curl sqlite sqlite-dev \
  && ARCH="$(uname -m)" \
  && case "$ARCH" in \
       aarch64) ST_ARCH="aarch64" ;; \
@@ -48,9 +48,13 @@ COPY --from=builder /app/dist ./dist/
 
 # Persistent data directory (mount a volume here)
 RUN mkdir -p /app/data
+# Provide sqlite3 binary in the image to allow in-container DB checks
+RUN apk add --no-cache sqlite-libs sqlite
 
 EXPOSE 7654
 
 ENV NODE_ENV=production
+ARG BUILD_TIME
+ENV BUILD_TIME=${BUILD_TIME}
 
 CMD ["node", "server/index.js"]

@@ -95,4 +95,30 @@ router.post('/logout', (_req, res) => {
   res.clearCookie(COOKIE_NAME, { path: '/' }).json({ ok: true })
 })
 
+// POST /api/auth/change-password - authenticated users change their own password
+router.post('/change-password', async (req, res) => {
+  const token = req.cookies?.[COOKIE_NAME]
+  if (!token) return res.status(401).json({ error: 'Not authenticated' })
+  let payload
+  try { payload = jwt.verify(token, getJwtSecret()) } catch { return res.status(401).json({ error: 'Session expired' }) }
+  const username = payload.username
+  const { oldPassword, newPassword } = req.body ?? {}
+  if (!oldPassword || !newPassword) return res.status(400).json({ error: 'Missing old or new password' })
+  if (newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' })
+  const user = findUserByUsername(username)
+  if (!user) return res.status(404).json({ error: 'User not found' })
+  const bcrypt = await import('bcryptjs')
+  const match = await bcrypt.default.compare(oldPassword, user.password_hash)
+  if (!match) {
+    audit('auth.change_password_failed', { username })
+    return res.status(401).json({ error: 'Old password incorrect' })
+  }
+  const hash = await bcrypt.default.hash(newPassword, 12)
+  const db = getDb()
+  db.run('UPDATE users SET password_hash = ? WHERE username = ?', [hash, username])
+  audit('auth.change_password', { username })
+  // Invalidate session by clearing cookie; preserve other cookies (UI prefs are separate)
+  res.clearCookie(COOKIE_NAME, { path: '/' }).json({ ok: true, logout: true })
+})
+
 export default router

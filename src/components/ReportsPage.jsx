@@ -10,8 +10,9 @@ export default function ReportsPage() {
   const [liveMonitor, setLiveMonitor] = useState(null)
   const [from, setFrom] = useState(() => Date.now() - 7 * 24 * 60 * 60 * 1000)
   const [to, setTo] = useState(() => Date.now())
-  const [limit, setLimit] = useUIPref('reports.limit', 50)
-  const [offset, setOffset] = useState(0)
+  const [per, setPer] = useUIPref('reports.limit', 50)
+  const [_offset, setOffset] = useState(0)
+  const [page, setPage] = useState(1)
   const [outageCount, setOutageCount] = useState(0)
   const [tab, setTab] = useUIPref('reports.tab', 'overview')
   const [showRetention, setShowRetention] = useUIPref('reports.showRetention', false)
@@ -20,8 +21,10 @@ export default function ReportsPage() {
   const [speedtests, setSpeedtests] = useState(null)
   const [ddnsHistory, setDdnsHistory] = useState(null)
 
-  const loadEvents = React.useCallback(async () => {
-    const qs = new URLSearchParams({ from: String(from), to: String(to), limit: String(limit), offset: String(offset) })
+  const loadEvents = React.useCallback(async (p = page, pageSize = per) => {
+    const off = (p - 1) * pageSize
+    setOffset(off)
+    const qs = new URLSearchParams({ from: String(from), to: String(to), limit: String(pageSize), offset: String(off) })
     const r = await fetch(`/api/reports?${qs.toString()}`)
     const j = await r.json()
     setEvents(j.events || [])
@@ -31,7 +34,7 @@ export default function ReportsPage() {
       const oj = await or.json()
       setOutageCount(oj.totalOutages || 0)
     } catch { setOutageCount(0) }
-  }, [from, to, limit, offset])
+  }, [from, to, per, page])
 
   useEffect(() => {
     let es
@@ -86,7 +89,7 @@ export default function ReportsPage() {
     const j = await r.json()
     setHistory(j.rows || [])
   }
-    useEffect(() => { loadEvents() }, [from, to, limit, offset, loadEvents])
+    useEffect(() => { loadEvents(page, per) }, [from, to, per, page, loadEvents])
 
   // load reports and current tab data; intentionally mount/when-tab only
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -185,11 +188,13 @@ export default function ReportsPage() {
             </table>
           </div>
           <div className="flex gap-2 items-center mt-2">
-            <button disabled={offset<=0} onClick={() => { setOffset(Math.max(0, offset - limit)); loadEvents() }} className="px-2 py-1 border rounded">Prev</button>
-            <div className="text-sm">Offset: {offset}</div>
-            <button onClick={() => { setOffset(offset + limit); loadEvents() }} className="px-2 py-1 border rounded">Next</button>
-            <span className="text-xs ml-2">limit</span>
-            <input type="number" value={limit} onChange={e => setLimit(Math.max(1, Math.min(200, parseInt(e.target.value||50,10))))} />
+            <div className="ml-auto flex items-center gap-3">
+              <label className="text-xs text-slate-400">Per page:</label>
+              <select value={per} onChange={e => { setPer(Number(e.target.value)); setPage(1) }} className="px-2 py-1 border rounded bg-[#071025] text-sm">
+                {[10,20,25,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <Pagination page={page} total={1000} per={per} onChangePage={(p)=>setPage(p)} onChangePer={(n)=>{ setPer(n); setPage(1) }} />
+            </div>
           </div>
         </div>
       {showRetention && (
@@ -201,3 +206,4 @@ export default function ReportsPage() {
     </div>
   )
 }
+import Pagination from './Pagination.jsx'

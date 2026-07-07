@@ -32,6 +32,7 @@ export default function LogsPage() {
   const [autoRefresh, setAutoRefresh] = useUIPref('logs.autoRefresh', false)
   const [autoInterval, setAutoInterval] = useUIPref('logs.autoInterval', 5000)
   const timerRef = useRef(null)
+  const [copiedRows, setCopiedRows] = useState([])
 
   // ── Date filters ───────────────────────────────────────────────────────
   const toISODate = (d) => d.toISOString().slice(0,10)
@@ -103,7 +104,21 @@ export default function LogsPage() {
     const style = LEVEL_STYLES[entry.level] ?? LEVEL_STYLES.info
     const time  = new Date(entry.ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const date  = new Date(entry.ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
-    const copyRow = () => navigator.clipboard.writeText(`${date} ${time} [${entry.level}] ${entry.message}`)
+    const copyRow = async () => {
+      try {
+        await navigator.clipboard.writeText(`${date} ${time} [${entry.level}] ${entry.message}`)
+        setCopiedRows(prev => Array.from(new Set([...prev, entry.seq])))
+        setTimeout(() => setCopiedRows(prev => prev.filter(x => x !== entry.seq)), 3000)
+      } catch {
+        // fallback: attempt execCommand
+        const ta = document.createElement('textarea')
+        ta.value = `${date} ${time} [${entry.level}] ${entry.message}`
+        document.body.appendChild(ta)
+        ta.select()
+        try { document.execCommand('copy'); setCopiedRows(prev => Array.from(new Set([...prev, entry.seq]))); setTimeout(() => setCopiedRows(prev => prev.filter(x => x !== entry.seq)), 3000) } catch { alert('Copy failed') }
+        document.body.removeChild(ta)
+      }
+    }
     const saveRow = () => {
       const blob = new Blob([`${date} ${time} [${entry.level}] ${entry.message}\n`], { type: 'text/plain' })
       const url = URL.createObjectURL(blob)
@@ -123,7 +138,9 @@ export default function LogsPage() {
         </span>
         <span className="text-slate-300 whitespace-pre-wrap break-all leading-relaxed">{entry.message}</span>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={copyRow} className="text-[11px] text-slate-500 hover:text-slate-300">Copy</button>
+          <button onClick={copyRow} className="text-[11px] text-slate-500 hover:text-slate-300 flex items-center gap-1">
+            {copiedRows.includes(entry.seq) ? <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg> : 'Copy'}
+          </button>
           <button onClick={saveRow} className="text-[11px] text-slate-500 hover:text-slate-300">Save</button>
         </div>
       </div>

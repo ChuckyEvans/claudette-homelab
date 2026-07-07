@@ -5,8 +5,9 @@ import {
   ResponsiveContainer, LineChart, Line, ReferenceLine,
 } from 'recharts'
 import { api, exportToCsv, exportToPdf } from '../lib/api.js'
+import MiniSpeedGauges from './MiniSpeedGauges.jsx'
 import Pagination from './Pagination.jsx'
-import TopProgressBar from './TopProgressBar.jsx'
+// TopProgressBar removed for speedtest UI — gauges now animate in-place
 import Tooltip from './Tooltip.jsx'
 
 const PAGE_SIZE = 50
@@ -281,14 +282,24 @@ function ChartTip({ active, payload, label, labelFormatter }) {
 function parseMtrHops(text) {
   if (!text) return null
   const hops = []
-  for (const line of text.split('\n')) {
-    const m = line.match(/^\s*(\d+)\.\|--\s+(\S+)\s+([\d.]+)%\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/)
-    if (m) hops.push({
-      hop: parseInt(m[1]), host: m[2],
-      loss: parseFloat(m[3]), snt: parseInt(m[4]),
-      last: parseFloat(m[5]), avg: parseFloat(m[6]),
-      best: parseFloat(m[7]), wrst: parseFloat(m[8]), stdev: parseFloat(m[9]),
-    })
+  const lines = text.split('\n')
+  const re = /^\s*(\d+)\s+([^\s]+)\s+([\d.]+)%?\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s+.*)?$/
+  for (const line of lines) {
+    const m = line.match(re)
+    if (!m) continue
+    try {
+      hops.push({
+        hop: parseInt(m[1]),
+        host: m[2],
+        loss: parseFloat(m[3]),
+        snt: parseInt(m[4]),
+        last: parseFloat(m[5]),
+        avg: parseFloat(m[6]),
+        best: parseFloat(m[7]),
+        wrst: parseFloat(m[8]),
+        stdev: parseFloat(m[9]),
+      })
+    } catch (err) { void err }
   }
   return hops.length >= 1 ? hops : null
 }
@@ -362,39 +373,41 @@ function MtrPathView({ hops }) {
       })}
 
       {/* Final connector to destination */}
-      {dest && (() => {
-        const s = latencyStyle(dest.avg)
-        const barWidth = Math.min(100, Math.max(4, (dest.avg / 200) * 100))
-        return (
-          <>
-            <div className="flex items-stretch gap-3">
-              <div className="w-8 flex justify-center"><div className="w-px bg-emerald-700/50 flex-1" /></div>
-              <div className="flex items-center gap-2 py-1">
-                <div className="h-1.5 rounded-full bg-slate-800 w-20 overflow-hidden">
-                  <div className={`h-full rounded-full ${s.bar}`} style={{ width: `${barWidth}%` }} />
+      {dest ? (
+        (() => {
+          const s = latencyStyle(dest.avg)
+          const barWidth = Math.min(100, Math.max(4, (dest.avg / 200) * 100))
+          return (
+            <>
+              <div className="flex items-stretch gap-3">
+                <div className="w-8 flex justify-center"><div className="w-px bg-emerald-700/50 flex-1" /></div>
+                <div className="flex items-center gap-2 py-1">
+                  <div className="h-1.5 rounded-full bg-slate-800 w-20 overflow-hidden">
+                    <div className={`h-full rounded-full ${s.bar}`} style={{ width: `${barWidth}%` }} />
+                  </div>
+                  <span className={`text-[10px] font-mono ${s.badge}`}>{dest.avg.toFixed(1)}ms</span>
+                  {dest.loss > 0 && <span className="text-[10px] text-red-400 font-mono">{dest.loss.toFixed(1)}% loss</span>}
                 </div>
-                <span className={`text-[10px] font-mono ${s.badge}`}>{dest.avg.toFixed(1)}ms</span>
-                {dest.loss > 0 && <span className="text-[10px] text-red-400 font-mono">{dest.loss.toFixed(1)}% loss</span>}
               </div>
-            </div>
-            {/* Destination terminal node */}
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center flex-shrink-0">
-                <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-              </div>
-              <div className="flex-1 flex items-center justify-between min-w-0">
-                <div className="min-w-0">
-                  <div className="text-xs font-mono font-semibold text-emerald-300">{dest.host}</div>
-                  <div className="text-[10px] text-slate-500">best {dest.best.toFixed(1)} · worst {dest.wrst.toFixed(1)}ms · hop {dest.hop}</div>
+              {/* Destination terminal node */}
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center flex-shrink-0">
+                  <Wifi className="w-3.5 h-3.5 text-emerald-400" />
                 </div>
-                <span className="text-[10px] font-semibold text-emerald-500 ml-2 flex-shrink-0">destination reached</span>
+                <div className="flex-1 flex items-center justify-between min-w-0">
+                  <div className="min-w-0">
+                    <div className="text-xs font-mono font-semibold text-emerald-300">{dest.host}</div>
+                    <div className="text-[10px] text-slate-500">best {dest.best.toFixed(1)} · worst {dest.wrst.toFixed(1)}ms · hop {dest.hop}</div>
+                  </div>
+                  <span className="text-[10px] font-semibold text-emerald-500 ml-2 flex-shrink-0">destination reached</span>
+                </div>
               </div>
-            </div>
-          </>
-        )
-      })()}
-    </div>
-  )
+            </>
+          )
+        })()
+      ) : null}
+      </div>
+    )
 }
 
 function MtrTable({ output }) {
@@ -824,6 +837,8 @@ const ALL_TABS = [
 ]
 
 export default function Reports() {
+  const [_per, _setPer] = useState(25) // unused per-state stub
+
   const [tab,          setTab]          = useState('overview')
   const [range,        setRange]        = useState('30d')
   const [eventFilter,  setEventFilter]  = useState('')
@@ -841,11 +856,14 @@ export default function Reports() {
   const [drillDay,     setDrillDay]     = useState(null) // { from, to, label }
   const [internetData,  setInternetData]  = useState(null)
   const [speedtestData, setSpeedtestData] = useState(null)
+  const [speedLatest, setSpeedLatest] = useState(null)
   const [exporting,     setExporting]     = useState(null)
   const [running,       setRunning]       = useState(false)
   const [runningVpn,    setRunningVpn]    = useState(false)
+  const [manualActive,  setManualActive]  = useState(false)
   const [outageData,    setOutageData]    = useState(null)
   const [outageLogPage, setOutageLogPage] = useState(1)
+  const [outageLogPer, setOutageLogPer] = useState(25)
   const [outageLog,     setOutageLog]     = useState([])
   const [outageLogTotal, setOutageLogTotal] = useState(0)
   const [_outageLogLoading, setOutageLogLoading] = useState(false)
@@ -867,7 +885,7 @@ export default function Reports() {
   const [inputTo,              setInputTo]              = useState('')
   const [selectedCheck,        setSelectedCheck]        = useState(null)
   const [selectedOutage,       setSelectedOutage]       = useState(null) // outage object with optional .diagnostics
-  const [traceActive,          setTraceActive]          = useState(false) // drives top progress bar
+  // traceActive removed — top progress bar disabled
   const [ddnsData,             setDdnsData]             = useState(null)  // { status, history }
   const [ddnsChecking,         setDdnsChecking]         = useState(false)
   const [ddnsPortScanning,     setDdnsPortScanning]     = useState(false)
@@ -966,7 +984,10 @@ export default function Reports() {
     const to   = customRange?.to   ?? Date.now()
     const from = customRange?.from ?? (to - rangeMs(range))
     try {
-      setSpeedtestData(await api.reports.speedtest({ from, to, limit: 200 }))
+      const sd = await api.reports.speedtest({ from, to, limit: 200 })
+      setSpeedtestData(sd)
+      // set latest single-row for UI gauges
+      if (sd && sd.results && sd.results.length) setSpeedLatest(sd.results[0])
     } catch (e) {
       console.error('[Reports/speedtest]', e)
     }
@@ -1007,10 +1028,10 @@ export default function Reports() {
 
   
 
-  const loadOutageLog = useCallback(async (page = 1) => {
+  const loadOutageLog = useCallback(async (page = 1, limit = outageLogPer) => {
     setOutageLogLoading(true)
     try {
-      const res = await fetch(`/api/paginate?table=outage_diagnostics&page=${page}&limit=25&order=${outageLogOrderColumn || 'captured_at'}&dir=${outageLogOrderDir || 'desc'}`).then(r=>r.json()).catch(e => ({ error: e.message }))
+      const res = await fetch(`/api/paginate?table=outage_diagnostics&page=${page}&limit=${limit}&order=${outageLogOrderColumn || 'captured_at'}&dir=${outageLogOrderDir || 'desc'}`).then(r=>r.json()).catch(e => ({ error: e.message }))
       let rows = (res && res.rows) ? res.rows : []
       let total = (res && res.total) ? res.total : 0
 
@@ -1028,6 +1049,13 @@ export default function Reports() {
         total = rows.length
       }
 
+      // Ensure durationMs and uptimeBeforeMs present for display
+      rows = rows.map(r => {
+        const rr = { ...r }
+        if (rr.durationMs == null && rr.outage_ts && rr.captured_at) rr.durationMs = Number(rr.captured_at) - Number(rr.outage_ts)
+        if (rr.uptimeBeforeMs == null && rr.outage_ts && rr.prev_up_ts) rr.uptimeBeforeMs = Number(rr.outage_ts) - Number(rr.prev_up_ts)
+        return rr
+      })
       setOutageLog(rows)
       setOutageLogTotal(total)
       setOutageLogPage(res.page || page)
@@ -1036,10 +1064,10 @@ export default function Reports() {
     } finally {
       setOutageLogLoading(false)
     }
-  }, [outageData, outageLogOrderColumn, outageLogOrderDir])
+  }, [outageData, outageLogOrderColumn, outageLogOrderDir, outageLogPer])
 
   // Ensure outage log loads on first render (default newest-first)
-  useEffect(() => { loadOutageLog(1) }, [loadOutageLog])
+  useEffect(() => { loadOutageLog(1, outageLogPer) }, [loadOutageLog, outageLogPer])
 
   const loadDdns = useCallback(async () => {
     try {
@@ -1093,6 +1121,33 @@ export default function Reports() {
   useEffect(() => { loadCharts()  }, [loadCharts])
   useEffect(() => { loadInternet() }, [loadInternet])
   useEffect(() => { loadSpeedtest() }, [loadSpeedtest])
+
+  // Listen for live speedtest SSE events to update mini gauges in real-time
+  // Only apply live SSE updates while a manual run is active to avoid UI noise from scheduled runs.
+  useEffect(() => {
+    const onSpeed = (ev) => {
+      try {
+        if (!manualActive) return
+        const d = ev.detail
+        if (!d) return
+        // server may emit partial progress (download/upload progress) or final result
+        // update latest row + progress hints
+        setSpeedLatest(prev => ({ ...(prev||{}), ...d, download_progress: (d.download_progress ?? d.download_pct ?? prev?.download_progress), upload_progress: (d.upload_progress ?? d.upload_pct ?? prev?.upload_progress) }))
+      } catch (err) { void err }
+    }
+    window.addEventListener('claudette:speedtest', onSpeed)
+    return () => window.removeEventListener('claudette:speedtest', onSpeed)
+  }, [manualActive])
+  // Refresh speedtest results when user revisits the page/tab
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        void loadSpeedtest()
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [loadSpeedtest])
   useEffect(() => { loadOutages()  }, [loadOutages])
   useEffect(() => { loadDdns()     }, [loadDdns])
 
@@ -1321,8 +1376,8 @@ export default function Reports() {
 
       rows.sort((a, b) => (b.timestamp_utc || '').localeCompare(a.timestamp_utc || ''))
       exportToCsv(rows, `claudette-report-${dateStamp()}.csv`)
-    } catch (e) {
-      console.error('CSV export failed:', e)
+    } catch (err) {
+      console.error('CSV export failed:', err)
     } finally {
       setExporting(null)
     }
@@ -1359,18 +1414,38 @@ export default function Reports() {
 
   async function handleRunSpeedtest() {
     try {
+      setManualActive(true)
       setRunning(true)
+      const before = (speedLatest?.ts) || 0
       await api.reports.runSpeedtest()
-      // Poll for result after ~35s (download + upload takes ~30s)
-      setTimeout(() => { loadSpeedtest(); setRunning(false) }, 35000)
-    } catch (e) {
-      console.error('Speed test failed:', e)
+      // Poll every 3s until a new speedtest row appears, or fallback after 90s
+      const start = Date.now()
+      const poll = setInterval(async () => {
+        try {
+          const res = await api.reports.speedtest({ limit: 1 })
+          const newest = (res.results && res.results[0]) || null
+            if (newest && newest.ts && newest.ts > before) {
+              clearInterval(poll)
+              loadSpeedtest()
+              setRunning(false)
+              setManualActive(false)
+          } else if (Date.now() - start > 90000) {
+            clearInterval(poll)
+            loadSpeedtest()
+              setRunning(false)
+              setManualActive(false)
+          }
+        } catch (err) { void err }
+      }, 3000)
+    } catch (err) {
+      console.error('Speed test failed:', err)
       setRunning(false)
     }
   }
 
   async function handleRunVpnSpeedtest() {
     try {
+      setManualActive(true)
       setRunningVpn(true)
       await api.reports.runVpnSpeedtest()
       // Listen for SSE completion — clear spinner immediately when the result arrives
@@ -1380,6 +1455,7 @@ export default function Reports() {
           clearTimeout(fallbackTimer)
           loadSpeedtest()
           setRunningVpn(false)
+          setManualActive(false)
         }
       }
       window.addEventListener('claudette:speedtest', onDone)
@@ -1388,6 +1464,7 @@ export default function Reports() {
         window.removeEventListener('claudette:speedtest', onDone)
         loadSpeedtest()
         setRunningVpn(false)
+        setManualActive(false)
       }, 90000)
     } catch (e) {
       console.error('VPN speed test failed:', e)
@@ -1487,8 +1564,19 @@ export default function Reports() {
           document.execCommand('copy')
           document.body.removeChild(ta)
           resolve()
-        })
-    write.then(() => { setCopiedIsp(true); setTimeout(() => setCopiedIsp(false), 2000); addToast('ISP report copied to clipboard') }).catch(() => {})
+        });
+      (async () => {
+      try {
+        await write
+        setCopiedIsp(true)
+        addToast('ISP report copied to clipboard')
+        // keep the tick visible slightly longer so it's noticeable
+        setTimeout(() => setCopiedIsp(false), 3000)
+      } catch (err) { void err
+        // fallback: show error toast
+        addToast('Copy to clipboard failed', 'error')
+      }
+    })()
   }
 
   return (
@@ -1496,14 +1584,12 @@ export default function Reports() {
       <ToastStack toasts={toasts} />
 
       {/* Check detail modal */}
-      <TopProgressBar active={traceActive} progress={null} />
+      {/* top progress bar intentionally removed for speedtest UI */}
 
       {selectedCheck && (
         <CheckDetailModal
           check={selectedCheck}
           onClose={() => setSelectedCheck(null)}
-          onTraceStart={() => setTraceActive(true)}
-          onTraceEnd={() => setTraceActive(false)}
         />
       )}
 
@@ -2306,7 +2392,8 @@ export default function Reports() {
                   }`}
                 >
                   {copiedIsp ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  {copiedIsp ? 'Copied!' : 'Copy to Clipboard'}
+                  <span className={`inline-block transition-opacity duration-300 ${copiedIsp ? 'opacity-100' : 'opacity-0'}`}>{'Copied!'}</span>
+                  <span className={`inline-block transition-opacity duration-300 ${copiedIsp ? 'opacity-0 ml-0' : 'opacity-100 ml-0'}`}>{'Copy to Clipboard'}</span>
                 </button>
               </div>
             )}
@@ -2329,7 +2416,8 @@ export default function Reports() {
                     }`}
                   >
                     {copiedIsp ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    {copiedIsp ? 'Copied!' : 'Copy to Clipboard'}
+                    <span className={`inline-block transition-opacity duration-300 ${copiedIsp ? 'opacity-100' : 'opacity-0'}`}>{'Copied!'}</span>
+                    <span className={`inline-block transition-opacity duration-300 ${copiedIsp ? 'opacity-0 ml-0' : 'opacity-100 ml-0'}`}>{'Copy to Clipboard'}</span>
                   </button>
                 </div>
                 <div className="overflow-x-auto text-[11px]">
@@ -2395,19 +2483,7 @@ export default function Reports() {
                         <button onClick={exportOutageCSV} className="px-2 py-1 border rounded">Export CSV</button>
                         <button onClick={exportOutagePDF} className="px-2 py-1 border rounded">Export PDF</button>
                         <div className="flex items-center gap-1">
-                          <button disabled={outageLogPage<=1} onClick={() => loadOutageLog(1)} className="px-2 py-1 border rounded">First</button>
-                          {(() => {
-                            const per = 25
-                            const totalPages = Math.max(1, Math.ceil(outageLogTotal / per))
-                            const pages = []
-                            const start = Math.max(1, outageLogPage - 2)
-                            const end = Math.min(totalPages, start + 4)
-                            for (let p = start; p <= end; p++) pages.push(p)
-                            return pages.map(p => (
-                              <button key={p} onClick={() => loadOutageLog(p)} className={`px-2 py-1 border rounded ${p === outageLogPage ? 'bg-slate-700 text-white' : ''}`}>{p}</button>
-                            ))
-                          })()}
-                          <button disabled={outageLogPage*25>=outageLogTotal} onClick={() => loadOutageLog(Math.max(1, Math.ceil(outageLogTotal/25)))} className="px-2 py-1 border rounded">Last</button>
+                          <Pagination page={outageLogPage} total={outageLogTotal} per={outageLogPer} onChangePage={(p)=>loadOutageLog(p, outageLogPer)} onChangePer={(n)=>{ setOutageLogPer(n); loadOutageLog(1, n) }} />
                         </div>
                     </div>
                   </div>
@@ -2742,6 +2818,26 @@ export default function Reports() {
                     </button>
                   </Tooltip>
                 </div>
+              </div>
+            </div>
+
+            {/* Mini gauges showing latest recorded or live speedtest */}
+            <div className="mt-3 mb-4">
+              {(manualActive || running || runningVpn) ? (
+                <MiniSpeedGauges
+                  download={Math.round(speedLatest?.download_mbps ?? (speedtestData?.results?.[0]?.download_mbps ?? 0))}
+                  upload={Math.round(speedLatest?.upload_mbps   ?? (speedtestData?.results?.[0]?.upload_mbps   ?? 0))}
+                  ping={Math.round(speedLatest?.ping_ms ?? (speedtestData?.results?.[0]?.ping_ms ?? 0))}
+                />
+              ) : (
+                <div className="text-[11px] text-slate-400 mt-2">Gauges are shown only during manual tests.</div>
+              )}
+              <div className="text-[11px] text-slate-400 mt-2">
+                {speedLatest ? (
+                  <div>Last test: {fmtDate(speedLatest.ts)} — Server: {speedLatest.server_name || speedLatest.server_host || 'unknown'}</div>
+                ) : (
+                  <div>No recent tests recorded</div>
+                )}
               </div>
             </div>
 
@@ -3607,3 +3703,4 @@ export default function Reports() {
     </div>
   )
 }
+

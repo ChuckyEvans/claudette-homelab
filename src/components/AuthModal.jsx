@@ -11,6 +11,7 @@ export default function AuthModal({ onAuthenticated }) {
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState(null)
   const [retryAfter, setRetryAfter] = useState(null)
+  const [notice, setNotice] = useState(null)
 
   // Countdown timer for rate-limit lockout
   useEffect(() => {
@@ -19,6 +20,14 @@ export default function AuthModal({ onAuthenticated }) {
     const t = setTimeout(() => setRetryAfter(s => (s > 1 ? s - 1 : null)), 1000)
     return () => clearTimeout(t)
   }, [retryAfter])
+
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search)
+      const n = p.get('notice')
+      if (n === 'password_changed') setNotice('Your password was changed. Please sign in with your new password.')
+      } catch (err) { void err }
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -54,6 +63,7 @@ export default function AuthModal({ onAuthenticated }) {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {notice && <p className="text-sm text-emerald-300 bg-emerald-900/20 rounded px-3 py-2">{notice}</p>}
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-slate-300">Username</label>
               <input

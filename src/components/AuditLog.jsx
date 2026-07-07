@@ -89,8 +89,9 @@ export default function AuditLog() {
     load()
   }
 
-  const totalPages = Math.max(1, Math.ceil(data.total / PAGE_SIZE))
-  const currentPage = Math.floor(offset / PAGE_SIZE) + 1
+  const [per, setPer] = useState(PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(data.total / per))
+  const currentPage = Math.floor(offset / per) + 1
 
   return (
     <div className="flex flex-col h-full">
@@ -205,14 +206,19 @@ export default function AuditLog() {
       </div>
 
       {/* Pagination */}
-      {data.total > PAGE_SIZE && (
+      {data.total > per && (
         <div className="flex items-center justify-between px-6 py-3 border-t border-[#1a1a30] flex-shrink-0">
-          <span className="text-xs text-slate-400">
-            Page {currentPage} of {totalPages} · {data.total.toLocaleString()} total
-          </span>
-          <Pagination page={currentPage - 1} totalPages={totalPages} onPage={p => setOffset(p * PAGE_SIZE)} />
+          <span className="text-xs text-slate-400">Page {currentPage} of {totalPages} · {data.total.toLocaleString()} total</span>
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-slate-400">Per page:</label>
+            <select value={per} onChange={e => { setPer(Number(e.target.value)); setOffset(0) }} className="px-2 py-1 border rounded bg-[#071025] text-sm">
+              {[10,20,25,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <Pagination page={currentPage} total={data.total} per={per} onChangePage={(p)=>setOffset((p-1)*per)} onChangePer={(n)=>{ setPer(n); setOffset(0) }} />
+          </div>
         </div>
       )}
     </div>
   )
 }
+

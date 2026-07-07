@@ -1,5 +1,81 @@
 # Claudette
 
+Home network monitoring and diagnostics for small deployments (Raspberry Pi friendly).
+
+This README gives new contributors an easy path to get the project running locally, run tests, build, and deploy to a Raspberry Pi for real-device testing.
+
+Prerequisites
+- Node.js 20+ (tested with Node 22)
+- npm (bundled with Node) or yarn
+- Git
+- Optional for deployment: SSH access to a Raspberry Pi (ubuntu user), with an SSH key configured
+
+Quickstart — run locally
+1. Clone the repo:
+
+   git clone https://github.com/ChuckyEvans/claudette-homelab.git
+   cd claudette-homelab
+
+2. Install dependencies:
+
+   npm ci
+
+3. Run tests (Vitest):
+
+   npm test
+
+4. Start the server (development):
+
+   npm run dev
+
+   - Frontend: Vite dev server on http://localhost:5173 by default
+   - Backend: server/index.js (Express) on configured port (see `config.yaml`)
+
+Build for production
+
+1. Build frontend and server artifacts:
+
+   npm run build
+
+2. Result: `dist/` will contain the built frontend; server files are left in `server/` for packaging.
+
+Deploy to Raspberry Pi (quick)
+
+This project includes `scripts/deploy-pi.mjs` to upload and run a build on a Pi. The deploy process uploads a tarball to `/tmp/claudette-build` and runs `/tmp/claudette-deploy.sh` on the Pi.
+
+- Ensure SSH key access to `ubuntu@<pi-ip>` and enough space in `/tmp` (it's typically a small ram-disk).
+- From your workstation run:
+
+  node scripts/deploy-pi.mjs
+
+Common options you may use when developing locally:
+- `--no-progress` : skip progress streaming during deploy
+- `--skip-tests` / `--skip-lint` : used by convenience scripts (not recommended for CI)
+
+Configuration
+- `config.example.yaml` shows available settings. Copy to `config.yaml` and edit values that matter (ports, credentials, etc.).
+- `data/` holds runtime state and `claudette.db` (SQLite). For tests, per-worker DB files are used.
+
+Testing notes
+- Tests use Vitest and create per-worker SQLite DBs to avoid file locks.
+- If you see "unable to open database file" failures, re-run tests — the code includes retries and per-worker DB paths.
+
+Troubleshooting
+- Remote deploy logs: when running on the Pi, logs live under `/tmp/claudette-build/build.log`. If files are root-owned, run `sudo chown -R ubuntu:ubuntu /tmp/claudette-build` or re-run deploy as `ubuntu` to recreate the directory.
+- Pi `/tmp` is small: consider building locally and uploading the `dist/` tarball if builds fail due to disk/swap.
+
+Contributing
+- Create a branch from `feature/` or `main`, run tests locally, and open a PR targeting `main`.
+
+Where to look next
+- Backend: `server/` — Express routes, DB helpers.
+- Frontend: `src/` — React + Vite.
+- Scripts: `scripts/` — deployment, codemods, utilities.
+
+Help
+- If you get stuck, open an issue or contact the repository owner.
+# Claudette
+
 A self-hosted home network monitoring dashboard. Runs in Docker on a Raspberry Pi (or any Linux host) and gives you a live view of every device on your network, monitored services, internet health, speed history, CVE threat intelligence, and a full audit trail — all from a browser or Kodi.
 
 ---

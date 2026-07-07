@@ -110,6 +110,11 @@ export default function ServicesPanel({ services, onRefreshServices }) {
     return true
   })
 
+  const [page, setPage] = useState(1)
+  const [per, setPer] = useState(10)
+  const total = visibleResults.length
+  const paged = visibleResults.slice((page - 1) * per, page * per)
+
   const handleRefresh = async () => {
     setRefreshing(true)
     try { await onRefreshServices() } finally { setRefreshing(false) }
@@ -186,9 +191,20 @@ export default function ServicesPanel({ services, onRefreshServices }) {
         ) : visibleResults.length === 0 ? (
           <p className="text-slate-500 text-center py-10">No services match current filters</p>
         ) : (
-          visibleResults.map(r => (
-            <ServiceCard key={r.name} result={r} history={history[r.name] ?? []} />
-          ))
+          <>
+            {paged.map(r => (
+              <ServiceCard key={r.name} result={r} history={history[r.name] ?? []} />
+            ))}
+            {total > per && (
+              <div className="mt-3 flex items-center justify-end">
+                <label className="text-xs text-slate-400 mr-2">Per page:</label>
+                <select value={per} onChange={e => { setPer(Number(e.target.value)); setPage(1) }} className="px-2 py-1 border rounded bg-[#071025] text-sm mr-4">
+                  {[5,10,20,50].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <Pagination page={page} total={total} per={per} onChangePage={(p)=>setPage(p)} onChangePer={(n)=>{ setPer(n); setPage(1) }} />
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -238,3 +254,4 @@ export default function ServicesPanel({ services, onRefreshServices }) {
     </div>
   )
 }
+import Pagination from './Pagination.jsx'

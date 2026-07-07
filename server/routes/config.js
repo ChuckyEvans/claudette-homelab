@@ -23,7 +23,7 @@ router.get('/', (req, res) => {
   res.json(loadConfig() ?? {})
 })
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const body = req.body ?? {}
 
   const sanitize = (v, re, max) => String(v ?? '').replace(re, '').slice(0, max)
@@ -66,6 +66,8 @@ router.post('/', (req, res) => {
       mtr_outage_repeat_minutes: Math.max(0, Math.min(60, (n => Number.isFinite(n) ? n : 15)(parseInt(body.schedule?.mtr_outage_repeat_minutes)))),
       speedtest_provider: ['cloudflare', 'ookla'].includes(body.schedule?.speedtest_provider)
         ? body.schedule.speedtest_provider : 'cloudflare',
+      ookla_server_id: body.schedule?.ookla_server_id ? String(body.schedule.ookla_server_id).slice(0,64) : undefined,
+      ookla_interface: body.schedule?.ookla_interface ? String(body.schedule.ookla_interface).slice(0,32) : undefined,
     },
   }
   const existingNetwork = loadConfig()?.network ?? {}
@@ -186,6 +188,43 @@ router.post('/', (req, res) => {
   }
 
   try {
+    // If an Ookla server id was provided, validate it by querying the local discovery
+    if (config.schedule?.ookla_server_id) {
+      try {
+        const ifaceQuery = config.schedule.ookla_interface ? `?interface=${encodeURIComponent(config.schedule.ookla_interface)}` : ''
+        const { exec } = await import('child_process')
+        const { promisify } = await import('util')
+        const pe = promisify(exec)
+        // Use the same discovery CLI invocation as the servers-local route and parse its output
+        const discoveryCmd = `speedtest ${config.schedule.ookla_interface ? `--interface ${config.schedule.ookla_interface}` : ''} --accept-license --accept-gdpr --servers --format=json`
+        let out
+        try {
+          out = (await pe(discoveryCmd, { timeout: 20000 })).stdout || ''
+        } catch (e) {
+          // fallback to list parsing
+          out = (await pe('speedtest --list 2>&1 || speedtest -L 2>&1', { timeout: 20000 })).stdout || ''
+        }
+        let found = false
+        try {
+          const data = JSON.parse(String(out || ''))
+          const raw = Array.isArray(data) ? data : (data.servers || [])
+          for (const s of raw) {
+            const id = String(s.id ?? s.serverId ?? s.server_id ?? s.server ?? '')
+            if (id && id === String(config.schedule.ookla_server_id)) { found = true; break }
+          }
+        } catch (e) {
+          // parse text list output
+          const lines = String(out || '').split('\n').map(l => l.trim()).filter(Boolean)
+          for (const line of lines) {
+            const m = line.match(/^([0-9]+)\)\s+(.+?)\s+\(([^)]+)\)/)
+            if (m && m[1] === String(config.schedule.ookla_server_id)) { found = true; break }
+          }
+        }
+        if (!found) return res.status(400).json({ error: 'Invalid Ookla server id: not found in local discovery output' })
+      } catch (e) {
+        return res.status(500).json({ error: 'Ookla server validation failed: ' + (e.message || String(e)) })
+      }
+    }
     fs.writeFileSync(getConfigPath(), yaml.dump(config))
     resetConfig()
     req.app.locals.reschedule?.()

@@ -1332,6 +1332,8 @@ const NET_TREE_MAX = 480
 const NET_TREE_DEFAULT = 224  // w-56 = 14rem = 224px
 
 export default function NetworkScan({ networkScan, threats, services, onScan, onCancel, preSelectedIp, onDeviceUpdated, onClearAll, portScanProgress = {}, deepScan = {}, lastScanDurationMs = null, lastDeepScanDurationMs = null }) {
+  const [_per, _setPer] = useState(25) // unused per-state stub
+
   const { devices = [], lastScan, scanning, error, progress, subnets = [], devicesFound = 0, gateway = null, gatewayAssignments = {} } = networkScan
   const { running: deepRunning = false, done: deepDone = 0, total: deepTotal = 0, currentIp: deepCurrentIp = null, phase: deepPhase = 'portscan' } = deepScan
 
@@ -1729,3 +1731,4 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
     </div>
   )
 }
+

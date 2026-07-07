@@ -20,6 +20,8 @@ const STACK = [
 
 export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates, checkingUpdate = false }) {
   const versionInfo = updateInfo ?? null
+  const displayVersion = versionInfo?.current ?? '0.2.1'
+  const buildTime = versionInfo?.build_time ?? null
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-10 space-y-10">
@@ -31,7 +33,7 @@ export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates, ch
           <h1 className="text-2xl font-bold text-white tracking-tight">Claudette</h1>
           <p className="text-slate-500 text-sm mt-0.5">
             Homelab Monitor
-            {versionInfo?.current ? ` · v${versionInfo.current}` : ''}
+            {` · v${displayVersion}`}{buildTime ? ` · built ${new Date(buildTime).toLocaleString()}` : ''}
           </p>
         </div>
       </div>

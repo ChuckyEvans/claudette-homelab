@@ -8,13 +8,13 @@ router.get('/latest', (_req, res) => {
     let row = null
     try {
       row = db.get('SELECT * FROM outage_diagnostics ORDER BY captured_at DESC LIMIT 1')
-    } catch (e) {
+    } catch {
       try { row = db.get('SELECT * FROM outage_diagnostics_archived ORDER BY captured_at DESC LIMIT 1') } catch { row = null }
     }
     res.json({ ok: true, row })
-  } catch (e) {
-    console.error('[routes/diagnostics] error:', e)
-    res.status(500).json({ ok: false, error: e.message })
+  } catch (err) {
+    console.error('[routes/diagnostics] error:', err)
+    res.status(500).json({ ok: false, error: err.message })
   }
 })
 

@@ -277,7 +277,8 @@ async function getOoklaServers(iface) {
   const cmd = `speedtest --accept-license --accept-gdpr --format=json --servers ${ifaceFlag}`.trim()
   let stdout = ''
   try {
-    ;({ stdout } = await exec(cmd, { timeout: 30_000 }))
+    const result = await exec(cmd, { timeout: 30_000 })
+    stdout = typeof result === 'string' ? result : (result && result.stdout) || ''
   } catch {
     return []
   }
@@ -301,12 +302,16 @@ async function getOoklaServers(iface) {
  * @returns {{ ping_ms, download_mbps, upload_mbps, client_ip, client_isp,
  *             server_name, server_location, server_country, server_id }}
  */
-async function runOoklaSpeedTest(iface, clientIsp = null) {
+async function runOoklaSpeedTest(iface, clientIsp = null, explicitServerId = null) {
   const ifaceFlag = iface ? `--interface ${iface}` : ''
 
   // Prefer a third-party server to avoid biased same-ISP results.
   // Only fall back to an ISP-owned server if no other options exist.
   let serverFlag = ''
+  // If caller provided an explicit server id, prefer it
+  if (explicitServerId) {
+    serverFlag = `--server-id ${explicitServerId}`
+  }
   if (clientIsp) {
     try {
       const servers = await getOoklaServers(iface)
@@ -356,14 +361,14 @@ export function persistSpeedTestRow(row) {
     getDb().run(`
       INSERT INTO speedtest_results
         (ts, client_ip, client_isp, client_city, client_country, client_lat, client_lon,
-         server_host, server_name, server_location, server_country,
+         server_id, server_host, server_name, server_location, server_country,
          ping_ms, download_mbps, upload_mbps, error, via, provider)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `, [
       row.ts,
       row.client_ip ?? null, row.client_isp ?? null, row.client_city ?? null,
       row.client_country ?? null, row.client_lat ?? null, row.client_lon ?? null,
-      row.server_host ?? null, row.server_name ?? null, row.server_location ?? null,
+      row.server_id ?? null, row.server_host ?? null, row.server_name ?? null, row.server_location ?? null,
       row.server_country ?? null,
       row.ping_ms ?? null, row.download_mbps ?? null, row.upload_mbps ?? null,
       row.error ?? null, row.via ?? 'direct', row.provider ?? 'cloudflare',
@@ -387,7 +392,7 @@ export function persistSpeedTestRow(row) {
  * VPN tests are run separately via runVpnSpeedTest() (manual only).
  * Returns the direct test row object.
  */
-export async function runSpeedTest(broadcast) {
+export async function runSpeedTest(broadcast, explicitServerId = null) {
   const ts = Date.now()
   const provider = loadConfig()?.schedule?.speedtest_provider ?? 'cloudflare'
   console.log(`[speedtest] Starting direct speed test… (provider: ${provider})`)
@@ -450,7 +455,7 @@ export async function runSpeedTest(broadcast) {
       } catch (e) {
         console.warn('[speedtest] Meta fetch before Ookla failed:', e.message)
       }
-      const result = await runOoklaSpeedTest(vpnActive && physIface ? physIface : null, clientIsp)
+      const result = await runOoklaSpeedTest(vpnActive && physIface ? physIface : null, clientIsp, explicitServerId)
       Object.assign(row, result)
     } else if (physIface) {
       // VPN is up: bind direct test to physical interface via curl so we measure real ISP speed
@@ -516,7 +521,7 @@ export async function runSpeedTest(broadcast) {
  * Only runs if vpn_interface is configured and the interface is up.
  * Returns the VPN test row object.
  */
-export async function runVpnSpeedTest(broadcast) {
+export async function runVpnSpeedTest(broadcast, explicitServerId = null) {
   const VPN_IFACE = loadConfig()?.network?.vpn_interface ?? null
   if (!VPN_IFACE) throw new Error('No vpn_interface configured in config.yaml')
   if (!isInterfaceUp(VPN_IFACE)) throw new Error(`${VPN_IFACE} is not up`)
@@ -533,7 +538,7 @@ export async function runVpnSpeedTest(broadcast) {
         clientIsp = meta.client_isp ?? null
         Object.assign(row, meta)
       } catch { /* ignore — ISP filtering is best-effort */ }
-      const result = await runOoklaSpeedTest(VPN_IFACE, clientIsp)
+      const result = await runOoklaSpeedTest(VPN_IFACE, clientIsp, explicitServerId)
       Object.assign(row, result)
     } else {
       const vpnMeta = await getClientMetaVia(VPN_IFACE)

@@ -139,6 +139,48 @@ app.use('/api/auth/login', authLimiter)
 app.use('/api/auth/register', authLimiter)
 app.use('/api/auth', authRouter)
 
+// Discovery endpoint that the frontend calls via the backend. This runs the
+// Ookla CLI on the host and returns a JSON-normalized server list. Access is
+// protected by `requireAuth` (mounted below) so only authenticated users can
+// invoke it.
+app.get('/api/reports/ookla/servers-local', async (req, res) => {
+  try {
+    const iface = req.query.interface ? `--interface ${req.query.interface}` : ''
+    const cmd = `speedtest ${iface} --accept-license --accept-gdpr --servers --format=json`
+    const { exec } = await import('child_process')
+    const { promisify } = await import('util')
+    const pe = promisify(exec)
+    try {
+      const { stdout } = await pe(cmd, { timeout: 20000 })
+      const outStr = String(stdout || '')
+      let data
+      try {
+        data = JSON.parse(outStr)
+      } catch (e) {
+        console.warn('[ookla] Failed to JSON-parse Ookla stdout; logging raw output')
+        console.warn(outStr.slice(0, 2000))
+        throw new Error('Could not parse Ookla CLI JSON output')
+      }
+      const raw = Array.isArray(data) ? data : (data.servers || [])
+      const servers = raw.map(s => ({ id: s.id ?? s.serverId ?? s.server_id ?? s.server ?? null, name: s.name || s.server || s.sponsor || '', country: s.country || s.location || '', city: s.city || '', host: s.host || null, distance_km: s.distance_km ?? s.distance ?? null }))
+      return res.json({ servers })
+    } catch {
+      const { stdout } = await pe('speedtest --list 2>&1 || speedtest -L 2>&1', { timeout: 20000 })
+      const lines = (String(stdout || '')).split('\n').map(l => l.trim()).filter(Boolean)
+      const servers = []
+      for (const line of lines) {
+        const m = line.match(/^([0-9]+)\)\s+(.+?)\s+\(([^)]+)\)/)
+        if (m) servers.push({ id: m[1], name: m[2].trim(), location: m[3].trim() })
+      }
+      if (servers.length === 0) return res.status(502).json({ error: 'Ookla CLI did not return a parsable server list' })
+      return res.json({ servers })
+    }
+  } catch (err) {
+    if (/not found|No such file|not recognized/i.test(err.message)) return res.status(503).json({ error: 'Ookla speedtest CLI not installed on this host' })
+    return res.status(500).json({ error: err.message })
+  }
+})
+
 // All other /api routes require a valid session
 app.use('/api', requireAuth)
 
@@ -265,6 +307,19 @@ function scheduleJobs() {
         if (detectors.persistBeacons) await detectors.persistBeacons(200)
           if (detectors.persistAuthFailures) await detectors.persistAuthFailures(200)
           if (detectors.persistThreatMatches) await detectors.persistThreatMatches(200)
+          // network checks: ping direct vs tun0 and persist
+          try {
+            const net = await import('./lib/network-check.js')
+            if (net && net.persistNetworkCheck) await net.persistNetworkCheck()
+          } catch (e) { console.error('[jobs] network-check:', e.message) }
+            // Persist computed outages to DB after network checks
+            try {
+              const db = await import('./db.js')
+              if (db && db.persistOutages) {
+                const n = db.persistOutages()
+                if (n && app.locals.broadcast) app.locals.broadcast('outages.persisted', { count: n, ts: Date.now() })
+              }
+            } catch (e) { console.error('[jobs] persist-outages:', e.message) }
       } catch (e) { console.error('[jobs] detectors:', e.message) }
     })))
   }
@@ -340,7 +395,12 @@ function scheduleJobs() {
 
   if (backupDays > 0) {
     _tasks.push(cron.schedule('0 2 * * *', () => {
-      if (due('backup', backupDays * 86_400_000)) doAutoBackup()
+      if (due('backup', backupDays * 86_400_000)) {
+        try {
+          doAutoBackup()
+          try { app.locals.broadcast && app.locals.broadcast('backup.auto', { ts: Date.now() }) } catch (e) { console.error('[jobs] backup-sse:', e.message) }
+        } catch (e) { console.error('[jobs] auto-backup:', e.message) }
+      }
     }))
   }
 

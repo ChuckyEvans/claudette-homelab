@@ -33,7 +33,11 @@ const JOBS = {
     label: 'Speed Test',
     desc:  'Measures your download/upload speed and ping via Cloudflare infrastructure.',
     eta:   '~35s',
-    trigger: () => api.reports.runSpeedtest(),
+    trigger: () => {
+      const sid = window.__claudette_override_speedtest_server ?? null
+      try { delete window.__claudette_override_speedtest_server } catch (e) {}
+      return api.reports.runSpeedtest({ server_id: sid })
+    },
   },
 }
 
@@ -89,8 +93,8 @@ function RunJobDialog({ jobId, onClose, onBackground }) {
   const [status, setStatus] = useState('running')
   const [msg, setMsg] = useState('')
   const doneRef = useRef(false)
-
   useEffect(() => {
+    // Track if the job is done
     if (!job) return
     job.trigger().catch(err => {
       setStatus('error')
@@ -598,6 +602,8 @@ function ServiceRow({ svc, idx, onSave, onDelete }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) {
+  const [_per, _setPer] = useState(25) // unused per-state stub
+
   const [loading, setLoading] = useState(true)
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
@@ -695,6 +701,11 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
   }, [isDirty])
 
   function handleRunNow(jobId)     { setActiveJob(jobId) }
+  function handleRunNowWithServer(jobId) {
+    if (jobId === 'speedtest') window.__claudette_override_speedtest_server = selectedOoklaServer || null
+    if (jobId === 'vpn-speedtest') window.__claudette_override_speedtest_server = selectedOoklaServer || null
+    setActiveJob(jobId)
+  }
   function handleJobClose()        { setActiveJob(null) }
   function handleJobBackground(id) {
     setBgJobs(prev => [...prev.filter(j => j !== id), id])
@@ -756,6 +767,10 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
   const restoreInputRef = useRef(null)
   const [settingsTab, setSettingsTab] = useState('host')
   const [flags,                 setFlags]                 = useState([])
+  const [ooklaServers, setOoklaServers] = useState([])
+  const [selectedOoklaServer, setSelectedOoklaServer] = useState('')
+  const [interfaces, setInterfaces] = useState([])
+  const [selectedInterface, setSelectedInterface] = useState('')
 
   useEffect(() => {
     api.config.get()
@@ -769,6 +784,8 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
         setSpeedtestInterval(cfg.schedule?.speedtest_interval_hours ?? 4)
         setVpnSpeedtestInterval(cfg.schedule?.vpn_speedtest_interval_hours ?? 4)
         setSpeedtestProvider(cfg.schedule?.speedtest_provider ?? 'cloudflare')
+        setSelectedOoklaServer(cfg.schedule?.ookla_server_id ?? '')
+        setSelectedInterface(cfg.schedule?.ookla_interface ?? '')
         setThreatInterval(cfg.schedule?.threat_interval_hours ?? 6)
         setPingInterval(cfg.schedule?.ping_interval_minutes ?? 5)
         setDeepScanHour(cfg.schedule?.deep_scan_hour ?? 4)
@@ -813,6 +830,8 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
         setDdnsNoipUser(d.noip?.username ?? '')
         setDdnsNoipPass(d.noip?.password ?? '')
         setDdnsNoipHost(d.noip?.hostname ?? '')
+        // load available network interfaces for Ookla discovery
+        api.system.interfaces().then(list => setInterfaces(list || [])).catch(() => setInterfaces([]))
         setDdnsDuckToken(d.duckdns?.token ?? '')
         setDdnsDuckDomains(d.duckdns?.domains ?? '')
         setDdnsDynuUser(d.dynu?.username ?? '')
@@ -846,6 +865,8 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
     speedtest_interval_hours:     parseInt(speedtestInterval),
     vpn_speedtest_interval_hours: parseInt(vpnSpeedtestInterval),
     speedtest_provider:           speedtestProvider,
+    ookla_server_id:             selectedOoklaServer || null,
+    ookla_interface:             selectedInterface || null,
     backup_interval_days:          parseInt(backupIntervalDays) || 0,
     backup_keep_days:              Math.max(1, parseInt(backupKeepDays) || 7),
     internet_outage_check_seconds: Math.max(5, parseInt(internetOutageCheckSecs) || 10),
@@ -1203,7 +1224,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                       {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </div>
-                  <button onClick={() => handleRunNow(jobId)}
+                  <button onClick={() => handleRunNowWithServer(jobId)}
                     className="mt-5 flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 bg-indigo-500/5 hover:bg-indigo-500/10 rounded-lg transition-colors whitespace-nowrap">
                     <Play className="w-3 h-3" />Run now
                   </button>
@@ -1221,6 +1242,55 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                 Ookla requires the <span className="font-mono">speedtest</span> CLI binary to be installed in the container.
                 Cloudflare uses pure HTTP and works everywhere.
               </p>
+              {speedtestProvider === 'ookla' && (
+                <div className="mt-3">
+                    <div className="flex items-center gap-2 mb-2">
+                    <button onClick={async () => {
+                      try {
+                        const res = await api.reports.ooklaServers(selectedInterface)
+                        // backend may return { servers: [...] } or array directly — normalize
+                        const raw = Array.isArray(res) ? res : (res?.servers ?? [])
+                        const list = Array.isArray(raw) ? raw : []
+                        const sorted = list.sort((a,b) => {
+                          const pa = (a.ping_ms??a.ping??99999)
+                          const pb = (b.ping_ms??b.ping??99999)
+                          if (pa !== pb) return pa - pb
+                          const na = (a.name||a.sponsor||a.host||'').toLowerCase()
+                          const nb = (b.name||b.sponsor||b.host||'').toLowerCase()
+                          return na < nb ? -1 : na > nb ? 1 : 0
+                        }).slice(0,10)
+                        setOoklaServers(sorted)
+                      } catch (err) { console.error(err); alert('Failed to discover Ookla servers: '+err.message) }
+                    }}
+                      className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium">Discover servers</button>
+                    <p className="text-[11px] text-slate-500">Click to query Ookla and list top candidates (by ping).</p>
+                  </div>
+                  {ooklaServers.length > 0 && (
+                    <div className="bg-[#080812] border border-[#1a1a30] rounded-lg p-3">
+                      <div className="mb-3">
+                        <div className="text-[12px] text-slate-400 mb-2">Select network adapter to probe from</div>
+                        <select value={selectedInterface} onChange={e => { setSelectedInterface(e.target.value); markDirty() }}
+                          className="w-full bg-[#080812] border border-[#1a1a30] rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors">
+                          <option value="">Auto (default)</option>
+                          {interfaces.map(i => <option key={i.name || i.iface} value={i.name || i.iface}>{i.name || i.iface} {i.address ? ` — ${i.address}` : ''}</option>)}
+                        </select>
+                        <p className="text-[11px] text-slate-500 mt-1">Pick `eth0`, `wlan0`, `tun0`, etc. to probe via that adapter.</p>
+                      </div>
+                      <div className="text-[12px] text-slate-400 mb-2">Choose a preferred server (or Auto to let Ookla pick)</div>
+                      <select value={selectedOoklaServer} onChange={e => { setSelectedOoklaServer(e.target.value); markDirty() }}
+                        className="w-full bg-[#080812] border border-[#1a1a30] rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors">
+                        <option value="">Auto (let Ookla select fastest)</option>
+                        {ooklaServers.map(s => {
+                          const id = String(s.id || s.server_id || s.server || s.id_str || s.host)
+                          const ping = s.ping_ms ?? s.ping ?? s.latency_ms ?? null
+                          const label = `${s.sponsor || s.name || s.host} — ${s.name || s.host}`
+                          return <option key={id} value={id}>{label} {ping !== null ? ` — ${ping} ms` : ''}</option>
+                        })}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="mt-3 max-w-lg">
               <label className="block text-xs font-medium text-slate-400 mb-1">
@@ -1630,8 +1700,8 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
             {services.length === 0 ? (
               <p className="text-xs text-slate-700 py-4">No services configured. Add one above.</p>
             ) : (
-              <div className="border border-[#1a1a30] rounded-lg overflow-hidden">
-                <table className="w-full text-xs">
+                <div className="border border-[#1a1a30] rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
                   <thead>
                     <tr className="text-[10px] text-slate-600 uppercase tracking-wider border-b border-[#1a1a30] bg-[#080812]">
                       <th className="text-left px-3 py-2">Name</th>
@@ -1647,6 +1717,16 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                     ))}
                   </tbody>
                 </table>
+                {services.length > 10 && (
+                  <div className="p-2 flex items-center justify-end gap-3">
+                    <label className="text-xs text-slate-400">Per page:</label>
+                    <select className="px-2 py-1 border rounded bg-[#071025] text-sm">
+                      <option>10</option>
+                      <option>20</option>
+                      <option>50</option>
+                    </select>
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -1961,3 +2041,4 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
     </>
   )
 }
+

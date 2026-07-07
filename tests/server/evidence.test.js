@@ -1,4 +1,4 @@
-import { describe, test, expect, afterAll } from 'vitest'
+import { describe, test, expect, afterAll, beforeAll } from 'vitest'
 import request from 'supertest'
 import { getDb } from '../../server/db.js'
 import app from '../../server/index.js'
@@ -22,7 +22,7 @@ describe('Evidence endpoints', () => {
     const db = getDb()
     try {
       db.run('INSERT OR IGNORE INTO outage_diagnostics (outage_ts, traceroute, ping_detail, gateway, outage_type, captured_at) VALUES (?, ?, ?, ?, ?, ?)', [ts, 'tr', '[]', null, 'isp', Date.now()])
-    } catch (e) {
+    } catch {
       // fall back to archived table if original has been renamed
       db.run('INSERT OR IGNORE INTO outage_diagnostics_archived (outage_ts, traceroute, ping_detail, gateway, outage_type, captured_at) VALUES (?, ?, ?, ?, ?, ?)', [ts, 'tr', '[]', null, 'isp', Date.now()])
     }

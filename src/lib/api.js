@@ -102,7 +102,10 @@ export const api = {
   },
   system: {
     stats:      () => request('/system/stats'),
-    interfaces: () => request('/system/interfaces'),
+    interfaces: async () => {
+      const res = await request('/system/interfaces')
+      return res?.interfaces || []
+    },
     version:    (force) => request(`/system/version${force ? '?force=1' : ''}`),  
     backup: async () => {
       const res = await fetch('/api/system/backup', { method: 'POST', credentials: 'include' })
@@ -123,6 +126,7 @@ export const api = {
       headers: { 'Content-Type': 'application/octet-stream' },
       body: fileData,
     }),
+    backups: () => request('/system/backups'),
   },
   config: {
     status: () => request('/config/status'),
@@ -179,8 +183,10 @@ export const api = {
       if (params.offset) q.set('offset', params.offset)
       return request(`/reports/speedtest?${q}`)
     },
-    runSpeedtest:    () => request('/reports/speedtest',     { method: 'POST' }),
-    runVpnSpeedtest: () => request('/reports/speedtest/vpn', { method: 'POST' }),
+    runSpeedtest:    (opts = {}) => request(`/reports/speedtest${opts.server_id ? `?server_id=${encodeURIComponent(opts.server_id)}` : ''}`,     { method: 'POST' }),
+    runVpnSpeedtest: (opts = {}) => request(`/reports/speedtest/vpn${opts.server_id ? `?server_id=${encodeURIComponent(opts.server_id)}` : ''}`, { method: 'POST' }),
+    // Call backend discovery which runs Ookla CLI on the host
+    ooklaServers: (iface) => request(`/reports/ookla/servers-local${iface ? `?interface=${encodeURIComponent(iface)}` : ''}`),
     outages: (params = {}) => {
       const q = new URLSearchParams()
       if (params.from) q.set('from', params.from)
@@ -588,6 +594,17 @@ export async function exportToPdf(reportData, filename = 'report.pdf') {
     }
   }
 
+  // ── Uptime / Downtime summary (from persisted network checks) ───────────────
+  const netSum = reportData.summary?.networkSummary ?? null
+  if (netSum) {
+    sectionHead('Uptime Summary')
+    checkPage(16)
+    kv('Total targets checked', (netSum.totalTargets ?? 0).toLocaleString('en-GB'))
+    kv('Total failed targets',  (netSum.totalOutages ?? 0).toLocaleString('en-GB'))
+    kv('Computed uptime %',      netSum.uptimePct != null ? `${netSum.uptimePct}%` : '\u2014')
+    y += 2
+  }
+
   // ── Outage incidents ─────────────────────────────────────────────────────────
   if ((reportData.outages?.totalOutages ?? 0) > 0) {
     sectionHead('Outage Incidents')
@@ -816,4 +833,80 @@ export async function exportToPdf(reportData, filename = 'report.pdf') {
   }
 
   doc.save(filename)
+}
+
+// Export full report object to CSV with header summary + section tables
+export function exportReportToCsv(reportData, filename = 'report-report.csv') {
+  if (!reportData) return
+  const lines = []
+
+  // Header block: key,value pairs
+  lines.push('# Report Summary')
+  const hdr = reportData.rangeLabel ? { Range: reportData.rangeLabel } : {}
+  const summary = reportData.summary || {}
+  if (summary) {
+    if (summary.newDevices != null) hdr['New devices'] = summary.newDevices
+    if (summary.onlineEvents != null) hdr['Online events'] = summary.onlineEvents
+    if (summary.offlineEvents != null) hdr['Offline events'] = summary.offlineEvents
+    if (summary.portFinds != null) hdr['Port finds'] = summary.portFinds
+    if (summary.serviceDown != null) hdr['Service down events'] = summary.serviceDown
+    if (summary.scansRun != null) hdr['Scans run'] = summary.scansRun
+    if (summary.networkSummary) {
+      hdr['Network total targets'] = summary.networkSummary.totalTargets
+      hdr['Network total outages'] = summary.networkSummary.totalOutages
+      hdr['Network uptime %'] = summary.networkSummary.uptimePct
+    }
+  }
+  for (const k of Object.keys(hdr)) lines.push(`${k},${String(hdr[k])}`)
+  lines.push('')
+
+  // Outages table
+  if (reportData.outages && reportData.outages.outages && reportData.outages.outages.length) {
+    lines.push('# Outages')
+    lines.push(['index','start','end','type','duration_ms','ongoing','uptime_before_ms'].join(','))
+    reportData.outages.outages.forEach((o, i) => {
+      const row = [i+1, o.start || '', o.end || '', o.outage_type || '', o.durationMs || '', !!o.ongoing, o.uptimeBeforeMs || '']
+      lines.push(row.map(v => typeof v === 'string' ? `"${v.replace(/"/g,'""') }"` : String(v)).join(','))
+    })
+    lines.push('')
+  }
+
+  // Speedtests
+  if (reportData.speedtests && reportData.speedtests.length) {
+    lines.push('# Speedtests')
+    lines.push(['ts','via','download_mbps','upload_mbps','ping_ms','server_name'].join(','))
+    for (const s of reportData.speedtests) {
+      const r = [s.ts || '', s.via || '', s.download_mbps ?? '', s.upload_mbps ?? '', s.ping_ms ?? '', s.server_name ?? '']
+      lines.push(r.map(v => typeof v === 'string' ? `"${v.replace(/"/g,'""') }"` : String(v)).join(','))
+    }
+    lines.push('')
+  }
+
+  // Daily activity
+  if (reportData.daily && reportData.daily.length) {
+    lines.push('# Daily Activity')
+    lines.push(['date','new','online','offline','ports'].join(','))
+    for (const d of reportData.daily) lines.push([d.date, d.new ?? '', d.online ?? '', d.offline ?? '', d.ports ?? ''].join(','))
+    lines.push('')
+  }
+
+  // Recent events (flatten payload minimally)
+  if (reportData.events && reportData.events.length) {
+    lines.push('# Recent Events')
+    lines.push(['ts','event','device','source','payload'].join(','))
+    for (const e of reportData.events) {
+      const payload = typeof e.payload === 'object' ? JSON.stringify(e.payload).replace(/"/g,'""') : (e.payload || '')
+      const row = [e.ts || '', e.event || '', e.hostname || e.ip || '', e.source || '', `"${payload}"`]
+      lines.push(row.join(','))
+    }
+    lines.push('')
+  }
+
+  const csv = lines.join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(link.href)
 }

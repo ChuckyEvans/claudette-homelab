@@ -1,10 +1,13 @@
 import { Router } from 'express'
 import express from 'express'
 import { exec } from 'child_process'
-import { getDb } from '../db.js'
+import fs from 'fs'
+import path from 'path'
+import { getDb, audit } from '../db.js'
 // PDF generation is required lazily where used
 import { runSpeedTest, runVpnSpeedTest, getSpeedTestHistory, isInterfaceUp } from '../utils/speedtest.js'
 import { loadConfig } from '../config.js'
+// use existing `exec` imported above
 
 const router = Router()
 
@@ -162,6 +165,21 @@ router.get('/', (req, res) => {
     const serviceDown   = db.get("SELECT COUNT(*) AS n FROM audit_log WHERE ts >= ? AND ts <= ? AND event = 'service.down'", [from, to]).n
     const scansRun      = db.get("SELECT COUNT(*) AS n FROM audit_log WHERE ts >= ? AND ts <= ? AND event LIKE 'scan.complete'", [from, to]).n
 
+    // Aggregate persisted network checks (if table exists)
+    let networkSummary = null
+    try {
+      const ncExists = db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='network_check_runs'")
+      if (ncExists) {
+        const sums = db.get(`SELECT SUM(total_targets) AS total_targets, SUM(total_outages) AS total_outages FROM network_check_runs WHERE ts >= ? AND ts <= ?`, [from, to])
+        const totalTargets = Number(sums.total_targets || 0)
+        const totalOutages = Number(sums.total_outages || 0)
+        const uptimePct = totalTargets > 0 ? parseFloat(((1 - (totalOutages / totalTargets)) * 100).toFixed(3)) : null
+        networkSummary = { totalTargets, totalOutages, uptimePct }
+      }
+    } catch {
+      networkSummary = null
+    }
+
     res.json({
       events: allRows.map(r => ({ ...r, payload: JSON.parse(r.payload) })),
       total,
@@ -169,10 +187,10 @@ router.get('/', (req, res) => {
       offset,
       from,
       to,
-      summary: { newDevices, onlineEvents, offlineEvents, portFinds, serviceDown, scansRun },
+      summary: { newDevices, onlineEvents, offlineEvents, portFinds, serviceDown, scansRun, networkSummary },
     })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
+  } catch (_err) {
+    res.status(500).json({ error: _err.message })
   }
 })
 
@@ -390,17 +408,17 @@ router.get('/outages', (req, res) => {
     let diagRows = []
     try {
       diagRows = db.all(`SELECT outage_ts, traceroute, ping_detail, gateway, captured_at FROM outage_diagnostics`)
-    } catch (e) {
+    } catch {
       // table missing or archived — continue without diagnostics
       diagRows = []
     }
-    const diagMap  = new Map(diagRows.map(r => [r.outage_ts, r]))
+      const diagMap = new Map(diagRows.map(r => [r.outage_ts, r]))
     const cfg = loadConfig()
     let windowedWithDiag = windowed.map(o => {
       const d = diagMap.get(o.start)
       if (!d) return o
       let pingDetail = null
-      try { pingDetail = JSON.parse(d.ping_detail) } catch {}
+          try { pingDetail = JSON.parse(d.ping_detail) } catch {}
       const pingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
       return { ...o, diagnostics: { traceroute: d.traceroute, ping_detail: pingDetail, gateway: d.gateway, ping_hosts: pingHosts, captured_at: d.captured_at } }
     })
@@ -429,8 +447,8 @@ router.get('/outages', (req, res) => {
       page,
       limit,
     })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
+  } catch (_err) {
+    res.status(500).json({ error: _err.message })
   }
 })
 
@@ -499,7 +517,7 @@ router.get('/outages/:ts', (req, res) => {
     let row = null
     try {
       row = getDb().get(`SELECT outage_ts, traceroute, ping_detail, gateway, outage_type, captured_at FROM outage_diagnostics WHERE outage_ts = ?`, [ts])
-    } catch (e) {
+    } catch {
       return res.status(404).json({ error: 'no diagnostics stored for this outage (archived or missing)' })
     }
     if (!row) return res.status(404).json({ error: 'no diagnostics stored for this outage' })
@@ -589,8 +607,9 @@ router.get('/mtr-snapshots', (req, res) => {
 // POST /api/reports/speedtest — trigger a manual direct speed test
 router.post('/speedtest', async (req, res) => {
   try {
+    const serverId = req.query.server_id ?? req.body?.server_id ?? null
     res.json({ ok: true, message: 'Direct speed test started' })
-    setImmediate(() => runSpeedTest(req.app.locals.broadcast).catch(e => console.error('[speedtest/manual]', e.message)))
+    setImmediate(() => runSpeedTest(req.app.locals.broadcast, serverId).catch(e => console.error('[speedtest/manual]', e.message)))
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -606,10 +625,99 @@ router.post('/speedtest/vpn', async (req, res) => {
     if (!isInterfaceUp(vpnIface)) {
       return res.status(400).json({ error: `VPN interface ${vpnIface} is not up — is the VPN connected?` })
     }
+    const serverId = req.query.server_id ?? req.body?.server_id ?? null
     res.json({ ok: true, message: 'VPN speed test started' })
-    setImmediate(() => runVpnSpeedTest(req.app.locals.broadcast).catch(e => console.error('[speedtest/vpn]', e.message)))
+    setImmediate(() => runVpnSpeedTest(req.app.locals.broadcast, serverId).catch(e => console.error('[speedtest/vpn]', e.message)))
   } catch (err) {
     res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/reports/ookla/servers — discover nearby Ookla servers (returns JSON)
+router.get('/ookla/servers', async (req, res) => {
+  try {
+    // Prefer machine-local Ookla CLI which supports JSON output
+    // Try a JSON-enabled listing first; fall back to human list if not supported
+    try {
+      const iface = req.query.interface ? `--interface ${req.query.interface}` : ''
+      const cmd = `speedtest ${iface} --accept-license --accept-gdpr --servers --format=json`
+      const result = await exec(cmd, { timeout: 20000 })
+      const stdout = typeof result === 'string' ? result : (result && result.stdout) || ''
+      const data = JSON.parse(stdout)
+      // Expecting an array of servers (provider may differ); normalize shape
+      const raw = Array.isArray(data) ? data : (data.servers || [])
+      const servers = raw.map(s => {
+        const id = s.id ?? s.serverId ?? s.server_id ?? s.server ?? null
+        const name = s.name || s.server || s.sponsor || ''
+        const country = s.country || s.location || ''
+        const city = s.city || ''
+        const host = s.host || null
+        const distance_km = s.distance_km ?? s.distance ?? null
+        return { id, name, country, city, host, distance_km }
+      })
+      return res.json({ servers })
+    } catch {
+      // If JSON mode unsupported, attempt to call plain list and parse basic lines
+      const result2 = await exec('speedtest --list 2>&1 || speedtest -L 2>&1', { timeout: 20000 })
+      const stdout2 = typeof result2 === 'string' ? result2 : (result2 && result2.stdout) || ''
+      const lines = (stdout2 || '').split('\n').map(l => l.trim()).filter(Boolean)
+      const servers = []
+      for (const line of lines) {
+        // Typical line: '12345) Example ISP (City, Country) [host:port]'
+        const m = line.match(/^([0-9]+)\)\s+(.+?)\s+\(([^)]+)\)/)
+        if (m) {
+          servers.push({ id: m[1], name: m[2].trim(), location: m[3].trim() })
+        }
+      }
+      if (servers.length === 0) return res.status(502).json({ error: 'Ookla CLI did not return a parsable server list' })
+      return res.json({ servers })
+    }
+  } catch (err) {
+    if (/not found|No such file|not recognized/i.test(err.message)) return res.status(503).json({ error: 'Ookla speedtest CLI not installed on this host' })
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/reports/ookla/servers-local — discovery allowed only from localhost
+// This is intended for the UI to call via the backend (server will call speedtest
+// locally) without exposing discovery to remote clients.
+router.get('/ookla/servers-local', async (req, res) => {
+  try {
+    const remote = req.ip || req.connection?.remoteAddress || ''
+    // Allow only localhost addresses
+    const ok = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)
+    if (!ok) return res.status(403).json({ error: 'Forbidden: discovery allowed from localhost only' })
+
+    try {
+      const iface = req.query.interface ? `--interface ${req.query.interface}` : ''
+      const cmd = `speedtest ${iface} --accept-license --accept-gdpr --servers --format=json`
+      const { stdout } = await exec(cmd, { timeout: 20000 })
+      const data = JSON.parse(String(stdout || ''))
+      const raw = Array.isArray(data) ? data : (data.servers || [])
+      const servers = raw.map(s => {
+        const id = s.id ?? s.serverId ?? s.server_id ?? s.server ?? null
+        const name = s.name || s.server || s.sponsor || ''
+        const country = s.country || s.location || ''
+        const city = s.city || ''
+        const host = s.host || null
+        const distance_km = s.distance_km ?? s.distance ?? null
+        return { id, name, country, city, host, distance_km }
+      })
+      return res.json({ servers })
+    } catch {
+      const { stdout } = await exec('speedtest --list 2>&1 || speedtest -L 2>&1', { timeout: 20000 })
+      const lines = (String(stdout || '')).split('\n').map(l => l.trim()).filter(Boolean)
+      const servers = []
+      for (const line of lines) {
+        const m = line.match(/^([0-9]+)\)\s+(.+?)\s+\(([^)]+)\)/)
+        if (m) servers.push({ id: m[1], name: m[2].trim(), location: m[3].trim() })
+      }
+      if (servers.length === 0) return res.status(502).json({ error: 'Ookla CLI did not return a parsable server list' })
+      return res.json({ servers })
+    }
+  } catch (err) {
+    if (/not found|No such file|not recognized/i.test(err.message)) return res.status(503).json({ error: 'Ookla speedtest CLI not installed on this host' })
+    return res.status(500).json({ error: err.message })
   }
 })
 

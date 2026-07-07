@@ -7,6 +7,7 @@ import path from 'path'
 import zlib from 'node:zlib'
 import { fileURLToPath } from 'url'
 import { getDb, getDbPath, getDataDir, resetDb, audit } from '../db.js'
+import { requireAuth, requireRole } from '../middleware/auth.js'
 import { getConfigPath, loadConfig, resetConfig } from '../config.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -20,6 +21,8 @@ const { version: CURRENT_VERSION } = JSON.parse(
 let _versionCache = null
 let _versionCacheAt = 0
 const VERSION_CACHE_MS = 60 * 60 * 1000
+// Build timestamp (can be provided at Docker build time via BUILD_TIME arg)
+const BUILD_TIME = process.env.BUILD_TIME || null
 
 const router = Router()
 
@@ -181,7 +184,7 @@ export function doAutoBackup() {
 }
 
 // ── POST /api/system/backup — create & download a backup bundle ───────────────
-router.post('/backup', (req, res) => {
+router.post('/backup', requireAuth, requireRole('admin'), (req, res) => {
   try {
     const bundle   = buildBackupBundle()
     const filename = `claudette-backup-${localDateStr()}.claudette.gz`
@@ -194,9 +197,23 @@ router.post('/backup', (req, res) => {
   }
 })
 
+// GET /api/system/backup?name=filename — serve an existing backup file (admin only)
+router.get('/backup', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const name = req.query.name
+    if (!name) return res.status(400).json({ error: 'name required' })
+    const backupDir = path.join(getDataDir(), 'backups')
+    const file = path.join(backupDir, path.basename(name))
+    if (!fs.existsSync(file)) return res.status(404).json({ error: 'Not found' })
+    res.download(file)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── POST /api/system/restore — restore from an uploaded backup bundle ─────────
 // Accepts the JSON bundle as a raw body (up to 50 MB).
-router.post('/restore', express.raw({ type: '*/*', limit: '50mb' }), (req, res) => {
+router.post('/restore', requireAuth, requireRole('admin'), express.raw({ type: '*/*', limit: '50mb' }), (req, res) => {
   try {
     let bodyBuf = req.body
     // Require gzip — detect magic bytes 1f 8b
@@ -252,6 +269,23 @@ router.post('/restore', express.raw({ type: '*/*', limit: '50mb' }), (req, res) 
   }
 })
 
+// GET /api/system/backups — list available backup bundles (admin only)
+router.get('/backups', requireAuth, requireRole('admin'), (req, res) => {
+  try {
+    const backupDir = path.join(getDataDir(), 'backups')
+    if (!fs.existsSync(backupDir)) return res.json({ items: [] })
+    const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.claudette.gz') || f.startsWith('claudette-backup-'))
+    const items = files.map(f => {
+      const p = path.join(backupDir, f)
+      const s = fs.statSync(p)
+      return { name: f, size: s.size, mtime: s.mtimeMs }
+    }).sort((a,b) => b.mtime - a.mtime)
+    res.json({ items })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── Version / update check ───────────────────────────────────────────────────
 router.get('/version', async (req, res) => {
   const now = Date.now()
@@ -273,11 +307,12 @@ router.get('/version', async (req, res) => {
       latest: latest || CURRENT_VERSION,
       updateAvailable,
       releaseUrl: updateAvailable ? (data.html_url ?? null) : null,
+      build_time: BUILD_TIME,
     }
     _versionCacheAt = now
   } catch {
     // Return current version even when GitHub is unreachable
-    _versionCache = { current: CURRENT_VERSION, latest: null, updateAvailable: false, releaseUrl: null, error: 'unreachable' }
+    _versionCache = { current: CURRENT_VERSION, latest: null, updateAvailable: false, releaseUrl: null, error: 'unreachable', build_time: BUILD_TIME }
     _versionCacheAt = now
   }
   res.json(_versionCache)

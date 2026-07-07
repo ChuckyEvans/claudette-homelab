@@ -9,6 +9,7 @@ const NAV = [
   { id: 'threats',   label: 'Exposure',  icon: ShieldAlert,     hint: 'Open port risk assessment per device' },
   { id: 'system',    label: 'System',    icon: Cpu,             hint: 'CPU, memory, temperature & Pi hardware stats' },
   { id: 'reports',   label: 'Reports',   icon: BarChart2,       hint: 'Speed tests, uptime history & charts' },
+  { id: 'backups',   label: 'Backups',   icon: ClipboardList,   hint: 'Create, download and restore backups (admin only)' },
   { id: 'users',     label: 'Users',     icon: ShieldAlert,     hint: 'Manage user accounts and roles' },
   // Incidents merged into Dashboard — navigation entry removed
   { id: 'audit',     label: 'Audit Log', icon: ClipboardList,   hint: 'Full record of events & configuration changes' },
@@ -32,7 +33,7 @@ const SIDEBAR_MIN = 160
 const SIDEBAR_MAX = 400
 const SIDEBAR_DEFAULT = 208
 
-export default function Layout({ page, setPage, services, _threats, username, onLogout, _updateInfo, notifications = [], unreadCount = 0, onDismissNotification, onClearNotifications, onMarkAllRead, logsBadge = {}, children }) {
+export default function Layout({ page, setPage, services, _threats, username, onLogout, _updateInfo, notifications = [], unreadCount = 0, onDismissNotification, onClearNotifications, onMarkAllRead, logsBadge = {}, backupsCount = 0, children }) {
   const failCount = services?.results?.filter(r => !r.ok).length ?? 0
   const allOk     = failCount === 0
 
@@ -144,7 +145,8 @@ export default function Layout({ page, setPage, services, _threats, username, on
             const errCt   = isLogs ? (logsBadge?.error ?? 0) : 0
             const warnCt  = isLogs ? (logsBadge?.warn  ?? 0) : 0
             const infoCt  = isLogs ? (logsBadge?.info  ?? 0) : 0
-            const hasBadge = isLogs && (errCt > 0 || warnCt > 0 || infoCt > 0)
+            const isBackups = id === 'backups'
+            const hasBadge = (isLogs && (errCt > 0 || warnCt > 0 || infoCt > 0)) || (isBackups && (backupsCount > 0))
             return (
               <div key={id} className="relative group">
                 <button
@@ -159,6 +161,9 @@ export default function Layout({ page, setPage, services, _threats, username, on
                   {!collapsed && <span className="flex-1 text-left">{label}</span>}
                   {!collapsed && hasBadge && (
                     <span className="flex items-center gap-1">
+                      {isBackups && backupsCount > 0 && (
+                        <span className="min-w-[18px] h-[18px] px-1 bg-sky-700/20 border border-sky-700/40 text-sky-200 text-[10px] font-bold rounded-full flex items-center justify-center leading-none">{backupsCount > 99 ? '99+' : backupsCount}</span>
+                      )}
                       {errCt  > 0 && <span className="min-w-[18px] h-[18px] px-1 bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold rounded-full flex items-center justify-center leading-none">{errCt  > 99 ? '99+' : errCt}</span>}
                       {warnCt > 0 && <span className="min-w-[18px] h-[18px] px-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-bold rounded-full flex items-center justify-center leading-none">{warnCt > 99 ? '99+' : warnCt}</span>}
                       {infoCt > 0 && <span className="min-w-[18px] h-[18px] px-1 bg-sky-500/20 border border-sky-500/40 text-sky-300 text-[10px] font-bold rounded-full flex items-center justify-center leading-none">{infoCt > 99 ? '99+' : infoCt}</span>}
@@ -176,6 +181,10 @@ export default function Layout({ page, setPage, services, _threats, username, on
             )
           })}
         </nav>
+        {/* Backups badge when present */}
+        <div className="px-3 py-2">
+          {/* placeholder for backups badge rendered via nav mapping */}
+        </div>
 
         {/* User + logout */}
         {username && (

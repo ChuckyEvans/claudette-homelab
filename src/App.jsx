@@ -18,6 +18,7 @@ const AuditLog      = lazy(() => import('./components/AuditLog.jsx'))
 const Settings      = lazy(() => import('./components/Settings.jsx'))
 const AboutPage     = lazy(() => import('./components/AboutPage.jsx'))
 const Reports       = lazy(() => import('./components/Reports.jsx'))
+const Backups       = lazy(() => import('./components/Backups.jsx'))
 const LogsPage      = lazy(() => import('./components/LogsPage.jsx'))
 const UsersPage      = lazy(() => import('./components/Users.jsx'))
 
@@ -85,6 +86,15 @@ export default function App() {
   // ── Logs badge — counts of new log entries since user last viewed the Logs page ─
   const [logsBadge,   setLogsBadge]   = useState({ info: 0, warn: 0, error: 0, debug: 0 })
   const logsLastSeen = useRef(parseInt(getUIPref('logs_last_seen') ?? '0') || 0)
+  const [backupsCount, setBackupsCount] = useState(0)
+  function getCookie(name) {
+    const v = document.cookie.split('; ').find(r => r.startsWith(name + '='))
+    return v ? decodeURIComponent(v.split('=')[1]) : null
+  }
+  function setCookie(name, value) {
+    // session cookie
+    document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(String(value))}; path=/`;
+  }
 
   const [deepScan, setDeepScan] = useState({ running: false, done: 0, total: 0, currentIp: null })
   const [lastScanDurationMs,      setLastScanDurationMs]      = useState(() => { const v = localStorage.getItem('claudette:lastScanMs'); return v ? Number(v) : null })
@@ -217,6 +227,12 @@ export default function App() {
     api.threats.get().then(setThreats).catch(console.error)
     api.network.get().then(d => setNetworkScan(prev => ({ ...prev, ...d }))).catch(console.error)
     api.system.stats().then(setSystemStats).catch(console.error)
+    api.system.backups().then(r => {
+      const items = r.items || []
+      const lastSeen = Number(getCookie('backups_last_seen') || 0)
+      const unseen = items.filter(it => (it.mtime || 0) > lastSeen).length
+      setBackupsCount(unseen)
+    }).catch(() => {})
     api.config.get().catch(() => {})
   }, [auth.authenticated])
 
@@ -331,6 +347,15 @@ export default function App() {
         console.error('[device_error]', data)
         setDbErrors(prev => [...prev, data])
       }
+      if (type === 'backup.auto') {
+          api.system.backups().then(r => {
+            const items = r.items || []
+            const lastSeen = Number(getCookie('backups_last_seen') || 0)
+            const unseen = items.filter(it => (it.mtime || 0) > lastSeen).length
+            setBackupsCount(unseen)
+          }).catch(() => {})
+          addToast && addToast('Scheduled backup completed', 'update')
+        }
     })
     return () => es.close()
   }, [auth.authenticated, addToast])
@@ -386,6 +411,7 @@ export default function App() {
     system: SystemStats,
     audit: AuditLog,
     reports:  Reports,
+    backups:  Backups,
     logs:     LogsPage,
     users:    UsersPage,
     settings: Settings,
@@ -410,6 +436,11 @@ export default function App() {
     }
     setPageLoading(true)
     setPage(newPage)
+    // Mark backups as seen when opening the Backups page
+    if (newPage === 'backups') {
+      try { setCookie('backups_last_seen', Date.now()) } catch { /* ignore */ }
+      setBackupsCount(0)
+    }
     // One frame is enough for the new component to mount and take over
     requestAnimationFrame(() => setTimeout(() => setPageLoading(false), 120))
   }, [page, settingsDirty])
@@ -471,6 +502,7 @@ export default function App() {
         onClearNotifications={clearAllNotifications}
         onMarkAllRead={markAllRead}
         logsBadge={logsBadge}
+        backupsCount={backupsCount}
       >
         {pageLoading && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#080812]/60 backdrop-blur-[2px] pointer-events-none">
@@ -483,6 +515,7 @@ export default function App() {
           </div>
         }>
           <Page
+            addToast={addToast}
             services={services}
             threats={threats}
             networkScan={networkScan}
