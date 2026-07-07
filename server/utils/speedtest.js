@@ -295,6 +295,23 @@ async function getOoklaServers(iface) {
   return []
 }
 
+// Returns servers enriched with last known ping (ms) from DB if available
+export async function listOoklaServersWithPing(iface) {
+  const servers = await getOoklaServers(iface)
+  if (!servers || servers.length === 0) return []
+  try {
+    const db = getDb()
+    const pings = new Map()
+    const rows = db.all('SELECT server_id, ping_ms FROM speedtest_results WHERE server_id IS NOT NULL ORDER BY ts DESC')
+    for (const r of rows) {
+      if (!pings.has(r.server_id)) pings.set(String(r.server_id), r.ping_ms)
+    }
+    return servers.map(s => ({ ...s, last_ping_ms: pings.get(String(s.id)) ?? null }))
+  } catch (e) {
+    return servers
+  }
+}
+
 /**
  * Run a speed test using the Ookla CLI.
  * @param {string|null} iface      Network interface to bind to (null = default route)
@@ -308,11 +325,11 @@ async function runOoklaSpeedTest(iface, clientIsp = null, explicitServerId = nul
   // Prefer a third-party server to avoid biased same-ISP results.
   // Only fall back to an ISP-owned server if no other options exist.
   let serverFlag = ''
-  // If caller provided an explicit server id, prefer it
+  // If caller provided an explicit server id, prefer it and skip auto-selection
   if (explicitServerId) {
     serverFlag = `--server-id ${explicitServerId}`
   }
-  if (clientIsp) {
+  if (clientIsp && !explicitServerId) {
     try {
       const servers = await getOoklaServers(iface)
       if (servers.length > 0) {

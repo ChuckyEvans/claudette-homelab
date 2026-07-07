@@ -163,7 +163,17 @@ app.get('/api/reports/ookla/servers-local', async (req, res) => {
       }
       const raw = Array.isArray(data) ? data : (data.servers || [])
       const servers = raw.map(s => ({ id: s.id ?? s.serverId ?? s.server_id ?? s.server ?? null, name: s.name || s.server || s.sponsor || '', country: s.country || s.location || '', city: s.city || '', host: s.host || null, distance_km: s.distance_km ?? s.distance ?? null }))
-      return res.json({ servers })
+      // Enrich with last-known ping from DB if available
+      try {
+        const { listOoklaServersWithPing } = await import('./utils/speedtest.js')
+        const enriched = await listOoklaServersWithPing(req.query.interface ? req.query.interface : null)
+        // Map by id for quick lookup
+        const map = new Map(enriched.map(s => [String(s.id), s.last_ping_ms]))
+        const out = servers.map(s => ({ ...s, last_ping_ms: map.get(String(s.id)) ?? null }))
+        return res.json({ servers: out })
+      } catch (e) {
+        return res.json({ servers })
+      }
     } catch {
       const { stdout } = await pe('speedtest --list 2>&1 || speedtest -L 2>&1', { timeout: 20000 })
       const lines = (String(stdout || '')).split('\n').map(l => l.trim()).filter(Boolean)

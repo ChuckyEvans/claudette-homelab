@@ -627,10 +627,15 @@ export function persistOutages() {
       // Defensive: compute duration from detected_at->end when available
       let duration = Number(o.durationMs)
       if (o.payload && o.payload.detected_at) {
-        const det = Number(o.payload.detected_at)
+        let det = Number(o.payload.detected_at)
+        // If detected_at looks like a seconds-since-epoch (e.g., 10-digit), convert to ms
         if (isFinite(det) && det > 0) {
+          if (det < 1e12) det = det * 1000
+          // Use detected_at as authoritative start when present
           const basisEnd = end || Date.now()
           duration = Math.round(basisEnd - det)
+          // override start to be detected_at (ms)
+          start = det
         }
       }
       if (!isFinite(duration) || duration < 0) {
@@ -851,16 +856,16 @@ export function upsertDevice(device) {
 
   // When a real MAC is discovered for a device previously stored without one, remove the placeholder
   if (device.mac) {
-    db.run("DELETE FROM devices WHERE mac = ?", [`noMAC:${device.ip}`])
+    enqueueWrite(() => runWithRetry(db, () => db.run("DELETE FROM devices WHERE mac = ?", [`noMAC:${device.ip}`])))
   }
 
   // If another device previously held this IP (DHCP reassignment), evict it first
-  db.run("DELETE FROM devices WHERE ip = ? AND mac != ?", [device.ip, pk])
+  enqueueWrite(() => runWithRetry(db, () => db.run("DELETE FROM devices WHERE ip = ? AND mac != ?", [device.ip, pk])))
 
   const isActive = device.status === 'online' || device.status === 'filtered'
   const effectiveStatus = device.status === 'online' ? 'online' : device.status === 'filtered' ? 'filtered' : 'offline'
 
-  db.run(`
+  enqueueWrite(() => runWithRetry(db, () => db.run(`
     INSERT INTO devices (mac, ip, vendor, hostname, hostname_stale, status, first_seen, last_seen, last_online, updated_at, latency, os, ports, host_scripts, traceroute)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(mac) DO UPDATE SET
@@ -890,11 +895,12 @@ export function upsertDevice(device) {
     JSON.stringify(device.ports ?? []),
     JSON.stringify(device.hostScripts ?? []),
     JSON.stringify(device.traceroute ?? []),
-  ])
+  ]))
 }
 
 export function clearAllDevices() {
-  getDb().run('DELETE FROM devices')
+  const db = getDb()
+  enqueueWrite(() => runWithRetry(db, () => db.run('DELETE FROM devices')))
 }
 
 /**
@@ -926,10 +932,11 @@ export function clearPhantomDevices() {
 }
 
 export function clearDevicePorts(mac) {
-  getDb().run(
+  const db = getDb()
+  enqueueWrite(() => runWithRetry(db, () => db.run(
     "UPDATE devices SET ports = '[]', host_scripts = '[]', traceroute = '[]' WHERE mac = ?",
     [mac]
-  )
+  )))
 }
 
 /** Mark devices offline and return the array of {mac, ip, hostname} that actually changed. */
@@ -949,10 +956,11 @@ export function markOffline(keepMacs) {
 
 export function touchDeviceStatus(mac, status, latency) {
   const now = Date.now()
+  const db = getDb()
   if (status === 'online') {
-    getDb().run('UPDATE devices SET status = ?, latency = ?, last_seen = ? WHERE mac = ?', [status, latency ?? null, now, mac])
+    enqueueWrite(() => runWithRetry(db, () => db.run('UPDATE devices SET status = ?, latency = ?, last_seen = ? WHERE mac = ?', [status, latency ?? null, now, mac])))
   } else {
-    getDb().run("UPDATE devices SET status = 'offline' WHERE mac = ?", [mac])
+    enqueueWrite(() => runWithRetry(db, () => db.run("UPDATE devices SET status = 'offline' WHERE mac = ?", [mac])))
   }
 }
 
