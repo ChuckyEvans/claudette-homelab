@@ -895,7 +895,7 @@ export function upsertDevice(device) {
     JSON.stringify(device.ports ?? []),
     JSON.stringify(device.hostScripts ?? []),
     JSON.stringify(device.traceroute ?? []),
-  ]))
+  ])))
 }
 
 export function clearAllDevices() {
