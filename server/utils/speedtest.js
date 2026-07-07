@@ -366,6 +366,7 @@ async function runOoklaSpeedTest(iface, clientIsp = null, explicitServerId = nul
     client_lat:       null,
     client_lon:       null,
     server_host:      j.server?.host            ?? null,
+    server_id:        j.server?.id ?? null,
     server_name:      j.server?.name ? `${j.server.name} (${j.server.id})` : null,
     server_location:  j.server?.location        ?? null,
     server_country:   j.server?.country         ?? null,
