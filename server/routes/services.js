@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import { execSync, exec } from 'child_process'
 import path from 'path'
+import { fileURLToPath } from 'url'
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import { NodeSSH } from 'node-ssh'
 import { loadConfig } from '../config.js'
 import { audit, getDb, getVpnState, setVpnState } from '../db.js'
