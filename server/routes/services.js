@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { execSync, exec } from 'child_process'
+import path from 'path'
 import { NodeSSH } from 'node-ssh'
 import { loadConfig } from '../config.js'
 import { audit, getDb, getVpnState, setVpnState } from '../db.js'
