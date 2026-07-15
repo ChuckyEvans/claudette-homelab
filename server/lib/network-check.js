@@ -67,12 +67,21 @@ export async function persistNetworkCheck() {
     try {
       const db = (await import('../db.js')).getDb()
       const now = Date.now()
-      const runStmt = db.prepare('INSERT INTO network_check_runs (ts, iface, total_targets, total_outages) VALUES (?, ?, ?, ?)')
-      runStmt.run(now, iface, results.length, results.filter(r=>!r.direct && !r.tun).length)
+      db.run('INSERT INTO network_check_runs (ts, iface, total_targets, total_outages) VALUES (?, ?, ?, ?)', [
+        now,
+        iface,
+        results.length,
+        results.filter(r => !r.direct && !r.tun).length,
+      ])
       const runId = db.get('SELECT last_insert_rowid() as id').id
-      const ins = db.prepare('INSERT INTO network_checks (run_id, target, direct_ok, tun_ok, outage) VALUES (?, ?, ?, ?, ?)')
       for (const r of results) {
-        ins.run(runId, r.target, r.direct?1:0, r.tun?1:0, (!r.direct && !r.tun)?1:0)
+        db.run('INSERT INTO network_checks (run_id, target, direct_ok, tun_ok, outage) VALUES (?, ?, ?, ?, ?)', [
+          runId,
+          r.target,
+          r.direct ? 1 : 0,
+          r.tun ? 1 : 0,
+          (!r.direct && !r.tun) ? 1 : 0,
+        ])
       }
     } catch (e) {
       audit('network.check.persist.error', { message: e.message, stack: e.stack }, 'system', null)

@@ -1,9 +1,6 @@
 import { Router } from 'express'
-import express from 'express'
 import { exec } from 'child_process'
-import fs from 'fs'
-import path from 'path'
-import { getDb, audit } from '../db.js'
+import { getDb } from '../db.js'
 // PDF generation is required lazily where used
 import { runSpeedTest, runVpnSpeedTest, getSpeedTestHistory, isInterfaceUp } from '../utils/speedtest.js'
 import { loadConfig } from '../config.js'
@@ -13,67 +10,211 @@ const router = Router()
 
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
 
-// Compute outages given DB and range. Returns array of outage objects.
-function computeOutages(db, from, to) {
-  // Pull ALL down/up transitions (not windowed) so we can pair them correctly
-  let events = db.all(
-    `SELECT ts, event, payload FROM audit_log WHERE event IN ('internet.down','internet.up') ORDER BY ts ASC`
-  )
+function parseInternetCheckRow(row) {
+  try {
+    const payload = JSON.parse(row.payload)
+    return {
+      ts: Number(row.ts),
+      ok: Boolean(payload.ok),
+      outage_type: payload.outage_type ?? null,
+    }
+  } catch {
+    return null
+  }
+}
 
-  // Normalize timestamps: some environments store ts in seconds instead of ms.
-  // If the first timestamp looks like seconds (less than 1e12), convert all to ms.
-  if (events && events.length > 0 && events[0].ts && events[0].ts < 1e12) {
-    events = events.map(e => ({ ...e, ts: Number(e.ts) * 1000 }))
+function loadInternetCheckRows(db, from, to) {
+  const rows = db.all(
+    `SELECT ts, payload FROM audit_log WHERE event = 'internet.check' AND ts >= ? AND ts <= ? ORDER BY ts ASC`,
+    [from, to]
+  )
+  const previous = db.get(
+    `SELECT ts, payload FROM audit_log WHERE event = 'internet.check' AND ts < ? ORDER BY ts DESC LIMIT 1`,
+    [from]
+  )
+  return [previous, ...rows].filter(Boolean).map(parseInternetCheckRow).filter(Boolean)
+}
+
+function computeWeightedInternetUptime(checks, from, to) {
+  if (!checks.length || to <= from) return 0
+  const series = checks.map(check => ({ ...check }))
+  if (series[0].ts > from) {
+    series.unshift({ ...series[0], ts: from })
   }
 
+  let upMs = 0
+  let totalMs = 0
+  for (let i = 0; i < series.length; i++) {
+    const current = series[i]
+    const next = series[i + 1]
+    const intervalStart = Math.max(current.ts, from)
+    const intervalEnd = Math.min(next?.ts ?? to, to)
+    if (intervalEnd <= intervalStart) continue
+    const delta = intervalEnd - intervalStart
+    totalMs += delta
+    if (current.ok) upMs += delta
+  }
+
+  return totalMs > 0 ? parseFloat(((upMs / totalMs) * 100).toFixed(3)) : 0
+}
+
+function pairOutagesFromChecks(checks, nowMs = Date.now()) {
   const outages = []
   let downTs = null
   let downType = null
   let lastUpTs = null
 
-  if (!events || events.length === 0) {
-    const checks = db.all(`SELECT ts, payload FROM audit_log WHERE event = 'internet.check' ORDER BY ts ASC`)
-    for (const c of checks) {
-      let p = null
-      try { p = JSON.parse(c.payload) } catch { p = null }
-      const ok = p ? Boolean(p.ok) : false
-      if (!ok && downTs === null) {
-        downTs = c.ts
-        downType = p?.outage_type ?? null
-      } else if (ok && downTs !== null) {
-        const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-        outages.push({ start: downTs, end: c.ts, durationMs: c.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
-        lastUpTs = c.ts
-        downTs = null
-        downType = null
-      } else if (ok) {
-        lastUpTs = c.ts
-      }
+  for (const row of checks) {
+    if (!row.ok && downTs === null) {
+      downTs = row.ts
+      downType = row.outage_type ?? null
+    } else if (row.ok && downTs !== null) {
+      const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
+      outages.push({ start: downTs, end: row.ts, durationMs: row.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
+      lastUpTs = row.ts
+      downTs = null
+      downType = null
+    } else if (row.ok) {
+      lastUpTs = row.ts
     }
-  } else {
-    for (const e of events) {
-      if (e.event === 'internet.down' && downTs === null) {
-        downTs = e.ts
-        try { const p = JSON.parse(e.payload); downType = p.outage_type ?? null } catch { downType = null }
-      } else if (e.event === 'internet.up' && downTs !== null) {
-        const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-        outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
-        lastUpTs = e.ts
-        downTs = null
-        downType = null
-      } else if (e.event === 'internet.up') {
-        lastUpTs = e.ts
-      }
-    }
-  }
-  if (downTs !== null) {
-    const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-    outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, uptimeBeforeMs, outage_type: downType, ongoing: true })
   }
 
-  // Filter to outages that overlap the requested window — newest first
-  const windowed = outages.filter(o => (!o.end || o.end >= from) && o.start <= to).reverse()
-  return windowed
+  if (downTs !== null) {
+    const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
+    outages.push({ start: downTs, end: null, durationMs: nowMs - downTs, uptimeBeforeMs, outage_type: downType, ongoing: true })
+  }
+
+  return outages
+}
+
+// Compute outages given DB and range. Returns array of outage objects.
+function computeOutages(db, from, to) {
+  const checks = loadInternetCheckRows(db, from, to)
+  let outages = []
+  let usedPersistedRows = false
+
+  try {
+    const persisted = db.all(
+      `SELECT start, end, duration_ms, outage_type, ongoing, created_at
+       FROM network_outages
+       WHERE start <= ?
+       ORDER BY start ASC`,
+      [to]
+    )
+    if (persisted && persisted.length > 0) {
+      usedPersistedRows = true
+      let lastEnd = null
+      for (const row of persisted) {
+        const start = Number(row.start)
+        const end = row.end == null ? null : Number(row.end)
+        const durationMs = Number(row.duration_ms ?? (end != null ? end - start : Date.now() - start))
+        const uptimeBeforeMs = lastEnd !== null ? start - lastEnd : null
+        if ((end == null || end >= from) && start <= to) outages.push({
+          start,
+          end,
+          durationMs,
+          uptimeBeforeMs,
+          outage_type: row.outage_type ?? null,
+          ongoing: Number(row.ongoing) === 1,
+        })
+        lastEnd = end ?? start + durationMs
+      }
+    }
+  } catch {
+    usedPersistedRows = false
+  }
+
+  if (!usedPersistedRows) {
+    // Fallback for older databases that have not yet populated network_outages.
+    let events = db.all(
+      `SELECT ts, event, payload FROM audit_log WHERE event IN ('internet.down','internet.up') ORDER BY ts ASC`
+    )
+
+    // Normalize timestamps: some environments store ts in seconds instead of ms.
+    // If the first timestamp looks like seconds (less than 1e12), convert all to ms.
+    if (events && events.length > 0 && events[0].ts && events[0].ts < 1e12) {
+      events = events.map(e => ({ ...e, ts: Number(e.ts) * 1000 }))
+    }
+
+    let downTs = null
+    let downType = null
+    let lastUpTs = null
+
+    if (!events || events.length === 0) {
+      const checks = db.all(`SELECT ts, payload FROM audit_log WHERE event = 'internet.check' ORDER BY ts ASC`)
+      for (const c of checks) {
+        let p = null
+        try { p = JSON.parse(c.payload) } catch { p = null }
+        const ok = p ? Boolean(p.ok) : false
+        if (!ok && downTs === null) {
+          downTs = c.ts
+          downType = p?.outage_type ?? null
+        } else if (ok && downTs !== null) {
+          const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
+          outages.push({ start: downTs, end: c.ts, durationMs: c.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
+          lastUpTs = c.ts
+          downTs = null
+          downType = null
+        } else if (ok) {
+          lastUpTs = c.ts
+        }
+      }
+    } else {
+      for (const e of events) {
+        if (e.event === 'internet.down' && downTs === null) {
+          downTs = e.ts
+          try { const p = JSON.parse(e.payload); downType = p.outage_type ?? null } catch { downType = null }
+        } else if (e.event === 'internet.up' && downTs !== null) {
+          const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
+          outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
+          lastUpTs = e.ts
+          downTs = null
+          downType = null
+        } else if (e.event === 'internet.up') {
+          lastUpTs = e.ts
+        }
+      }
+    }
+    if (downTs !== null) {
+      const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
+      outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, uptimeBeforeMs, outage_type: downType, ongoing: true })
+    }
+  }
+  
+  // If we have fresh internet.check rows, prefer pairing those (they may be more accurate)
+  if (checks.length > 0) {
+    outages = pairOutagesFromChecks(checks)
+  }
+
+  // Clip outages to the requested window so durations reflect only the selected range.
+  const nowMs = Date.now()
+  const clipped = outages
+    .map(o => {
+      const origStart = o.start
+      const origEnd = o.end
+      const clippedStart = Math.max(origStart, from)
+      const clippedEndRaw = origEnd != null ? Math.min(origEnd, to) : (o.ongoing ? Math.min(nowMs, to) : null)
+      const clippedEnd = clippedEndRaw != null && clippedEndRaw >= clippedStart ? clippedEndRaw : (clippedEndRaw != null ? clippedEndRaw : null)
+      const durationMs = clippedEnd != null ? (clippedEnd - clippedStart) : (o.ongoing ? Math.max(0, nowMs - clippedStart) : 0)
+
+      // Adjust uptimeBeforeMs: if the original lastUpTs is known (derived from uptimeBeforeMs),
+      // and that lastUpTs is before the window start, report only the uptime observed within window.
+      let uptimeBeforeMs = o.uptimeBeforeMs
+      if (uptimeBeforeMs != null) {
+        const lastUpTs = origStart - uptimeBeforeMs
+        if (lastUpTs < from) {
+          // only the portion from `from` -> origStart is observable in-window
+          uptimeBeforeMs = Math.max(0, origStart - from)
+        }
+      }
+
+      return { ...o, start: clippedStart, end: clippedEnd, durationMs, uptimeBeforeMs }
+    })
+    // Keep only outages that overlap the window
+    .filter(o => (!o.end || o.end >= from) && o.start <= to)
+    .reverse()
+
+  return clipped
 }
 
 // ── Event category → which table(s) to query ─────────────────────────────────
@@ -263,11 +404,13 @@ router.get('/chart', (req, res) => {
 
     // Internet stats summary: uptime %, avg latency, check count, status changes
     // Use full window counts (not the chart-capped 300 rows) for accuracy
-    const { total_checks: totalChecks, ok_checks: okChecks } = db.get(
+    const internetChecks = loadInternetCheckRows(db, from, to)
+    const uptime = computeWeightedInternetUptime(internetChecks, from, to)
+
+    const { total_checks: totalChecks } = db.get(
       `SELECT COUNT(*) AS total_checks, SUM(CASE WHEN json_extract(payload,'$.ok') = 1 THEN 1 ELSE 0 END) AS ok_checks FROM audit_log WHERE ts >= ? AND ts <= ? AND event = 'internet.check'`,
       [from, to]
     )
-    const uptime = totalChecks > 0 ? parseFloat(((okChecks / totalChecks) * 100).toFixed(3)) : 0
     const avgLatency = internet.filter(x => x.ms != null).length > 0
       ? Math.round(internet.filter(x => x.ms != null).reduce((s, x) => s + x.ms, 0) / internet.filter(x => x.ms != null).length)
       : 0
@@ -524,54 +667,6 @@ router.get('/outages/:ts', (req, res) => {
     let pingDetail = null
     try { pingDetail = JSON.parse(row.ping_detail) } catch {}
     res.json({ ...row, ping_detail: pingDetail })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// POST /api/reports/outages/:ts/evidence — attach an evidence file (base64 JSON)
-router.post('/outages/:ts/evidence', express.json({ limit: '20mb' }), (req, res) => {
-  try {
-    const ts = parseInt(req.params.ts)
-    if (!ts) return res.status(400).json({ error: 'invalid ts' })
-    const { filename, data } = req.body
-    if (!filename || !data) return res.status(400).json({ error: 'filename and data required' })
-    const db = getDb()
-    const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
-    const dir = path.join(__dirname, '..', 'data', 'evidence')
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    const fname = `${ts}_${Date.now()}_${safeName}`
-    const fpath = path.join(dir, fname)
-    const buf = Buffer.from(data, 'base64')
-    fs.writeFileSync(fpath, buf)
-    db.run('INSERT INTO evidence_files (outage_ts, filename, path, uploaded_at) VALUES (?, ?, ?, ?)', [ts, filename, fpath, Date.now()])
-    audit('evidence.upload', { outage_ts: ts, filename }, req.user?.sub ?? 'system')
-    res.json({ ok: true })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// GET /api/reports/outages/:ts/evidence — list attached files
-router.get('/outages/:ts/evidence', (req, res) => {
-  try {
-    const ts = parseInt(req.params.ts)
-    if (!ts) return res.status(400).json({ error: 'invalid ts' })
-    const rows = getDb().all('SELECT id, filename, uploaded_at FROM evidence_files WHERE outage_ts = ? ORDER BY uploaded_at DESC', [ts])
-    res.json({ files: rows })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
-})
-
-// GET /api/reports/outages/:ts/evidence/:id — download file
-router.get('/outages/:ts/evidence/:id/download', (req, res) => {
-  try {
-    const id = parseInt(req.params.id)
-    const row = getDb().get('SELECT filename, path FROM evidence_files WHERE id = ?', [id])
-    if (!row) return res.status(404).json({ error: 'not found' })
-    if (!fs.existsSync(row.path)) return res.status(404).json({ error: 'file missing' })
-    res.download(row.path, row.filename)
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

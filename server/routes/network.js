@@ -4,8 +4,9 @@ import { existsSync, readFileSync } from 'fs'
 import { createSocket } from 'dgram'
 import { promises as dnsPromises } from 'dns'
 import { loadConfig } from '../config.js'
+import { scanPorts } from '../utils/ddns.js'
 import { isPrivateIP, isPrivateCIDR, ipInCIDR, getCIDRHosts } from '../utils/ip.js'
-import { audit, auditDevice, upsertDevice, markOffline, getAllDevices, getAllFlags, createFlag, updateFlag, deleteFlag, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleDeviceFlag, toggleFavorite, toggleFlagged, toggleDormant, autoDormantStale } from '../db.js'
+import { audit, auditDevice, upsertDevice, markOffline, getAllDevices, getAllFlags, createFlag, updateFlag, deleteFlag, clearAllDevices, clearPhantomDevices, clearDevicePorts, setDeviceLabel, toggleDeviceFlag, toggleFavorite, toggleFlagged, toggleDormant, autoDormantStale, setDeviceFlag } from '../db.js'
 
 const router = Router()
 
@@ -27,6 +28,13 @@ let _broadcastRef = null
 let _scanProcs = []
 let _portScanProcs = new Map()   // ip → nmap proc for per-device scans
 let _gateway = null
+
+const DEVICE_SCAN_PORTS = [
+  7, 21, 22, 23, 25, 53, 67, 68, 80, 110, 123, 137, 138, 139, 143,
+  161, 162, 443, 445, 554, 631, 873, 993, 995, 1433, 1883, 1900, 3000,
+  3128, 3306, 3389, 5000, 5353, 5432, 5900, 8000, 8080, 8081, 8443,
+  8883, 9000, 9100, 9200, 32400,
+]
 
 // ── OUI / MAC vendor lookup ──────────────────────────────────────────────────────────
 const _ouiMap = new Map()
@@ -937,59 +945,67 @@ router.post('/scan', (req, res) => {
 
 // ── Shared port scan logic (used by on-demand handler + scheduled deep scan) ──
 
-async function scanDevicePorts(ip, broadcast, { noPing = false } = {}) {
+async function scanDevicePorts(ip, broadcast) {
   try {
-    const output = await runNmap([
-      ...(noPing ? ['-Pn'] : []),
-      '-sV', '--open',
-      '-O', '--osscan-guess',
-      '--script', 'http-title,banner,ssl-cert,smb-os-discovery',
-      '--script-timeout', '5s',
-      '--top-ports', '500',
-      '--host-timeout', '60s',
-      '--min-rate', '300',
-      '--stats-every', '3s',
-      '--traceroute',
+    if (broadcast) broadcast('port_scan_progress', { ip, percent: 0 })
+    const existing = getAllDevices().find(d => d.ip === ip)
+    const ports = loadConfig()?.network?.port_scan_ports ?? DEVICE_SCAN_PORTS
+    const scan = await scanPorts(ip, ports)
+    const openPorts = (scan.results ?? []).filter(r => r.open)
+    const hasTcpEvidence = openPorts.some(r => r.protocol === 'tcp')
+    const hasUdpEvidence = openPorts.some(r => r.protocol === 'udp')
+    const icmpBlocked = hasUdpEvidence && existing?.status === 'offline'
+    const result = {
+      ts: scan.ts,
       ip,
-    ], (percent) => {
-      if (broadcast) broadcast('port_scan_progress', { ip, percent: percent != null ? Math.round(percent) : null })
-    }, (proc) => {
-      _portScanProcs.set(ip, proc)
-      proc.on('close', () => _portScanProcs.delete(ip))
-    })
+      status: (hasTcpEvidence || hasUdpEvidence)
+        ? (icmpBlocked ? 'filtered' : (existing?.status ?? 'online'))
+        : (existing?.status ?? 'unknown'),
+      mac: existing?.mac ?? null,
+      ports: openPorts.map(r => ({
+        port: r.port,
+        protocol: r.protocol ?? 'tcp',
+        state: 'open',
+        service: r.service ?? '',
+        version: r.version ?? '',
+        scripts: [],
+      })),
+      hostScripts: [],
+      traceroute: [],
+      hostname: existing?.hostname ?? null,
+      vendor: existing?.vendor ?? null,
+      latency: null,
+      os: existing?.os ?? null,
+    }
 
-    const devices = parseNmapOutput(output)
-    const result = devices[0] ?? { ip, ports: [], status: 'unknown' }
     if (broadcast) broadcast('port_scan_progress', { ip, percent: 100 })
 
-    if (result.ip) {
-      // Detect new ports relative to what DB already has
-      const existing = getAllDevices().find(d => d.ip === ip)
-      const oldPortSet = new Set((existing?.ports ?? []).map(p => p.port))
-      for (const p of (result.ports ?? [])) {
-        if (!oldPortSet.has(p.port)) {
-          auditDevice('device.port.open',
-            result.mac ?? existing?.mac, ip,
-            result.hostname ?? existing?.hostname,
-            { port: p.port, service: p.service, version: p.version }
-          )
-        }
-      }
-      // noPing=true: ICMP was blocked; only persist if ports actually responded
-      // (avoids overwriting 'offline' for truly unreachable hosts)
-      const portsFound = (result.ports ?? []).length > 0
-      if (!noPing || portsFound) {
-        const effectiveStatus = noPing ? 'filtered' : 'online'
-        try {
-          upsertDevice({ ...result, status: effectiveStatus })
-          if (noPing && broadcast) broadcast('device_updated', { ip, status: 'filtered' })
-        } catch (err) {
-          console.error(`[db] upsertDevice failed for ${result.ip} (MAC: ${result.mac ?? 'none'}):`, err.message)
-          audit('device.upsert_error', { ip: result.ip, mac: result.mac, error: err.message })
-          if (broadcast) broadcast('device_error', { ip: result.ip, mac: result.mac ?? null, error: err.message })
-        }
+    const oldPortSet = new Set((existing?.ports ?? []).map(p => `${p.protocol ?? 'tcp'}:${p.port}`))
+    for (const p of result.ports ?? []) {
+      const key = `${p.protocol ?? 'tcp'}:${p.port}`
+      if (!oldPortSet.has(key)) {
+        auditDevice('device.port.open',
+          result.mac ?? existing?.mac, ip,
+          result.hostname ?? existing?.hostname,
+          { port: p.port, protocol: p.protocol ?? 'tcp', service: p.service, version: p.version }
+        )
       }
     }
+
+    try {
+      upsertDevice({ ...result, overwritePorts: true })
+      const mac = result.mac ?? existing?.mac ?? null
+      if (mac) {
+        setDeviceFlag(mac, 'icmp_blocked', icmpBlocked)
+        setDeviceFlag(mac, 'dodgy', icmpBlocked)
+      }
+      if (result.status === 'filtered' && broadcast) broadcast('device_updated', { ip, status: 'filtered' })
+    } catch (err) {
+      console.error(`[db] upsertDevice failed for ${result.ip} (MAC: ${result.mac ?? 'none'}):`, err.message)
+      audit('device.upsert_error', { ip: result.ip, mac: result.mac, error: err.message })
+      if (broadcast) broadcast('device_error', { ip: result.ip, mac: result.mac ?? null, error: err.message })
+    }
+
     return result
   } catch (err) {
     if (broadcast) broadcast('port_scan_progress', { ip, percent: null, error: err.message })
@@ -1008,7 +1024,7 @@ router.get('/device/:ip', async (req, res) => {
     return res.status(400).json({ error: `'${ip}' is outside all configured subnets. Only devices on your LAN may be scanned.` })
   }
   try {
-    const result = await scanDevicePorts(ip, _broadcastRef)
+    const result = await scanDevicePorts(ip, _broadcastRef, { noPing: true })
     res.json(result)
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -1135,21 +1151,16 @@ export async function runScheduledDeepScan(broadcast) {
   _deepScanning = true
   const _deepStartMs = Date.now()
   try {
-    // Announce immediately so the UI shows a progress bar right away
-    if (broadcast) broadcast('deep_scan_started', { total: 0, phase: 'ping', ts: Date.now() })
-    audit('deep_scan.started', {})
-
-    // Step 1 — ping sweep (upserts devices, emits device.new/online/offline events)
-    const swept = await runPingSweep(broadcast)
-    // Track which IPs responded to ping; others may still have open ports (ICMP blocked)
-    const onlineIps = new Set(swept.filter(d => d.status === 'online').map(d => d.ip))
-
-    // Step 2 — port-scan ALL known devices, using -Pn for those that didn't ping
-    // Devices with open ports but no ping response are marked 'filtered' (orange dot)
     const allToScan = getAllDevices()
     const total = allToScan.length
 
-    // Send updated total now that we know it
+    // Announce immediately so the UI shows a progress bar right away.
+    // Deep scan now port-scans the devices already known in the DB; discovery
+    // is handled by the regular scan path.
+    if (broadcast) broadcast('deep_scan_started', { total, phase: 'portscan', ts: Date.now() })
+    audit('deep_scan.started', {})
+
+    // Send updated total now that we know it.
     if (broadcast) broadcast('deep_scan_progress', { ip: null, done: 0, total, percent: 0, phase: 'portscan' })
 
     let done = 0
@@ -1163,7 +1174,7 @@ export async function runScheduledDeepScan(broadcast) {
         percent: Math.round((done / total) * 100),
       })
       try {
-        await scanDevicePorts(device.ip, broadcast, { noPing: !onlineIps.has(device.ip) })
+        await scanDevicePorts(device.ip, broadcast)
       } catch { /* skip unreachable devices */ }
       done++
     }

@@ -267,6 +267,43 @@ function ownedByClientIsp(serverName, clientIsp) {
   return ispWords.some(w => svrText.includes(w))
 }
 
+export function formatOoklaServerLabel(server) {
+  const sponsor = String(server?.sponsor ?? '').trim()
+  const name = String(server?.name ?? '').trim()
+  const locationParts = [server?.city, server?.country].map(s => String(s ?? '').trim()).filter(Boolean)
+  const location = locationParts.join(', ')
+
+  let primary = sponsor || name || String(server?.host ?? '').trim() || `Server ${server?.id ?? ''}`.trim()
+  if (sponsor && name && sponsor.toLowerCase() === name.toLowerCase()) primary = sponsor
+  const secondary = [name, location].filter(Boolean)
+  if (secondary.length === 0) return primary
+  if (secondary.length === 1 && secondary[0].toLowerCase() === primary.toLowerCase()) return primary
+  const uniqueSecondary = secondary.filter(part => part.toLowerCase() !== primary.toLowerCase())
+  return uniqueSecondary.length ? `${primary} — ${uniqueSecondary.join(' · ')}` : primary
+}
+
+export function sortOoklaServers(a, b) {
+  const pingA = Number.isFinite(Number(a?.last_ping_ms)) ? Number(a.last_ping_ms) : null
+  const pingB = Number.isFinite(Number(b?.last_ping_ms)) ? Number(b.last_ping_ms) : null
+  if (pingA !== pingB) {
+    if (pingA === null) return 1
+    if (pingB === null) return -1
+    if (pingA !== pingB) return pingA - pingB
+  }
+
+  const distA = Number.isFinite(Number(a?.distance_km)) ? Number(a.distance_km) : null
+  const distB = Number.isFinite(Number(b?.distance_km)) ? Number(b.distance_km) : null
+  if (distA !== distB) {
+    if (distA === null) return 1
+    if (distB === null) return -1
+    if (distA !== distB) return distA - distB
+  }
+
+  const labelA = formatOoklaServerLabel(a).toLowerCase()
+  const labelB = formatOoklaServerLabel(b).toLowerCase()
+  return labelA < labelB ? -1 : labelA > labelB ? 1 : 0
+}
+
 /**
  * List nearby Ookla speedtest servers.
  * Returns an array of { id, name, location, country, host } or [] on failure.
@@ -306,9 +343,13 @@ export async function listOoklaServersWithPing(iface) {
     for (const r of rows) {
       if (!pings.has(r.server_id)) pings.set(String(r.server_id), r.ping_ms)
     }
-    return servers.map(s => ({ ...s, last_ping_ms: pings.get(String(s.id)) ?? null }))
-  } catch (e) {
-    return servers
+    return servers.map(s => ({
+      ...s,
+      label: formatOoklaServerLabel(s),
+      last_ping_ms: pings.get(String(s.id)) ?? null,
+    }))
+  } catch {
+    return servers.map(s => ({ ...s, label: formatOoklaServerLabel(s), last_ping_ms: null }))
   }
 }
 

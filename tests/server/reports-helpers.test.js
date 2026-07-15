@@ -6,14 +6,29 @@ import { describe, it, expect } from 'vitest'
 
 // ── Replicated helpers ────────────────────────────────────────────────────────
 
-/** Compute internet uptime % from raw audit rows containing JSON payloads. */
+/** Compute internet uptime % by weighting each row over the elapsed time to the next row. */
 function computeUptime(netRows) {
-  const totalChecks = netRows.length
-  if (totalChecks === 0) return 0
-  const okChecks = netRows.filter(r => {
-    try { return JSON.parse(r.payload).ok ?? false } catch { return false }
-  }).length
-  return parseFloat(((okChecks / totalChecks) * 100).toFixed(3))
+  if (netRows.length === 0) return 0
+  const rows = [...netRows].sort((a, b) => a.ts - b.ts)
+  if (rows[0].ts > rows[rows.length - 1].ts) return 0
+
+  let upMs = 0
+  let totalMs = 0
+  for (let i = 0; i < rows.length; i++) {
+    const current = rows[i]
+    const next = rows[i + 1]
+    const start = current.ts
+    const end = next?.ts ?? current.ts
+    const delta = end - start
+    if (delta <= 0) continue
+    totalMs += delta
+    try {
+      if (JSON.parse(current.payload).ok ?? false) upMs += delta
+    } catch {
+      // treat malformed rows as downtime
+    }
+  }
+  return totalMs === 0 ? 0 : parseFloat(((upMs / totalMs) * 100).toFixed(3))
 }
 
 /** Flatten internet check rows into { ts, ok, ms } objects. */
@@ -81,7 +96,7 @@ describe('computeUptime()', () => {
   it('returns 100 when all checks are ok', () => {
     const rows = [
       { ts: 1, payload: JSON.stringify({ ok: true }) },
-      { ts: 2, payload: JSON.stringify({ ok: true }) },
+      { ts: 11, payload: JSON.stringify({ ok: true }) },
     ]
     expect(computeUptime(rows)).toBe(100)
   })
@@ -89,7 +104,7 @@ describe('computeUptime()', () => {
   it('returns 0 when all checks fail', () => {
     const rows = [
       { ts: 1, payload: JSON.stringify({ ok: false }) },
-      { ts: 2, payload: JSON.stringify({ ok: false }) },
+      { ts: 11, payload: JSON.stringify({ ok: false }) },
     ]
     expect(computeUptime(rows)).toBe(0)
   })
@@ -97,7 +112,8 @@ describe('computeUptime()', () => {
   it('computes 50% correctly', () => {
     const rows = [
       { ts: 1, payload: JSON.stringify({ ok: true  }) },
-      { ts: 2, payload: JSON.stringify({ ok: false }) },
+      { ts: 11, payload: JSON.stringify({ ok: false }) },
+      { ts: 21, payload: JSON.stringify({ ok: true  }) },
     ]
     expect(computeUptime(rows)).toBe(50)
   })
@@ -124,7 +140,20 @@ describe('computeUptime()', () => {
   it('treats missing ok field as false', () => {
     const rows = [
       { ts: 1, payload: JSON.stringify({}) },  // no ok field
-      { ts: 2, payload: JSON.stringify({ ok: true }) },
+      { ts: 11, payload: JSON.stringify({ ok: true }) },
+    ]
+    expect(computeUptime(rows)).toBe(0)
+  })
+
+  it('weights longer outages more heavily than sample counts', () => {
+    const rows = [
+      { ts: 1,  payload: JSON.stringify({ ok: true }) },
+      { ts: 6,  payload: JSON.stringify({ ok: true }) },
+      { ts: 11, payload: JSON.stringify({ ok: false }) },
+      { ts: 12, payload: JSON.stringify({ ok: false }) },
+      { ts: 13, payload: JSON.stringify({ ok: false }) },
+      { ts: 14, payload: JSON.stringify({ ok: false }) },
+      { ts: 21, payload: JSON.stringify({ ok: true }) },
     ]
     expect(computeUptime(rows)).toBe(50)
   })

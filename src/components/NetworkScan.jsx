@@ -5,13 +5,14 @@ import { deviceThreatLevel } from '../lib/threatMatch.js'
 import { getUIPref, setUIPref } from '../lib/uiPrefs.js'
 
 const WELL_KNOWN = {
-  21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP', 53: 'DNS',
-  80: 'HTTP', 110: 'POP3', 143: 'IMAP', 443: 'HTTPS', 445: 'SMB',
-  1883: 'MQTT', 3000: 'HTTP-dev', 3306: 'MySQL', 5432: 'Postgres',
-  6379: 'Redis', 7081: 'SickGear', 8080: 'HTTP-alt', 8123: 'HomeAssist',
-  8191: 'FlareSolvr', 8443: 'HTTPS-alt', 9091: 'Transmission', 9117: 'Jackett',
-  27017: 'MongoDB', 32400: 'Plex', 8096: 'Jellyfin', 8920: 'Jellyfin-HTTPS',
-  6881: 'BitTorrent', 51413: 'Transmission-peer',
+  7: 'Echo', 21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP', 53: 'DNS',
+  67: 'DHCP', 68: 'DHCP', 80: 'HTTP', 110: 'POP3', 123: 'NTP', 137: 'NetBIOS',
+  138: 'NetBIOS', 143: 'IMAP', 161: 'SNMP', 162: 'SNMP-Trap', 443: 'HTTPS',
+  445: 'SMB', 1883: 'MQTT', 1900: 'SSDP', 3000: 'HTTP-dev', 3306: 'MySQL',
+  5353: 'mDNS', 5432: 'Postgres', 6379: 'Redis', 7081: 'SickGear',
+  8080: 'HTTP-alt', 8123: 'HomeAssist', 8191: 'FlareSolvr', 8443: 'HTTPS-alt',
+  9091: 'Transmission', 9117: 'Jackett', 27017: 'MongoDB', 32400: 'Plex',
+  8096: 'Jellyfin', 8920: 'Jellyfin-HTTPS', 6881: 'BitTorrent', 51413: 'Transmission-peer',
 }
 
 function relTime(ms) {
@@ -429,7 +430,7 @@ function DeviceTree({ devices, selected, onSelect, scanning, portScanProgress = 
                   : badge === 'moon'
                     ? <span className="text-[10px] text-blue-400/50" title="Marked dormant — will wake automatically on next ping">dormant</span>
                     : <span className="text-[10px] text-slate-500">offline</span>
-                : d.latency != null && <span className="text-[10px] font-mono text-slate-400" title="Ping round-trip latency">{d.latency}ms</span>
+                : null
             }
             {openPorts.length > 0 && (
               <span className={`text-[10px] ${(isOffline || isFiltered) ? 'text-slate-500' : 'text-slate-400'}`} title={`${openPorts.length} open port${openPorts.length !== 1 ? 's' : ''} detected`}>{openPorts.length}p</span>
@@ -746,7 +747,6 @@ function DeviceDetail({ device, knownDevices, onDeviceUpdated, portScanProgress 
         <InfoRow icon={Tag}      label="Device Type"  value={inferDeviceType(d)} />
         <InfoRow icon={Activity} label="Hostname"     value={device.hostname} note={device.hostnameStale ? 'unconfirmed' : null} />
         <InfoRow icon={Layers}   label="OS"           value={d.os} />
-        <InfoRow icon={Clock}    label="Latency"      value={device.latency != null ? `${device.latency}ms` : null} />
         <InfoRow icon={Router}   label="Gateway"      value={device.detectedGateway} mono />
         <InfoRow icon={Calendar} label="First Seen"   value={relTime(device.firstSeen)} />
         <InfoRow icon={Calendar} label="Last Seen"    value={relTime(device.lastSeen)} />
@@ -1026,11 +1026,6 @@ function renderMapNode(d, pos, isGw, selected, onSelect, nr) {
         <text x={pos.x} y={pos.y + 5} textAnchor="middle"
           fill="#818cf8" fontSize="11" fontWeight="bold" fontFamily="monospace"
         >GW</text>
-      )}
-      {!isGw && online && d.latency != null && (
-        <text x={pos.x} y={pos.y + 4} textAnchor="middle"
-          fill={isSel ? '#a5b4fc' : '#475569'} fontSize="9" fontFamily="monospace"
-        >{d.latency}ms</text>
       )}
       <text x={pos.x} y={pos.y + nr + 17} textAnchor="middle"
         fill={(online || filtered) ? (isSel ? '#e2e8f0' : '#94a3b8') : '#475569'}

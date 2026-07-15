@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<settings>
+
+  <category label="Connection">
+    <setting id="server_url" type="text"   label="Server URL"               default="http://192.168.8.10:7654" />
+    <setting id="username"   type="text"   label="Username"                 default="" />
+    <setting id="password"   type="text"   label="Password"                 default="" option="hidden" />
+    <setting id="timeout"    type="slider" label="Request timeout (seconds)" default="10" range="3,1,30" option="int" />
+  </category>
+
+  <category label="Devices and Threats">
+    <setting id="show_offline_devices" type="bool" label="Show offline devices"      default="true" />
+    <setting type="sep" />
+    <setting id="threat_min_severity"  type="enum" label="Minimum severity to show"  default="1" values="Low|Medium|High|Critical" />
+  </category>
+
+  <category label="Logs">
+    <setting id="log_limit"     type="slider" label="Log entries to show" default="100" range="25,25,500" option="int" />
+    <setting id="log_min_level" type="enum"   label="Minimum log level"   default="1"   values="Debug|Info|Warn|Error" />
+  </category>
+
+  <category label="Speed and Limits">
+    <setting id="speedtest_limit"     type="slider" label="Direct speed test results to show" default="10" range="5,5,30"    option="int" />
+    <setting id="vpn_speedtest_limit" type="slider" label="VPN speed test results to show"    default="10" range="5,5,30"    option="int" />
+    <setting id="isp_plan_dl"         type="text"   label="ISP plan download Mbps (0=off)"   default="0" />
+    <setting id="isp_plan_ul"         type="text"   label="ISP plan upload Mbps (0=off)"     default="0" />
+    <setting type="sep" />
+    <setting id="audit_limit"        type="slider" label="Audit events per page"         default="50" range="10,10,100" option="int" />
+    <setting id="ddns_history_limit" type="slider" label="DDNS history entries"          default="15" range="5,5,30"    option="int" />
+  </category>
+
+</settings>

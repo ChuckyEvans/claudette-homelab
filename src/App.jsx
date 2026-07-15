@@ -343,6 +343,9 @@ export default function App() {
         setDeepScan({ running: false, done: 0, total: 0, currentIp: null })
         if (data.durationMs != null) { setLastDeepScanDurationMs(data.durationMs); localStorage.setItem('claudette:lastDeepScanMs', data.durationMs) }
       }
+      if (type === 'outages.persisted') {
+        window.dispatchEvent(new CustomEvent('claudette:reports-refresh'))
+      }
       if (type === 'device_error') {
         console.error('[device_error]', data)
         setDbErrors(prev => [...prev, data])

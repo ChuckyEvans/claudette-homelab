@@ -35,7 +35,7 @@ const JOBS = {
     eta:   '~35s',
     trigger: () => {
       const sid = window.__claudette_override_speedtest_server ?? null
-      try { delete window.__claudette_override_speedtest_server } catch (e) {}
+      try { delete window.__claudette_override_speedtest_server } catch { void 0 }
       return api.reports.runSpeedtest({ server_id: sid })
     },
   },
@@ -554,6 +554,42 @@ function FlagRow({ flag, onSave, onDelete }) {
   )
 }
 
+function FlagSection({ title, description, flags, emptyText, onSave, onDelete }) {
+  return (
+    <div className="mb-5 last:mb-0">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div>
+          <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">{title}</h4>
+          {description && <p className="text-[11px] text-slate-600 mt-1">{description}</p>}
+        </div>
+        <span className="text-[10px] text-slate-500 uppercase tracking-wider">{flags.length} {flags.length === 1 ? 'flag' : 'flags'}</span>
+      </div>
+      <div className="border border-[#1a1a30] rounded-lg overflow-hidden">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[10px] text-slate-600 uppercase tracking-wider border-b border-[#1a1a30] bg-[#080812]">
+              <th className="text-center px-3 py-2 w-10">Icon</th>
+              <th className="text-left px-3 py-2 w-28">Key</th>
+              <th className="text-left px-3 py-2">Label</th>
+              <th className="text-left px-3 py-2">Description</th>
+              <th className="text-center px-3 py-2 w-16">Rank</th>
+              <th className="px-3 py-2 w-16" />
+            </tr>
+          </thead>
+          <tbody>
+            {flags.length === 0 && (
+              <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-700 text-xs italic">{emptyText}</td></tr>
+            )}
+            {flags.map(flag => (
+              <FlagRow key={flag.key} flag={flag} onSave={onSave} onDelete={onDelete} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ── Service row ───────────────────────────────────────────────────────────────
 function ServiceRow({ svc, idx, onSave, onDelete }) {
   const [editing, setEditing] = useState(svc._new ?? false)
@@ -616,7 +652,6 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
   const [uploadingTheme,   setUploadingTheme]   = useState(null)   // id of theme currently uploading
   const [photoVersions,    setPhotoVersions]    = useState({})     // {[id]: timestamp} for cache-busting after upload
   const bgJobsRef = useRef([])
-  // eslint-disable-next-line react-hooks/refs
   bgJobsRef.current = bgJobs
 
   // ── DDNS state ────────────────────────────────────────────────────────────
@@ -700,7 +735,6 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
     return () => window.removeEventListener('beforeunload', handler)
   }, [isDirty])
 
-  function handleRunNow(jobId)     { setActiveJob(jobId) }
   function handleRunNowWithServer(jobId) {
     if (jobId === 'speedtest') window.__claudette_override_speedtest_server = selectedOoklaServer || null
     if (jobId === 'vpn-speedtest') window.__claudette_override_speedtest_server = selectedOoklaServer || null
@@ -771,6 +805,10 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
   const [selectedOoklaServer, setSelectedOoklaServer] = useState('')
   const [interfaces, setInterfaces] = useState([])
   const [selectedInterface, setSelectedInterface] = useState('')
+  const sortedFlags = [...flags].sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.key).localeCompare(String(b.key)))
+  const systemFlags = sortedFlags.filter(flag => flag.isSystem)
+  const customFlags = sortedFlags.filter(flag => !flag.isSystem)
+  const nextCustomSortOrder = Math.max(100, sortedFlags.reduce((max, flag) => Math.max(max, Number(flag.sort_order) || 0), 0) + 10)
 
   useEffect(() => {
     api.config.get()
@@ -1244,6 +1282,15 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
               </p>
               {speedtestProvider === 'ookla' && (
                 <div className="mt-3">
+                  <div className="bg-[#080812] border border-[#1a1a30] rounded-lg p-3 mb-3">
+                    <div className="text-[12px] text-slate-400 mb-2">Select network adapter to probe from</div>
+                    <select value={selectedInterface} onChange={e => { setSelectedInterface(e.target.value); markDirty() }}
+                      className="w-full bg-[#080812] border border-[#1a1a30] rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors">
+                      <option value="">Auto (default)</option>
+                      {interfaces.map(i => <option key={i.name || i.iface} value={i.name || i.iface}>{i.name || i.iface} {i.address ? ` — ${i.address}` : ''}</option>)}
+                    </select>
+                    <p className="text-[11px] text-slate-500 mt-1">Pick `eth0`, `wlan0`, `tun0`, etc. to discover servers via that adapter.</p>
+                  </div>
                     <div className="flex items-center gap-2 mb-2">
                     <button onClick={async () => {
                       try {
@@ -1251,39 +1298,23 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                         // backend may return { servers: [...] } or array directly — normalize
                         const raw = Array.isArray(res) ? res : (res?.servers ?? [])
                         const list = Array.isArray(raw) ? raw : []
-                        const sorted = list.sort((a,b) => {
-                          const pa = (a.ping_ms??a.ping??99999)
-                          const pb = (b.ping_ms??b.ping??99999)
-                          if (pa !== pb) return pa - pb
-                          const na = (a.name||a.sponsor||a.host||'').toLowerCase()
-                          const nb = (b.name||b.sponsor||b.host||'').toLowerCase()
-                          return na < nb ? -1 : na > nb ? 1 : 0
-                        }).slice(0,10)
+                        const sorted = list.slice(0, 10)
                         setOoklaServers(sorted)
                       } catch (err) { console.error(err); alert('Failed to discover Ookla servers: '+err.message) }
                     }}
                       className="px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium">Discover servers</button>
-                    <p className="text-[11px] text-slate-500">Click to query Ookla and list top candidates (by ping).</p>
+                    <p className="text-[11px] text-slate-500">Click to query Ookla and list the backend-ranked candidates.</p>
                   </div>
                   {ooklaServers.length > 0 && (
                     <div className="bg-[#080812] border border-[#1a1a30] rounded-lg p-3">
-                      <div className="mb-3">
-                        <div className="text-[12px] text-slate-400 mb-2">Select network adapter to probe from</div>
-                        <select value={selectedInterface} onChange={e => { setSelectedInterface(e.target.value); markDirty() }}
-                          className="w-full bg-[#080812] border border-[#1a1a30] rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors">
-                          <option value="">Auto (default)</option>
-                          {interfaces.map(i => <option key={i.name || i.iface} value={i.name || i.iface}>{i.name || i.iface} {i.address ? ` — ${i.address}` : ''}</option>)}
-                        </select>
-                        <p className="text-[11px] text-slate-500 mt-1">Pick `eth0`, `wlan0`, `tun0`, etc. to probe via that adapter.</p>
-                      </div>
                       <div className="text-[12px] text-slate-400 mb-2">Choose a preferred server (or Auto to let Ookla pick)</div>
                       <select value={selectedOoklaServer} onChange={e => { setSelectedOoklaServer(e.target.value); markDirty() }}
                         className="w-full bg-[#080812] border border-[#1a1a30] rounded-lg px-3 py-2 text-sm text-slate-200 outline-none transition-colors">
                         <option value="">Auto (let Ookla select fastest)</option>
                         {ooklaServers.map(s => {
                           const id = String(s.id || s.server_id || s.server || s.id_str || s.host)
-                          const ping = s.ping_ms ?? s.ping ?? s.latency_ms ?? null
-                          const label = `${s.sponsor || s.name || s.host} — ${s.name || s.host}`
+                          const ping = s.last_ping_ms ?? s.ping_ms ?? s.ping ?? s.latency_ms ?? null
+                          const label = s.label || `${s.sponsor || s.name || s.host || id}`
                           return <option key={id} value={id}>{label} {ping !== null ? ` — ${ping} ms` : ''}</option>
                         })}
                       </select>
@@ -1738,67 +1769,87 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
             <div className="flex items-center justify-between mb-3">
               <div>
                 <SectionHeading>Device Flags</SectionHeading>
-                <p className="text-[11px] text-slate-600 -mt-3 mb-3">Flags can be applied to any device. System flags are built-in and cannot be changed or deleted.</p>
+                <p className="text-[11px] text-slate-600 -mt-3 mb-3">Flags can be applied to any device. System flags are built-in and cannot be changed or deleted. Custom flags start after the built-in ranks so they sort below them by default.</p>
               </div>
-              <button
-                onClick={() => {
-                  const key = `flag_${Date.now()}`
-                  setFlags(prev => [...prev, { key, label: '', icon: '', description: '', sort_order: 100, isSystem: false, type: 'custom', _new: true }])
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 rounded-lg transition-colors flex-shrink-0">
-                <Plus className="w-3.5 h-3.5" />New Flag
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-[10px] text-slate-500 border border-[#1a1a30] rounded-lg px-2 py-1">
+                  Next custom rank: {nextCustomSortOrder}
+                </span>
+                <button
+                  onClick={() => {
+                    setFlags(prev => {
+                      const sortOrder = Math.max(100, prev.reduce((max, flag) => Math.max(max, Number(flag.sort_order) || 0), 0) + 10)
+                      const key = `flag_${Date.now()}`
+                      return [...prev, { key, label: '', icon: '', description: '', sort_order: sortOrder, isSystem: false, type: 'custom', _new: true }]
+                    })
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 rounded-lg transition-colors flex-shrink-0">
+                  <Plus className="w-3.5 h-3.5" />Add Custom Flag
+                </button>
+              </div>
             </div>
-            <div className="border border-[#1a1a30] rounded-lg overflow-hidden">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-[10px] text-slate-600 uppercase tracking-wider border-b border-[#1a1a30] bg-[#080812]">
-                    <th className="text-center px-3 py-2 w-10">Icon</th>
-                    <th className="text-left px-3 py-2 w-28">Key</th>
-                    <th className="text-left px-3 py-2">Label</th>
-                    <th className="text-left px-3 py-2">Description</th>
-                    <th className="text-center px-3 py-2 w-16">Rank</th>
-                    <th className="px-3 py-2 w-16" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {flags.length === 0 && (
-                    <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-700 text-xs italic">No flags yet</td></tr>
-                  )}
-                  {flags.map(flag => (
-                    <FlagRow
-                      key={flag.key}
-                      flag={flag}
-                      onSave={async (tempKey, data) => {
-                        try {
-                          const existing = flags.find(f => f.key === tempKey)
-                          if (existing?._new) {
-                            const realKey = (data.key || data.label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32)
-                            if (!realKey) { showToast('Key is required', 'error'); return }
-                            const created = await api.network.flags.create({ key: realKey, label: data.label, icon: data.icon, description: data.description, sortOrder: Number(data.sortOrder) || 100 })
-                            setFlags(prev => prev.map(f => f.key === tempKey ? { ...created } : f))
-                          } else {
-                            const updated = await api.network.flags.update(tempKey, { label: data.label, icon: data.icon, description: data.description, sortOrder: Number(data.sortOrder) || 0 })
-                            setFlags(prev => prev.map(f => f.key === tempKey ? { ...updated } : f))
-                          }
-                          showToast('Flag saved')
-                        } catch (err) { showToast(err.message, 'error') }
-                      }}
-                      onDelete={async (key) => {
-                        const flag = flags.find(f => f.key === key)
-                        if (flag?._new) { setFlags(prev => prev.filter(f => f.key !== key)); return }
-                        if (!window.confirm(`Delete flag "${flag?.label || key}"? It will be removed from all devices.`)) return
-                        try {
-                          await api.network.flags.remove(key)
-                          setFlags(prev => prev.filter(f => f.key !== key))
-                          showToast('Flag deleted')
-                        } catch (err) { showToast(err.message, 'error') }
-                      }}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <FlagSection
+              title="System Flags"
+              description="Built-in flags are locked and always stay in the default system range."
+              flags={systemFlags}
+              emptyText="No built-in flags found"
+              onSave={async (tempKey, data) => {
+                try {
+                  const existing = flags.find(f => f.key === tempKey)
+                  if (existing?._new) {
+                    const realKey = (data.key || data.label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32)
+                    if (!realKey) { showToast('Key is required', 'error'); return }
+                    const created = await api.network.flags.create({ key: realKey, label: data.label, icon: data.icon, description: data.description, sortOrder: Number(data.sortOrder) || nextCustomSortOrder })
+                    setFlags(prev => prev.map(f => f.key === tempKey ? { ...created } : f))
+                  } else {
+                    const updated = await api.network.flags.update(tempKey, { label: data.label, icon: data.icon, description: data.description, sortOrder: Number(data.sortOrder) || 0 })
+                    setFlags(prev => prev.map(f => f.key === tempKey ? { ...updated } : f))
+                  }
+                  showToast('Flag saved')
+                } catch (err) { showToast(err.message, 'error') }
+              }}
+              onDelete={async (key) => {
+                const flag = flags.find(f => f.key === key)
+                if (flag?._new) { setFlags(prev => prev.filter(f => f.key !== key)); return }
+                if (!window.confirm(`Delete flag "${flag?.label || key}"? It will be removed from all devices.`)) return
+                try {
+                  await api.network.flags.remove(key)
+                  setFlags(prev => prev.filter(f => f.key !== key))
+                  showToast('Flag deleted')
+                } catch (err) { showToast(err.message, 'error') }
+              }}
+            />
+            <FlagSection
+              title="Custom Flags"
+              description="User-created flags. Lower ranks appear earlier; higher ranks stay below the system flags."
+              flags={customFlags}
+              emptyText="No custom flags yet"
+              onSave={async (tempKey, data) => {
+                try {
+                  const existing = flags.find(f => f.key === tempKey)
+                  if (existing?._new) {
+                    const realKey = (data.key || data.label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32)
+                    if (!realKey) { showToast('Key is required', 'error'); return }
+                    const created = await api.network.flags.create({ key: realKey, label: data.label, icon: data.icon, description: data.description, sortOrder: Number(data.sortOrder) || nextCustomSortOrder })
+                    setFlags(prev => prev.map(f => f.key === tempKey ? { ...created } : f))
+                  } else {
+                    const updated = await api.network.flags.update(tempKey, { label: data.label, icon: data.icon, description: data.description, sortOrder: Number(data.sortOrder) || 0 })
+                    setFlags(prev => prev.map(f => f.key === tempKey ? { ...updated } : f))
+                  }
+                  showToast('Flag saved')
+                } catch (err) { showToast(err.message, 'error') }
+              }}
+              onDelete={async (key) => {
+                const flag = flags.find(f => f.key === key)
+                if (flag?._new) { setFlags(prev => prev.filter(f => f.key !== key)); return }
+                if (!window.confirm(`Delete flag "${flag?.label || key}"? It will be removed from all devices.`)) return
+                try {
+                  await api.network.flags.remove(key)
+                  setFlags(prev => prev.filter(f => f.key !== key))
+                  showToast('Flag deleted')
+                } catch (err) { showToast(err.message, 'error') }
+              }}
+            />
             <p className="text-[11px] text-slate-600 mt-2">Icon: enter any emoji character (e.g. 🔒, 📷, 💡). It will appear on devices in the network view.</p>
           </section>
           </>)}

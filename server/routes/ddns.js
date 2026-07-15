@@ -58,7 +58,12 @@ router.post('/portscan', async (req, res) => {
     const ports = cfg?.ddns?.port_check_ports ?? undefined
     const scan  = await scanPorts(ip, ports)
     writeDdnsStatus({ ...status, port_scan: scan })
-    audit('ddns.port_scan', { ip, open: scan.results.filter(r => r.open).map(r => r.port) }, req.user?.username ?? 'user', req.ip)
+    audit(
+      'ddns.port_scan',
+      { ip, open: scan.results.filter(r => r.open).map(r => ({ port: r.port, protocol: r.protocol ?? 'tcp' })) },
+      req.user?.username ?? 'user',
+      req.ip,
+    )
     res.json(scan)
   } catch (err) {
     res.status(500).json({ error: err.message })

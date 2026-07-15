@@ -127,6 +127,7 @@ export function getDb() {
       start       INTEGER PRIMARY KEY,
       end         INTEGER,
       duration_ms INTEGER NOT NULL,
+      uptime_before_ms INTEGER,
       outage_type TEXT,
       ongoing     INTEGER NOT NULL DEFAULT 0,
       created_at  INTEGER NOT NULL
@@ -239,6 +240,7 @@ export function getDb() {
           start       INTEGER PRIMARY KEY,
           end         INTEGER,
           duration_ms INTEGER NOT NULL,
+          uptime_before_ms INTEGER,
           outage_type TEXT,
           ongoing     INTEGER NOT NULL DEFAULT 0,
           created_at  INTEGER NOT NULL
@@ -261,6 +263,8 @@ export function getDb() {
     INSERT OR IGNORE INTO flags (key, label, emoji, type, is_system, sort_order) VALUES
       ('favorite', 'Favorite', '★',  'system', 1, 20),
       ('pest',     'Pest',     '🐞', 'system', 1, 10),
+      ('icmp_blocked', 'ICMP Blocked', '🚫', 'system', 1, 15),
+      ('dodgy',    'Dodgy',    '⚠️', 'system', 1, 12),
       ('dormant',  'Dormant',  '🌙', 'system', 1, 30);
 
     CREATE TABLE IF NOT EXISTS device_flags (
@@ -277,12 +281,12 @@ export function getDb() {
   const flagsCols = _db.all('PRAGMA table_info(flags)').map(c => c.name)
   if (!flagsCols.includes('type')) {
     _db.exec(`ALTER TABLE flags ADD COLUMN type TEXT NOT NULL DEFAULT 'custom'`)
-    _db.exec(`UPDATE flags SET type = 'system' WHERE key IN ('favorite','pest','dormant')`)
+    _db.exec(`UPDATE flags SET type = 'system' WHERE key IN ('favorite','pest','icmp_blocked','dodgy','dormant')`)
     console.log('[db] Added type column to flags.')
   }
   if (!flagsCols.includes('is_system')) {
     _db.exec(`ALTER TABLE flags ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0`)
-    _db.exec(`UPDATE flags SET is_system = 1 WHERE key IN ('favorite','pest','dormant')`)
+    _db.exec(`UPDATE flags SET is_system = 1 WHERE key IN ('favorite','pest','icmp_blocked','dodgy','dormant')`)
     console.log('[db] Added is_system column to flags.')
   }
 
@@ -470,18 +474,6 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_alerts_type        ON alerts (type);
   `)
 
-  // Evidence files attached to outages
-  _db.exec(`
-    CREATE TABLE IF NOT EXISTS evidence_files (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      outage_ts INTEGER NOT NULL,
-      filename TEXT NOT NULL,
-      path TEXT NOT NULL,
-      uploaded_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_evidence_outage ON evidence_files (outage_ts);
-  `)
-
   // Historical outage diagnostics tables (current + archived)
   _db.exec(`
     CREATE TABLE IF NOT EXISTS outage_diagnostics (
@@ -605,8 +597,6 @@ export function persistOutages() {
           try { const p = JSON.parse(e.payload); downType = p.outage_type ?? null; _lastPayload = p } catch { downType = null; _lastPayload = null }
         }
         else if (e.event === 'internet.up' && downTs !== null) {
-          let payload = null
-          try { payload = JSON.parse(e.payload) } catch { payload = null }
           outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, outage_type: downType, ongoing: false, payload: _lastPayload })
           _lastUpTs = e.ts; downTs = null; downType = null; _lastPayload = null
         }
@@ -617,42 +607,61 @@ export function persistOutages() {
 
     // Upsert into network_outages — prefer payload.detected_at when present so
     // stored start/duration reflect detection -> discovery rather than pairing timestamps.
+    // Use a safer upsert that only replaces an existing row when the newly computed
+    // duration is greater than the stored one. This prevents accidental shrinking
+    // of previously-observed outages (e.g. due to late-arriving diagnostic timestamps).
     const now = Date.now()
-    // Use named parameters to avoid positional-binding issues with the wasm sqlite driver
-    const insert = db.prepare('INSERT OR REPLACE INTO network_outages (start,end,duration_ms,outage_type,ongoing,created_at) VALUES ($start,$end,$duration_ms,$outage_type,$ongoing,$created_at)')
+    const upsertSql = `INSERT INTO network_outages (start,end,duration_ms,uptime_before_ms,outage_type,ongoing,created_at)
+                       VALUES ($start,$end,$duration_ms,$uptime_before_ms,$outage_type,$ongoing,$created_at)
+                       ON CONFLICT(start) DO UPDATE SET
+                         end = excluded.end,
+                         duration_ms = excluded.duration_ms,
+                         uptime_before_ms = excluded.uptime_before_ms,
+                         outage_type = excluded.outage_type,
+                         ongoing = excluded.ongoing,
+                         created_at = excluded.created_at
+                       WHERE excluded.duration_ms > network_outages.duration_ms`
+    const upsert = db.prepare(upsertSql)
+
     for (const o of outages) {
-      // If payload provided a detected_at timestamp, prefer that as the start
-        let start = Number(o.start) || Date.now()
-      const end = o.end == null ? null : Number(o.end)
-      // Defensive: compute duration from detected_at->end when available
-      let duration = Number(o.durationMs)
+      // Normalize start/end to numbers (ms). Coerce missing start to now (defensive).
+      let start = Number(o.start)
+      if (!isFinite(start) || start <= 0) start = Date.now()
+      let end = o.end == null ? null : Number(o.end)
+      if (end != null && (!isFinite(end) || end <= 0)) end = null
+
+      // If payload provided a detected_at timestamp, and it looks sane, prefer that as the start
       if (o.payload && o.payload.detected_at) {
         let det = Number(o.payload.detected_at)
-        // If detected_at looks like a seconds-since-epoch (e.g., 10-digit), convert to ms
         if (isFinite(det) && det > 0) {
-          if (det < 1e12) det = det * 1000
-          // Use detected_at as authoritative start when present
-          const basisEnd = end || Date.now()
-          duration = Math.round(basisEnd - det)
-          // override start to be detected_at (ms)
-          start = det
+          if (det < 1e12) det = det * 1000 // seconds -> ms
+          // Only accept detected_at if it's not in the future and not unreasonably far from the paired start
+          const nowLocal = Date.now()
+          if (det <= nowLocal && Math.abs(det - start) < 1000 * 60 * 60 * 24) {
+            start = Math.round(det)
+          }
         }
       }
-      if (!isFinite(duration) || duration < 0) {
-        console.warn('[db] persistOutages: invalid duration, coercing to 0', o)
-        duration = 0
-      } else {
-        duration = Math.round(duration)
-      }
+
+      // Compute duration from start->end (or start->now for ongoing). Ensure non-negative integer.
+      let duration = 0
+      if (end != null) duration = Math.round(Math.max(0, end - start))
+      else duration = Math.round(Math.max(0, Date.now() - start))
+
+      // Compute uptime_before_ms where possible (time between previous up and this down).
+      // The calling code that constructs `outages` may include uptimeBeforeMs; prefer that when present.
+      let uptime_before_ms = null
+      if (o.uptimeBeforeMs != null) uptime_before_ms = Number(o.uptimeBeforeMs)
+      else if (o.uptime_before_ms != null) uptime_before_ms = Number(o.uptime_before_ms)
+      if (uptime_before_ms != null && (!isFinite(uptime_before_ms) || uptime_before_ms < 0)) uptime_before_ms = null
+
       const type = o.outage_type ?? null
       const ongoing = o.ongoing ? 1 : 0
       try {
-        const bound = { $start: start, $end: end, $duration_ms: duration, $outage_type: type, $ongoing: ongoing, $created_at: now }
-        insert.run(bound)
+        upsert.run({ $start: start, $end: end, $duration_ms: duration, $uptime_before_ms: uptime_before_ms, $outage_type: type, $ongoing: ongoing, $created_at: now })
       } catch (e) {
-        // On failure, log details at error level to assist debugging
-        console.error('[db] persistOutages: insert failed for outage object:', JSON.stringify(o), e && e.message)
-        try { console.error('[db] persistOutages: bound params ->', JSON.stringify({ $start: start, $end: end, $duration_ms: duration, $outage_type: type, $ongoing: ongoing, $created_at: now })) } catch {}
+        console.error('[db] persistOutages: upsert failed for outage object:', JSON.stringify(o), e && e.message)
+        try { console.error('[db] persistOutages: bound params ->', JSON.stringify({ start, end, duration, type, ongoing })) } catch {}
         throw e
       }
     }
@@ -853,6 +862,7 @@ export function upsertDevice(device) {
   const now = Date.now()
   const db = getDb()
   const pk = device.mac ?? `noMAC:${device.ip}`
+  const overwritePorts = device.overwritePorts === true ? 1 : 0
 
   // When a real MAC is discovered for a device previously stored without one, remove the placeholder
   if (device.mac) {
@@ -884,7 +894,7 @@ export function upsertDevice(device) {
       latency        = excluded.latency,
       os             = COALESCE(excluded.os,       devices.os),
       dormant        = CASE WHEN excluded.status IN ('online','filtered') THEN 0 ELSE devices.dormant END,
-      ports        = CASE WHEN json_array_length(excluded.ports)        > 0 THEN excluded.ports        ELSE devices.ports        END,
+      ports        = CASE WHEN ? = 1 THEN excluded.ports ELSE CASE WHEN json_array_length(excluded.ports) > 0 THEN excluded.ports ELSE devices.ports END END,
       host_scripts = CASE WHEN json_array_length(excluded.host_scripts) > 0 THEN excluded.host_scripts ELSE devices.host_scripts END,
       traceroute   = CASE WHEN json_array_length(excluded.traceroute)   > 0 THEN excluded.traceroute   ELSE devices.traceroute   END
   `, [
@@ -895,6 +905,7 @@ export function upsertDevice(device) {
     JSON.stringify(device.ports ?? []),
     JSON.stringify(device.hostScripts ?? []),
     JSON.stringify(device.traceroute ?? []),
+    overwritePorts,
   ])))
 }
 
@@ -1027,6 +1038,7 @@ export function getAllDevices() {
       flags,
       favorited: flags.includes('favorite'),
       flagged:   flags.includes('pest'),
+      dodgy:     flags.includes('dodgy'),
       dormant:   flags.includes('dormant'),
       latency: r.latency, os: r.os,
       ports: JSON.parse(r.ports || '[]'),
@@ -1085,6 +1097,16 @@ export function toggleDeviceFlag(mac, flagKey) {
 export function toggleFavorite(mac) { return toggleDeviceFlag(mac, 'favorite') }
 export function toggleFlagged(mac)  { return toggleDeviceFlag(mac, 'pest') }
 export function toggleDormant(mac)  { return toggleDeviceFlag(mac, 'dormant') }
+
+export function setDeviceFlag(mac, flagKey, enabled) {
+  const db = getDb()
+  if (enabled) {
+    db.run('INSERT OR IGNORE INTO device_flags (mac, flag_key, set_at) VALUES (?, ?, ?)', [mac, flagKey, Date.now()])
+    return true
+  }
+  db.run('DELETE FROM device_flags WHERE mac = ? AND flag_key = ?', [mac, flagKey])
+  return false
+}
 
 /**
  * Auto-dormant devices that have been offline for >= `days` days.

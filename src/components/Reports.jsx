@@ -1066,6 +1066,19 @@ export default function Reports() {
     }
   }, [outageData, outageLogOrderColumn, outageLogOrderDir, outageLogPer])
 
+  useEffect(() => {
+    const handleRefresh = () => {
+      loadData()
+      loadCharts()
+      loadInternet()
+      loadSpeedtest()
+      loadOutages()
+      loadOutageLog(outageLogPage, outageLogPer)
+    }
+    window.addEventListener('claudette:reports-refresh', handleRefresh)
+    return () => window.removeEventListener('claudette:reports-refresh', handleRefresh)
+  }, [loadData, loadCharts, loadInternet, loadSpeedtest, loadOutages, loadOutageLog, outageLogPage, outageLogPer])
+
   // Ensure outage log loads on first render (default newest-first)
   useEffect(() => { loadOutageLog(1, outageLogPer) }, [loadOutageLog, outageLogPer])
 

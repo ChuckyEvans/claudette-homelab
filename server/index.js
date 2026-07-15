@@ -156,7 +156,7 @@ app.get('/api/reports/ookla/servers-local', async (req, res) => {
       let data
       try {
         data = JSON.parse(outStr)
-      } catch (e) {
+      } catch {
         console.warn('[ookla] Failed to JSON-parse Ookla stdout; logging raw output')
         console.warn(outStr.slice(0, 2000))
         throw new Error('Could not parse Ookla CLI JSON output')
@@ -165,17 +165,19 @@ app.get('/api/reports/ookla/servers-local', async (req, res) => {
       const servers = raw.map(s => ({ id: s.id ?? s.serverId ?? s.server_id ?? s.server ?? null, name: s.name || s.server || s.sponsor || '', country: s.country || s.location || '', city: s.city || '', host: s.host || null, distance_km: s.distance_km ?? s.distance ?? null }))
       // Enrich with last-known ping from DB if available
       try {
-        const { listOoklaServersWithPing } = await import('./utils/speedtest.js')
+        const { listOoklaServersWithPing, sortOoklaServers, formatOoklaServerLabel } = await import('./utils/speedtest.js')
         const enriched = await listOoklaServersWithPing(req.query.interface ? req.query.interface : null)
-        // Map by id for quick lookup
-        const map = new Map(enriched.map(s => [String(s.id), s.last_ping_ms]))
+        const map = new Map(enriched.map(s => [String(s.id), s]))
         const out = servers.map(s => {
-          const ping = map.get(String(s.id)) ?? null
-          const nameWithPing = ping != null ? `${s.name} - ${ping}ms` : s.name
-          return { ...s, name: nameWithPing, last_ping_ms: ping }
-        })
+          const extra = map.get(String(s.id)) ?? {}
+          return {
+            ...s,
+            label: extra.label ?? formatOoklaServerLabel(s),
+            last_ping_ms: extra.last_ping_ms ?? null,
+          }
+        }).sort(sortOoklaServers)
         return res.json({ servers: out })
-      } catch (e) {
+      } catch {
         return res.json({ servers })
       }
     } catch {

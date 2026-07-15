@@ -52,11 +52,66 @@ function extractPackage(title) {
 }
 
 const SEVERITY_ORDER = { critical: 4, high: 3, medium: 2, low: 1 }
+const RETRYABLE_STATUS = new Set([502, 503, 504])
 
 let _cachedThreats = []
 let _lastRefresh = null
 // Track consecutive failures and cooldown per feed in-memory
 const _feedState = new Map()
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function getRetryAfterMs(err) {
+  const raw = err?.retryAfter ?? err?.response?.headers?.get?.('retry-after') ?? err?.headers?.['retry-after']
+  if (!raw) return null
+  const seconds = Number(raw)
+  if (Number.isFinite(seconds)) return Math.max(0, seconds) * 1000
+  const when = Date.parse(raw)
+  return Number.isFinite(when) ? Math.max(0, when - Date.now()) : null
+}
+
+export function isRetryableThreatFeedError(err) {
+  const status = Number(err?.status)
+  if (status === 429) return false
+  if (Number.isFinite(status)) return RETRYABLE_STATUS.has(status)
+  const msg = String(err?.message ?? '')
+  const match = msg.match(/status code\s+(\d{3})/i)
+  if (match && Number(match[1]) === 429) return false
+  if (match) return RETRYABLE_STATUS.has(Number(match[1]))
+  return true
+}
+
+export async function fetchThreatFeedText(feedUrl, { fetchFn = fetch, maxAttempts = 4 } = {}) {
+  let lastError = null
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const resp = await fetchFn(feedUrl, { timeout: 15000 })
+      if (!resp.ok) {
+        const error = new Error(`Status code ${resp.status}`)
+        error.status = resp.status
+        if (resp.status === 429) {
+          const retryAfter = resp.headers?.get?.('retry-after')
+          if (retryAfter) error.retryAfter = retryAfter
+        }
+        throw error
+      }
+      const txt = await resp.text()
+      if (!txt) throw new Error('Empty response body')
+      return txt
+    } catch (err) {
+      lastError = err
+      const retryable = isRetryableThreatFeedError(err)
+      const wait = Math.min(8000, 300 * 2 ** (attempt - 1))
+      console.error(`[threats] fetch attempt ${attempt} failed for ${feedUrl}: ${err.message}${retryable ? ' (retryable)' : ''}`)
+      if (!retryable) break
+      if (attempt >= maxAttempts) break
+      await sleep(wait)
+    }
+  }
+  throw lastError ?? new Error('Failed to fetch threat feed')
+}
 
 function ensureDataDir() {
   const dir = path.dirname(STATE_FILE)
@@ -118,23 +173,8 @@ export async function refreshThreats(broadcast) {
       continue
     }
     try {
-      // Fetch with retries to handle transient 502/502 from upstream
-      let txt = null
-      const maxAttempts = 3
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-          const resp = await fetch(feed.url, { timeout: 15000 })
-          if (!resp.ok) throw new Error(`Status code ${resp.status}`)
-          txt = await resp.text()
-          break
-        } catch (e) {
-          const wait = 200 * Math.pow(2, attempt)
-          console.error(`[threats] fetch attempt ${attempt} for ${feed.name} failed: ${e.message}`)
-          if (attempt < maxAttempts) await new Promise(r => setTimeout(r, wait))
-          else throw e
-        }
-      }
-      if (!txt) throw new Error('Empty response body')
+      // Fetch with retries to handle transient 502/503/504 from upstream.
+      const txt = await fetchThreatFeedText(feed.url)
       const parsed = await parser.parseString(txt)
       for (const item of parsed.items ?? []) {
         const id = item.guid || item.link || item.title
@@ -167,10 +207,18 @@ export async function refreshThreats(broadcast) {
       // increment failure counter; if threshold reached, set cooldown
       state.failures = (state.failures || 0) + 1
       const failureThreshold = 3
-      const cooldownMin = (loadConfig()?.threats?.feed_cooldown_minutes) || 30
+      const defaultCooldownMin = (loadConfig()?.threats?.feed_cooldown_minutes) || 30
+      const retryAfterMs = Number(err?.status) === 429 ? getRetryAfterMs(err) : null
+      const cooldownMs = Number.isFinite(retryAfterMs)
+        ? Math.max(retryAfterMs, 6 * 60 * 60 * 1000)
+        : defaultCooldownMin * 60_000
+      if (Number(err?.status) === 429) {
+        state.disabledUntil = Date.now() + cooldownMs
+        console.error(`[threats] Rate-limited ${feed.name}; cooling down for ${Math.round(cooldownMs / 60000)} minutes`)
+      }
       if (state.failures >= failureThreshold) {
-        state.disabledUntil = Date.now() + cooldownMin * 60_000
-        console.error(`[threats] Disabling ${feed.name} for ${cooldownMin} minutes after ${state.failures} failures`)
+        state.disabledUntil = Date.now() + cooldownMs
+        console.error(`[threats] Disabling ${feed.name} for ${Math.round(cooldownMs / 60000)} minutes after ${state.failures} failures`)
       }
       _feedState.set(feed.url, state)
     }

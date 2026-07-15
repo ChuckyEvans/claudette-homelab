@@ -65,31 +65,157 @@ function appendDdnsHistory(entry, retentionDays = 365) {
 }
 
 // ── Port scan ─────────────────────────────────────────────────────────────────
-// Probes each port via TCP connect. Works on most home networks (hairpin NAT permitting).
-// Does NOT require root or nmap — pure Node.js net.createConnection().
+// Probes TCP ports via connect() and UDP ports via nmap.
+// The result shape is protocol-aware so callers can persist both port and type.
 
-const DEFAULT_PORTS = [21, 22, 25, 80, 443, 3389, 8080, 8443, 25565, 32400, 51820]
+const DEFAULT_PORTS = [7, 21, 22, 25, 53, 80, 123, 137, 161, 443, 3389, 8080, 8443, 25565, 32400, 51820]
 
-const PORT_SERVICES = {
-  21: 'FTP', 22: 'SSH', 25: 'SMTP', 80: 'HTTP', 443: 'HTTPS',
-  3389: 'RDP', 8080: 'HTTP-alt', 8443: 'HTTPS-alt',
-  25565: 'Minecraft', 32400: 'Plex', 51820: 'WireGuard',
+const PORT_PROTOCOL_HINTS = {
+  7: 'udp',
+  53: 'udp',
+  67: 'udp',
+  68: 'udp',
+  69: 'udp',
+  123: 'udp',
+  137: 'udp',
+  138: 'udp',
+  161: 'udp',
+  162: 'udp',
+  1900: 'udp',
+  5353: 'udp',
 }
 
-function probePort(host, port, timeoutMs = 3000) {
+const PORT_SERVICES = {
+  7: 'Echo', 21: 'FTP', 22: 'SSH', 25: 'SMTP', 53: 'DNS',
+  67: 'DHCP', 68: 'DHCP', 69: 'TFTP', 80: 'HTTP', 123: 'NTP',
+  137: 'NetBIOS', 138: 'NetBIOS', 161: 'SNMP', 162: 'SNMP-Trap',
+  443: 'HTTPS', 3389: 'RDP', 8080: 'HTTP-alt', 8443: 'HTTPS-alt',
+  1900: 'SSDP', 5353: 'mDNS', 25565: 'Minecraft', 32400: 'Plex', 51820: 'WireGuard',
+}
+
+function getNmapBin() {
+  if (process.platform === 'win32') {
+    const candidates = [
+      'C:\\Program Files (x86)\\Nmap\\nmap.exe',
+      'C:\\Program Files\\Nmap\\nmap.exe',
+    ]
+    for (const p of candidates) {
+      if (fs.existsSync(p)) return p
+    }
+  }
+  return 'nmap'
+}
+
+function normalizePortSpec(spec) {
+  if (typeof spec === 'number') {
+    return { port: spec, protocol: PORT_PROTOCOL_HINTS[spec] ?? 'tcp' }
+  }
+  if (typeof spec === 'string') {
+    const match = spec.trim().match(/^(\d+)(?:\/(tcp|udp))?$/i)
+    if (!match) throw new Error(`Invalid port spec: ${spec}`)
+    const port = Number(match[1])
+    return { port, protocol: (match[2]?.toLowerCase() ?? PORT_PROTOCOL_HINTS[port] ?? 'tcp') }
+  }
+  if (spec && typeof spec === 'object') {
+    const port = Number(spec.port)
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error(`Invalid port spec: ${JSON.stringify(spec)}`)
+    return { port, protocol: String(spec.protocol ?? PORT_PROTOCOL_HINTS[port] ?? 'tcp').toLowerCase() === 'udp' ? 'udp' : 'tcp' }
+  }
+  throw new Error(`Invalid port spec: ${String(spec)}`)
+}
+
+function normalizePortSpecs(ports = DEFAULT_PORTS) {
+  const seen = new Set()
+  const specs = []
+  for (const spec of ports) {
+    const normalized = normalizePortSpec(spec)
+    const key = `${normalized.protocol}:${normalized.port}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    specs.push(normalized)
+  }
+  return specs
+}
+
+function probeTcpPort(host, port, timeoutMs = 3000) {
   return new Promise(resolve => {
     const socket = net.createConnection({ host, port })
     socket.setTimeout(timeoutMs)
-    const done = (open) => { socket.destroy(); resolve({ port, open, service: PORT_SERVICES[port] ?? null }) }
+    const done = (open) => {
+      socket.destroy()
+      resolve({
+        port,
+        protocol: 'tcp',
+        open,
+        service: PORT_SERVICES[port] ?? null,
+        state: open ? 'open' : 'closed',
+        version: '',
+      })
+    }
     socket.on('connect', () => done(true))
-    socket.on('error',   () => done(false))
+    socket.on('error', () => done(false))
     socket.on('timeout', () => done(false))
   })
 }
 
+async function scanTcpPorts(ip, specs) {
+  return Promise.all(specs.map(({ port }) => probeTcpPort(ip, port)))
+}
+
+async function scanUdpPorts(ip, specs) {
+  if (!specs.length) return []
+  try {
+    const portList = specs.map(({ port }) => port).join(',')
+    const { stdout } = await execFileAsync(getNmapBin(), [
+      '-sU', '-Pn', '-n', '--max-retries', '1', '--host-timeout', '15s',
+      '-p', portList, ip,
+    ])
+    const byPort = new Map()
+    for (const line of stdout.split('\n')) {
+      const match = line.match(/^(\d+)\/udp\s+(open|closed|filtered|open\|filtered)\s*(\S+)?\s*(.*)$/i)
+      if (!match) continue
+      byPort.set(Number(match[1]), {
+        state: match[2].toLowerCase(),
+        service: match[3] ?? null,
+        version: match[4]?.trim() || '',
+      })
+    }
+    return specs.map(({ port }) => {
+      const found = byPort.get(port)
+      return {
+        port,
+        protocol: 'udp',
+        open: found?.state === 'open',
+        service: found?.service ?? PORT_SERVICES[port] ?? null,
+        state: found?.state ?? 'filtered',
+        version: found?.version ?? '',
+      }
+    })
+  } catch {
+    return specs.map(({ port }) => ({
+      port,
+      protocol: 'udp',
+      open: false,
+      service: PORT_SERVICES[port] ?? null,
+      state: 'filtered',
+      version: '',
+    }))
+  }
+}
+
 export async function scanPorts(ip, ports = DEFAULT_PORTS) {
-  const results = await Promise.all(ports.map(p => probePort(ip, p)))
-  return { ts: Date.now(), ip, results }
+  const specs = normalizePortSpecs(ports)
+  const tcpSpecs = specs.filter(p => p.protocol === 'tcp')
+  const udpSpecs = specs.filter(p => p.protocol === 'udp')
+  const [tcpResults, udpResults] = await Promise.all([
+    scanTcpPorts(ip, tcpSpecs),
+    scanUdpPorts(ip, udpSpecs),
+  ])
+  const byKey = new Map([
+    ...tcpResults.map(r => [`tcp:${r.port}`, r]),
+    ...udpResults.map(r => [`udp:${r.port}`, r]),
+  ])
+  return { ts: Date.now(), ip, results: specs.map(spec => byKey.get(`${spec.protocol}:${spec.port}`)).filter(Boolean) }
 }
 
 // ── Public IP detection (multiple fallbacks) ─────────────────────────────────

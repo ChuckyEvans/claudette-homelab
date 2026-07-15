@@ -20,7 +20,7 @@ const STACK = [
 
 export default function AboutPage({ onShowWizard, updateInfo, onCheckUpdates, checkingUpdate = false }) {
   const versionInfo = updateInfo ?? null
-  const displayVersion = versionInfo?.current ?? '0.2.1'
+  const displayVersion = versionInfo?.current ?? '0.2.2'
   const buildTime = versionInfo?.build_time ?? null
 
   return (

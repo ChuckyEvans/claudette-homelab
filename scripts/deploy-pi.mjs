@@ -69,7 +69,7 @@ const kodiUser = param('kodi-user', 'root')
 function yamlVal(key, fb = '') {
   const f = join(ROOT, 'config.yaml')
   if (!existsSync(f)) return fb
-  const m = readFileSync(f, 'utf8').match(new RegExp(`^\\s*${key}:\\s*(.+)`, 'm'))
+  const m = readFileSync(f, 'utf8').match(new RegExp(`^\s*${key}:\s*(.+)`, 'm'))
   return m ? m[1].trim().replace(/^['"]|['"]$/g, '') : fb
 }
 function yamlList(key) {
@@ -79,7 +79,7 @@ function yamlList(key) {
   const result = []
   let on = false
   for (const l of lines) {
-    if (new RegExp(`^\\s+${key}:\\s*$`).test(l)) { on = true; continue }
+    if (new RegExp(`^\s+${key}:\s*$`).test(l)) { on = true; continue }
     if (on) {
       const m = l.match(/^\s+-\s+(.+)/)
       if (m) result.push(m[1].trim().replace(/^['"]|['"]$/g, ''))
@@ -119,7 +119,6 @@ function run(cmd, args, { silent = false, noThrow = false, cwd = ROOT } = {}) {
   return (r.stdout ?? '').trim()
 }
 
-// Resolve npm command robustly
 function resolveNpmCmdSync() {
   if (process.platform !== 'win32') return 'npm'
   try {
@@ -130,7 +129,6 @@ function resolveNpmCmdSync() {
 }
 const NPM_CMD = resolveNpmCmdSync()
 
-// SSH helper
 const remote = (cmd, opts = {}) => {
   if (Array.isArray(cmd)) cmd = cmd.filter(Boolean).join(' && ')
   if (!cmd || !String(cmd).trim()) throw new Error('remote(): empty command')
@@ -161,12 +159,11 @@ if (!skipTests) {
 
 emitProgress({ step: 'prechecks', progress: 0.05, message: 'pre-deploy checks complete' })
 
-// quick deploy
 if (quick) {
   log('\n[1/2] Uploading server files to Pi...')
   const tar = join(tmpdir(), 'claudette-quick.tar')
   mkTar(tar, 'server')
-  info(`Tarball: ${(statSync(tar).size/1e6).toFixed(1)} MB`)
+  info(`Tarball: ${(statSync(tar).size / 1e6).toFixed(1)} MB`)
   emitProgress({ step: 'pack', progress: 0.15, message: 'created quick tarball' })
   scpTo(tar, `${piUser}@${piHost}:/home/${piUser}/claudette-quick.tar`)
   unlinkSync(tar)
@@ -193,11 +190,10 @@ if (quick) {
   process.exit(0)
 }
 
-// pre-built: upload src+dist and build minimal Dockerfile
 if (preBuilt) {
   log('\n[1/2] Uploading pre-built dist + server (skipping npm build on Pi)...')
   const tar = join(tmpdir(), 'claudette-src.tar')
-  const includes = ['server','dist','package.json','package-lock.json'].filter(f => existsSync(join(ROOT,f)))
+  const includes = ['server', 'dist', 'package.json', 'package-lock.json'].filter(f => existsSync(join(ROOT, f)))
   mkTar(tar, ...includes)
   scpTo(tar, `${piUser}@${piHost}:/home/${piUser}/claudette-src.tar`)
   unlinkSync(tar)
@@ -226,21 +222,20 @@ if (preBuilt) {
     `tar -xf /home/${piUser}/claudette-src.tar -C /tmp/claudette-build`,
     `mv /home/${piUser}/claudette-Dockerfile /tmp/claudette-build/Dockerfile || true`,
     `cd /tmp/claudette-build && sudo docker build --build-arg CACHEBUST=${Date.now()} -t ${IMAGE} .`,
-    'cd / && rm -rf /tmp/claudette-build || true'
+    'cd / && rm -rf /tmp/claudette-build || true',
   ].join(' && '))
   info('Built.')
 } else if (!skipBuild) {
   log('\n[1/2] Uploading source + building on Pi (native ARM64)...')
   const tar = join(tmpdir(), 'claudette-src.tar')
-  const includes = ['server','src','public','package.json','package-lock.json','Dockerfile','vite.config.js','postcss.config.js','tailwind.config.js','index.html','eslint.config.js','.dockerignore'].filter(f => existsSync(join(ROOT,f)))
+  const includes = ['server', 'src', 'public', 'package.json', 'package-lock.json', 'Dockerfile', 'vite.config.js', 'postcss.config.js', 'tailwind.config.js', 'index.html', 'eslint.config.js', '.dockerignore'].filter(f => existsSync(join(ROOT, f)))
   mkTar(tar, ...includes)
-  info(`Tarball: ${(statSync(tar).size/1e6).toFixed(1)} MB`)
+  info(`Tarball: ${(statSync(tar).size / 1e6).toFixed(1)} MB`)
   emitProgress({ step: 'pack', progress: 0.2, message: 'created source tarball' })
   scpTo(tar, `${piUser}@${piHost}:/home/${piUser}/claudette-src.tar`)
   unlinkSync(tar)
 
   info('Uploaded. Building on Pi (this takes a few minutes)...')
-  // kill leftover build processes if present
   try { remote('sudo pkill -f /tmp/claudette-build || true; sudo pkill -f claude*progress* || true', { silent: true, noThrow: true }) } catch (e) {}
 
   const remoteScript = [
@@ -254,21 +249,19 @@ if (preBuilt) {
     'emit "{\"step\":\"start\",\"progress\":0,\"message\":\"begin build\"}"',
     `cd /tmp/claudette-build && sudo docker build --build-arg CACHEBUST=${Date.now()} -t ${IMAGE} . 2>&1 | tee /tmp/claudette-build/build.log`,
     'emit "{\"step\":\"done\",\"progress\":0.9,\"message\":\"build finished\"}"',
-    'cd / && rm -rf /tmp/claudette-build || true'
+    'cd / && rm -rf /tmp/claudette-build || true',
   ].join('\n')
   const tmpScript = join(tmpdir(), 'claudette-deploy.sh')
   writeFileSync(tmpScript, remoteScript, 'utf8')
   scpTo(tmpScript, `${piUser}@${piHost}:/home/${piUser}/claudette-deploy.sh`)
   unlinkSync(tmpScript)
 
-  // start remote build interactively (not background) so we can stream logs locally
   remote(`chmod +x /home/${piUser}/claudette-deploy.sh && bash /home/${piUser}/claudette-deploy.sh`)
   emitProgress({ step: 'remote-build', progress: 0.85, message: 'remote build finished' })
 } else {
   info('[1/2] Skipping build — reusing existing image on Pi.')
 }
 
-// 2. Restart container on Pi
 log('\n[2/2] Restarting container on Pi...')
 emitProgress({ step: 'restart', progress: 0.9, message: 'stopping and starting container' })
 remote(`sudo docker stop ${CONTAINER} 2>/dev/null || true`)
@@ -295,13 +288,10 @@ const dockerRunParts = [
   `--network host`,
   ...dnsFlags,
   leasesMount,
-  // Prefer host bind-mount to avoid creating an anonymous named volume.
-  // Always mount the host data directory; deploy script ensures backups/restores beforehand.
   `-v /home/${piUser}/claudette-data:/app/data`,
   IMAGE,
 ].filter(Boolean).join(' ')
 
-// Before starting container ensure host data dir has latest backups restored
 info('Ensuring host data directory backups and config restoration...')
 try {
   const restoreScript = [
