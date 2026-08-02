@@ -15,7 +15,7 @@ FROM node:22-alpine
 # nmap is required for network scanning; tcpdump for passive ARP gateway detection
 # curl is required for interface-bound speed tests (VPN/direct comparison)
 # Ookla speedtest CLI: downloaded directly as a static ARM64 binary (Alpine has no apt/deb)
-RUN apk add --no-cache nmap tcpdump curl sqlite sqlite-dev \
+RUN apk add --no-cache nmap tcpdump curl sqlite sqlite-dev mtr \
  && ARCH="$(uname -m)" \
  && case "$ARCH" in \
       aarch64) ST_ARCH="aarch64" ;; \

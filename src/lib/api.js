@@ -55,6 +55,7 @@ export const api = {
     run: () => request('/services/run', { method: 'POST' }),
     runInternet: () => request('/services/internet/run', { method: 'POST' }),
     vpnMeta: () => request('/services/vpn-meta'),
+    pingRemote: (host, retries = 1) => request(`/services/ping-remote?host=${encodeURIComponent(host)}&retries=${encodeURIComponent(retries)}`),
   },
   threats: {
     get: () => request('/threats'),
@@ -107,20 +108,27 @@ export const api = {
       return res?.interfaces || []
     },
     version:    (force) => request(`/system/version${force ? '?force=1' : ''}`),  
-    backup: async () => {
-      const res = await fetch('/api/system/backup', { method: 'POST', credentials: 'include' })
+    backupSave: async () => {
+      const res = await fetch('/api/system/backup?mode=save', { method: 'POST', credentials: 'include' })
+      if (res.status === 401) { notifySessionExpired(); throw new Error('Not authenticated') }
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || res.statusText) }
+      return res.json()
+    },
+    backupDownload: async () => {
+      const res = await fetch('/api/system/backup?mode=download', { method: 'POST', credentials: 'include' })
       if (res.status === 401) { notifySessionExpired(); throw new Error('Not authenticated') }
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || res.statusText) }
       const blob     = await res.blob()
       const cd       = res.headers.get('Content-Disposition') ?? ''
       const match    = cd.match(/filename="([^"]+)"/)
-      const filename = match ? match[1] : 'claudette-backup.claudette'
+      const filename = match ? match[1] : 'claudette-backup.7z'
       const link = document.createElement('a')
       link.href = URL.createObjectURL(blob)
       link.download = filename
       link.click()
       URL.revokeObjectURL(link.href)
     },
+    backup: async () => api.system.backupDownload(),
     restore: (fileData) => request('/system/restore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream' },

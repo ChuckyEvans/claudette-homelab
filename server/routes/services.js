@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 import { NodeSSH } from 'node-ssh'
 import { loadConfig } from '../config.js'
-import { audit, getDb, getVpnState, persistOutages, setVpnState } from '../db.js'
+import { audit, getDb, getVpnState, persistOutages, persistTargetOutages, setVpnState, normalizeHostString } from '../db.js'
 import { isPrivateIP } from '../utils/ip.js'
 import { getClientMetaVia } from '../utils/speedtest.js'
 
@@ -16,6 +16,7 @@ const history = new Map()
 const MAX_HISTORY = 60
 // Previous status for change detection
 const _prevStatus = new Map()
+const _prevTargetStatus = new Map()
 
 function addToHistory(name, entry) {
   if (!history.has(name)) history.set(name, [])
@@ -143,6 +144,10 @@ let _prevInternetOk    = null
 let _internetResults   = []
 let _internetAttempts  = [] // array of attempt arrays for double-check evidence
 
+// Consecutive confirmation counters to avoid flapping transient records
+let _consecFailCount = 0
+let _consecSuccessCount = 0
+
 // Initialize previous internet status from the most-recent persisted check so first real transition is detected
 try {
   const last = getDb().get(`SELECT payload FROM audit_log WHERE event = 'internet.check' ORDER BY ts DESC LIMIT 1`)
@@ -186,6 +191,13 @@ export function runMtrSnapshot(type, outageTsValue = null) {
       console.error('[mtr] store failed:', e.message)
     }
   })
+
+  try {
+    const tn = persistTargetOutages()
+    if (tn > 0 && typeof _outageBroadcast === 'function') _outageBroadcast('target_outages.persisted', { count: tn, ts: Date.now() })
+  } catch (e) {
+    console.error('[services] persistTargetOutages failed:', e && e.message)
+  }
 }
 
 function _startOutagePoll() {
@@ -224,24 +236,45 @@ function _stopOutagePoll() {
   _outageTs           = null
 }
 
-function pingHost(host) {
-  return new Promise(resolve => {
-    const start = Date.now()
+function pingHost(host, retries = 1) {
+  return new Promise(async resolve => {
     const isWin = process.platform === 'win32'
-    const cmd = isWin ? `ping -n 1 -w 3000 ${host}` : `ping -c 1 -W 3 ${host}`
-    exec(cmd, { timeout: 5000 }, (err) => {
-      resolve({ host, ok: !err, ms: Date.now() - start, ts: Date.now() })
-    })
+    let lastMs = null
+    let ok = false
+    for (let attempt = 0; attempt < Math.max(1, Number(retries || 1)); attempt++) {
+      const start = Date.now()
+      const cmd = isWin ? `ping -n 1 -w 3000 ${host}` : `ping -c 1 -W 3 ${host}`
+      try {
+        await new Promise((res, rej) => exec(cmd, { timeout: 5000 }, (err) => err ? rej(err) : res()))
+        lastMs = Date.now() - start
+        ok = true
+        break
+      } catch {
+        lastMs = Date.now() - start
+        // continue to next attempt
+      }
+    }
+    resolve({ host, ok, ms: lastMs, ts: Date.now() })
   })
 }
 
 /** Ping a host bound to a specific network interface (Linux only) */
-function pingHostVia(host, iface) {
-  return new Promise(resolve => {
-    const start = Date.now()
-    exec(`ping -c 1 -W 3 -I ${iface} ${host}`, { timeout: 5000 }, (err) => {
-      resolve({ host, ok: !err, ms: Date.now() - start, ts: Date.now() })
-    })
+function pingHostVia(host, iface, retries = 1) {
+  return new Promise(async resolve => {
+    let lastMs = null
+    let ok = false
+    for (let attempt = 0; attempt < Math.max(1, Number(retries || 1)); attempt++) {
+      const start = Date.now()
+      try {
+        await new Promise((res, rej) => exec(`ping -c 1 -W 3 -I ${iface} ${host}`, { timeout: 5000 }, (err) => err ? rej(err) : res()))
+        lastMs = Date.now() - start
+        ok = true
+        break
+      } catch {
+        lastMs = Date.now() - start
+      }
+    }
+    resolve({ host, ok, ms: lastMs, ts: Date.now() })
   })
 }
 
@@ -325,7 +358,12 @@ export async function checkConnectivity(broadcast) {
   if (broadcast) _outageBroadcast = broadcast
 
   const cfg = loadConfig()
-  const pingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
+  const rawPingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
+  const defaultRetries = Number(cfg?.network?.ping_retries ?? 1)
+  const pingHosts = (Array.isArray(rawPingHosts) ? rawPingHosts : []).map(h => {
+    if (typeof h === 'string') return { host: h, enabled: true, retries: defaultRetries }
+    return { host: h.host || '', enabled: h.enabled !== false, retries: Number.isFinite(Number(h.retries)) ? Number(h.retries) : defaultRetries }
+  }).filter(h => h.host && h.enabled)
 
   // VPN check — detect early so we can bind direct pings to the physical interface
   const VPN_IFACE = cfg?.network?.vpn_interface ?? null
@@ -338,11 +376,16 @@ export async function checkConnectivity(broadcast) {
   }
 
   // First attempt
-  const attempt1Ping = await Promise.all(pingHosts.map(h => physIface ? pingHostVia(h, physIface) : pingHost(h)))
-  const attempt1Http  = physIface
-    ? await checkHttpHeadVia('http://connectivity-check.ubuntu.com', physIface)
-    : await checkHttpHead('http://connectivity-check.ubuntu.com')
-  const attempt1 = [...attempt1Ping, attempt1Http]
+  const attempt1Ping = await Promise.all(pingHosts.map(h => physIface ? pingHostVia(h.host, physIface, h.retries) : pingHost(h.host, h.retries)))
+  // Optional HTTP head check (useful for captive portal / HTTP-level detection). Can be disabled or overridden via config.network.http_connectivity_check_url
+  const httpCheckUrl = (cfg?.network?.http_connectivity_check_url ?? 'http://connectivity-check.ubuntu.com') || null
+  let attempt1 = [...attempt1Ping]
+  if (httpCheckUrl) {
+    const attempt1Http = physIface
+      ? await checkHttpHeadVia(httpCheckUrl, physIface)
+      : await checkHttpHead(httpCheckUrl)
+    attempt1.push(attempt1Http)
+  }
 
   // Double-check attempts (configurable)
   const doubleCheckAttempts = Number(cfg?.schedule?.outage_double_check_attempts ?? 2)
@@ -354,11 +397,15 @@ export async function checkConnectivity(broadcast) {
       // wait configured interval (bounded)
       const waitMs = Math.max(1000, Math.min(60000, doubleCheckInterval * 1000))
       await new Promise(r => setTimeout(r, waitMs))
-      const p = await Promise.all(pingHosts.map(h => physIface ? pingHostVia(h, physIface) : pingHost(h)))
-      const hres = physIface
-        ? await checkHttpHeadVia('http://connectivity-check.ubuntu.com', physIface)
-        : await checkHttpHead('http://connectivity-check.ubuntu.com')
-      attempts.push([...p, hres])
+      const p = await Promise.all(pingHosts.map(h => physIface ? pingHostVia(h.host, physIface, h.retries) : pingHost(h.host, h.retries)))
+      if (httpCheckUrl) {
+        const hres = physIface
+          ? await checkHttpHeadVia(httpCheckUrl, physIface)
+          : await checkHttpHead(httpCheckUrl)
+        attempts.push([...p, hres])
+      } else {
+        attempts.push([...p])
+      }
     }
   }
 
@@ -367,8 +414,19 @@ export async function checkConnectivity(broadcast) {
   _internetResults  = attempts[attempts.length - 1]
   const ok = attempts.some(at => at.some(r => r.ok))
 
+  // Confirm outages / recoveries only after configured consecutive results
+  const confirmFailures = Number(cfg?.network?.outage_confirm_failures ?? 2)
+  const confirmRecoveries = Number(cfg?.network?.outage_confirm_recoveries ?? 1)
+
+  if (!ok) { _consecFailCount++; _consecSuccessCount = 0 } else { _consecSuccessCount++; _consecFailCount = 0 }
+
+  // Determine desired effective state based on consecutive counters
+  let desiredOk = (_prevInternetOk !== null) ? _prevInternetOk : ok
+  if (_consecFailCount >= confirmFailures) desiredOk = false
+  else if (_consecSuccessCount >= confirmRecoveries) desiredOk = true
+
   if (_vpnUp) {
-    _vpnResults = await Promise.all(pingHosts.map(h => pingHostVia(h, VPN_IFACE)))
+    _vpnResults = await Promise.all(pingHosts.map(h => pingHostVia(h.host, VPN_IFACE, h.retries)))
     _vpnOk = _vpnResults.some(r => r.ok)
 
     // Fetch VPN exit-node metadata (ISP, exit IP, city) — rate-limited to once per 30 min
@@ -398,8 +456,24 @@ export async function checkConnectivity(broadcast) {
   const gatewayOk  = gwResult ? gwResult.ok : null
 
   // Determine if failures are internal (LAN-only) by checking failed ping hosts
-  const attemptPing = await Promise.all(pingHosts.map(h => pingHost(h)))
+  const attemptPing = await Promise.all(pingHosts.map(h => pingHost(h.host, h.retries)))
   const failedPrivate = attemptPing.filter(p => !p.ok && isPrivateIP(p.host))
+
+  // Detect per-target transitions and emit events for persistence
+  for (const p of attemptPing) {
+    try {
+      const normHost = normalizeHostString(p.host || '')
+      const prev = _prevTargetStatus.get(normHost)
+      if (prev !== undefined && prev !== p.ok) {
+        // Emit network.target.down / network.target.up for pairing
+        if (p.ok) await audit('network.target.up', { host: normHost, ok: true, ms: p.ms })
+        else await audit('network.target.down', { host: normHost, ok: false, ms: p.ms })
+        // Persist per-target outages in background
+        try { persistTargetOutages() } catch (e) { console.warn('[services] persistTargetOutages failed:', e.message) }
+      }
+      _prevTargetStatus.set(normHost, p.ok)
+    } catch (e) { console.warn('[services] per-target audit failed:', e && e.message) }
+  }
 
   // outageType precedence: null (ok) -> internal -> isp -> infra -> unknown
   let outageType = null
@@ -412,61 +486,113 @@ export async function checkConnectivity(broadcast) {
 
   // Track attempt count while in outage mode
   if (_outageMode) _outageAttemptCount++
+  const justWentDown = desiredOk === false && !_outageMode
+  const justCameUp   = desiredOk === true  && _outageMode
 
-  const justWentDown = ok === false && !_outageMode
-  const justCameUp   = ok === true  && _outageMode
-
-  if (_prevInternetOk !== null && _prevInternetOk !== ok) {
+  // Emit transition events only when desired state differs from previous confirmed state
+  if (_prevInternetOk !== null && _prevInternetOk !== desiredOk) {
     const nowTs = Date.now()
-    await audit(ok ? 'internet.up' : 'internet.down', {
-      results:     _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
+    // Sanitize host strings in results/attempts to avoid objectObject and URL prefixes
+    const sanitizeResult = r => ({ host: normalizeHostString(String(r.host || r.url || '')), ok: !!r.ok, ms: Number(r.ms || 0), ts: r.ts ? Number(r.ts) : undefined })
+    const payload = {
+      results:       _internetResults.map(sanitizeResult),
       attempt_count: attempts.length,
-      attempts:     attempts.map(a => a.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))),
-      outage_type: ok ? null : outageType,
-      gateway_ok:  ok ? null : gatewayOk,
-    })
+      attempts:      attempts.map(a => a.map(sanitizeResult)),
+      outage_type:   desiredOk ? null : outageType,
+      gateway_ok:    desiredOk ? null : gatewayOk,
+    }
+    if (desiredOk === false) payload.detected_at = nowTs
+    if (desiredOk === true) payload.restored_at = nowTs
+    await audit(desiredOk ? 'internet.up' : 'internet.down', payload)
     const outageCount = persistOutages()
     if (outageCount > 0 && broadcast) broadcast('outages.persisted', { count: outageCount, ts: Date.now() })
-    // Capture diagnostics in the background when going down (traceroute takes time)
-    if (!ok) {
+
+    // Capture diagnostics in the background when confirmed down
+    if (desiredOk === false) {
       const outageTsCapture = nowTs
-        const pingDetail      = _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))
-        const gatewayCapture  = gateway ?? null
-        const typeCapture     = outageType
-        // pingHosts are available via config; ping_detail stores per-host results
+      const pingDetail      = _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))
+      const gatewayCapture  = gateway ?? null
+      const typeCapture     = outageType
       exec('mtr --report --no-dns --report-cycles 5 8.8.8.8 2>&1', { timeout: 120000 }, (err, stdout) => {
         try {
-          getDb().run(
-            `INSERT OR REPLACE INTO outage_diagnostics (outage_ts, traceroute, ping_detail, gateway, outage_type, captured_at)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-              [outageTsCapture, stdout || (err?.message ?? 'traceroute unavailable'),
-               JSON.stringify(pingDetail), gatewayCapture, typeCapture, Date.now()]
-          )
+              const tracerouteText = stdout || (err?.message ?? 'traceroute unavailable')
+              // Log when traceroute is missing or appears to have failed to aid debugging
+              if (!tracerouteText || tracerouteText.trim() === '' || /traceroute unavailable/i.test(tracerouteText)) {
+                console.warn('[outage-diag] traceroute produced no output or failed', { outageTsCapture, err: err && err.message, tracerouteSample: (tracerouteText || '').slice(0,200), pingDetail })
+              }
+          // Try to extract the last reachable hop (host or IP) from traceroute output.
+          let lastHop = null
+          try {
+            const lines = (tracerouteText || '').split('\n').map(l => l.trim()).filter(Boolean)
+            // Look for the last line that contains a host/IP that's not '???' or '*' and capture its hostname/ip
+            for (let i = lines.length - 1; i >= 0; i--) {
+              const m = lines[i].match(/\b(\d{1,3}(?:\.\d{1,3}){3}|[a-zA-Z0-9._-]+)\b/)
+              if (m) {
+                const candidate = m[1]
+                if (candidate !== '???' && candidate !== '*') { lastHop = candidate; break }
+              }
+            }
+          } catch { lastHop = null }
+
+          // Fallback: if no traceroute last hop, use any successful ping host from pingDetail
+          if (!lastHop && Array.isArray(pingDetail)) {
+            for (const p of pingDetail) {
+              if (p && p.ok && p.host) { lastHop = p.host; break }
+            }
+          }
+
+          // DB insert with retries on transient locks
+          const params = [outageTsCapture, tracerouteText, lastHop, JSON.stringify(pingDetail), gatewayCapture, typeCapture, Date.now()]
+          let attempts = 0
+          const maxAttempts = 6
+          while (true) {
+            try {
+              attempts++
+              getDb().run(
+                `INSERT OR REPLACE INTO outage_diagnostics (outage_ts, traceroute, traceroute_last_hop, ping_detail, gateway, outage_type, captured_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                params
+              )
+              break
+            } catch (e) {
+              const msg = e && e.message || ''
+              if (attempts >= maxAttempts || !/locked|busy/i.test(msg)) {
+                console.error('[outage-diag] store failed after retries:', msg, { outageTsCapture, attempts, lastHop })
+                console.error('[outage-diag] payload sample:', JSON.stringify({ pingDetail: pingDetail?.slice ? pingDetail.slice(0,5) : pingDetail }))
+                break
+              }
+              const waitMs = 50 * Math.pow(2, attempts)
+              console.warn(`[outage-diag] DB locked, retry ${attempts}/${maxAttempts} after ${waitMs}ms`)
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs)
+            }
+          }
         } catch (e) {
-          console.error('[outage-diag] store failed:', e.message)
+          console.error('[outage-diag] store failed:', e && e.message)
         }
       })
     }
   }
 
+  // Always record the check (sanitized results) for debugging and history; include per-result timestamps
   audit('internet.check', {
-    ok,
-    results:          _internetResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
-    attempts:         _internetAttempts.map(a => a.map(r => ({ host: r.host, ok: r.ok, ms: r.ms }))),
-    outage_type:      ok ? null : outageType,
-    gateway_ok:       ok ? null : gatewayOk,
-    gateway:          gateway ?? null,
-    outage_mode:      _outageMode,
-    interval_seconds: _outageMode ? _outageCheckSecs : null,
-    attempt_count:    _outageMode ? _outageAttemptCount : null,
-    vpn_up:           _vpnUp,
-    vpn_ok:           _vpnOk,
-    vpn_results:      _vpnResults.map(r => ({ host: r.host, ok: r.ok, ms: r.ms })),
+    ok:                desiredOk,
+    results:           _internetResults.map(r => ({ host: normalizeHostString(String(r.host || r.url || '')), ok: !!r.ok, ms: Number(r.ms || 0), ts: r.ts })),
+    attempts:          _internetAttempts.map(a => a.map(r => ({ host: normalizeHostString(String(r.host || r.url || '')), ok: !!r.ok, ms: Number(r.ms || 0), ts: r.ts }))),
+    outage_type:       desiredOk ? null : outageType,
+    gateway_ok:        desiredOk ? null : gatewayOk,
+    gateway:           gateway ?? null,
+    outage_mode:       _outageMode,
+    interval_seconds:  _outageMode ? _outageCheckSecs : null,
+    attempt_count:     _outageMode ? _outageAttemptCount : null,
+    vpn_up:            _vpnUp,
+    vpn_ok:            _vpnOk,
+    vpn_results:       _vpnResults.map(r => ({ host: normalizeHostString(String(r.host || r.url || '')), ok: !!r.ok, ms: Number(r.ms || 0), ts: r.ts })),
   })
 
-  _prevInternetOk = ok
+  // Update confirmed previous state
+  _prevInternetOk = desiredOk
 
-  // Start / stop fast outage polling
+  // Start / stop fast outage polling based on confirmed state
   if (justWentDown) {
     _outageMode = true
     _startOutagePoll()
@@ -474,7 +600,7 @@ export async function checkConnectivity(broadcast) {
     _stopOutagePoll()
   }
 
-  if (broadcast) broadcast('internet', { results: _internetResults, attempts: _internetAttempts, ok, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults, vpn_meta: _vpnMeta, ts: Date.now() })
+  if (broadcast) broadcast('internet', { results: _internetResults, attempts: _internetAttempts, ok: desiredOk, vpn_up: _vpnUp, vpn_ok: _vpnOk, vpn_results: _vpnResults, vpn_meta: _vpnMeta, ts: Date.now() })
   if (broadcast) broadcast('job_done', { job: 'internet', ts: Date.now() })
   return _internetResults
 }
@@ -531,6 +657,19 @@ router.get('/', async (req, res) => {
 
 router.get('/history', (req, res) => {
   res.json(getHistory())
+})
+
+// Ping a remote host (internet) with optional retries — used by UI quick-test
+router.get('/ping-remote', async (req, res) => {
+  const { host, retries } = req.query
+  if (!host || typeof host !== 'string') return res.status(400).json({ error: 'Missing host' })
+  const attempts = Math.max(1, parseInt(retries) || 1)
+  try {
+    const result = await (isInterfaceUp ? pingHost(host, attempts) : pingHost(host, attempts))
+    res.json({ host: result.host, ok: result.ok, ms: result.ms, ts: result.ts })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
 })
 
 export default router

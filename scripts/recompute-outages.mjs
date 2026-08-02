@@ -1,11 +1,17 @@
 #!/usr/bin/env node
-import { getDbPath, getDb } from '../server/db.js'
 import fs from 'fs'
 
 // Back up existing network_outages table and rebuild from audit_log events
 async function main() {
   try {
-    const db = getDb()
+    // Try importing the server DB module from the container path first, fall back to repo-relative path.
+    let dbModule
+    try {
+      dbModule = await import('/app/server/db.js')
+    } catch (_e) {
+      dbModule = await import('../server/db.js')
+    }
+    const db = dbModule.getDb()
     const now = Date.now()
     const backupName = `network_outages_backup_${now}`
 
@@ -61,13 +67,6 @@ async function main() {
     for (const o of outages) {
       let start = Number(o.start) || Date.now()
       let end = o.end == null ? null : Number(o.end)
-      if (o.payload && o.payload.detected_at) {
-        let det = Number(o.payload.detected_at)
-        if (isFinite(det) && det > 0) {
-          if (det < 1e12) det = det * 1000
-          if (det <= Date.now() && Math.abs(det - start) < 1000*60*60*24) start = Math.round(det)
-        }
-      }
       const duration = end != null ? Math.round(Math.max(0, end - start)) : Math.round(Math.max(0, Date.now() - start))
       const uptimeBeforeMs = o.uptimeBeforeMs != null ? Number(o.uptimeBeforeMs) : null
       const type = o.outage_type ?? null

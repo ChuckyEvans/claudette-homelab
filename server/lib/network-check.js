@@ -4,6 +4,10 @@ import { audit } from '../db.js'
 const TARGETS = [ '1.1.1.1', '8.8.8.8', 'google.co.za', 'google.com' ]
 const TUN_IF = 'tun0'
 let _prevNetworkOutage = null
+// track per-target outage state in-memory (cleared on restart)
+const _prevTargetOutage = {}
+// how many consecutive failed checks before we consider a specific host "down"
+const _PER_TARGET_FAILURE_THRESHOLD = 3
 
 function pingIface(iface, target, timeoutMs = 3000) {
   return new Promise((resolve) => {
@@ -34,16 +38,28 @@ export async function persistNetworkCheck() {
     const iface = defIface || 'eth0'
     const results = []
     let outage = false
+    const failedTargets = []
     for (const t of TARGETS) {
       const okDirect = await pingIface(iface, t).catch(() => false)
       const okTun = await pingIface(TUN_IF, t).catch(() => false)
       results.push({ target: t, direct: okDirect, tun: okTun })
-      if (!okDirect && !okTun) outage = true
+      if (!okDirect && !okTun) {
+        failedTargets.push(t)
+      }
     }
     const nowTs = Date.now()
-    const payload = { ts: nowTs, iface, results, outage }
+    // classify overall state: full outage if ALL targets failed; partial otherwise
+    const allFailed = failedTargets.length === TARGETS.length
+    const partialFailed = failedTargets.length > 0 && !allFailed
+    outage = allFailed
+    const payload = { ts: nowTs, iface, results, outage, failedTargets }
     audit('network.check', payload, 'system', null)
-    if (outage) audit('network.outage', payload, 'system', null)
+    if (allFailed) {
+      audit('network.outage', payload, 'system', null)
+    } else if (partialFailed) {
+      // emit a warning-style event for partial failures
+      audit('network.partial_outage', { ts: nowTs, iface, failedTargets, results }, 'system', null)
+    }
 
     // Emit internet.down/up audit events on transition so outages are paired
     try {
@@ -51,12 +67,12 @@ export async function persistNetworkCheck() {
         // initialize from current state but do not emit on first run
         _prevNetworkOutage = outage
       } else if (outage && !_prevNetworkOutage) {
-        // transitioned to outage
-        audit('internet.down', { detected_at: nowTs, iface, results, outage_type: null }, 'system', null)
+        // transitioned to outage (all targets)
+        audit('internet.down', { detected_at: nowTs, iface, results, failedTargets, outage_type: null }, 'system', null)
         _prevNetworkOutage = true
       } else if (!outage && _prevNetworkOutage) {
         // transitioned back to ok
-        audit('internet.up', { detected_at: nowTs, iface, results }, 'system', null)
+        audit('internet.up', { detected_at: nowTs, iface, results, failedTargets: failedTargets.length ? failedTargets : undefined }, 'system', null)
         _prevNetworkOutage = false
       }
     } catch (e) {

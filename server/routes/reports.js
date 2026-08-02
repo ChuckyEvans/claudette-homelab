@@ -10,212 +10,7 @@ const router = Router()
 
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
 
-function parseInternetCheckRow(row) {
-  try {
-    const payload = JSON.parse(row.payload)
-    return {
-      ts: Number(row.ts),
-      ok: Boolean(payload.ok),
-      outage_type: payload.outage_type ?? null,
-    }
-  } catch {
-    return null
-  }
-}
-
-function loadInternetCheckRows(db, from, to) {
-  const rows = db.all(
-    `SELECT ts, payload FROM audit_log WHERE event = 'internet.check' AND ts >= ? AND ts <= ? ORDER BY ts ASC`,
-    [from, to]
-  )
-  const previous = db.get(
-    `SELECT ts, payload FROM audit_log WHERE event = 'internet.check' AND ts < ? ORDER BY ts DESC LIMIT 1`,
-    [from]
-  )
-  return [previous, ...rows].filter(Boolean).map(parseInternetCheckRow).filter(Boolean)
-}
-
-function computeWeightedInternetUptime(checks, from, to) {
-  if (!checks.length || to <= from) return 0
-  const series = checks.map(check => ({ ...check }))
-  if (series[0].ts > from) {
-    series.unshift({ ...series[0], ts: from })
-  }
-
-  let upMs = 0
-  let totalMs = 0
-  for (let i = 0; i < series.length; i++) {
-    const current = series[i]
-    const next = series[i + 1]
-    const intervalStart = Math.max(current.ts, from)
-    const intervalEnd = Math.min(next?.ts ?? to, to)
-    if (intervalEnd <= intervalStart) continue
-    const delta = intervalEnd - intervalStart
-    totalMs += delta
-    if (current.ok) upMs += delta
-  }
-
-  return totalMs > 0 ? parseFloat(((upMs / totalMs) * 100).toFixed(3)) : 0
-}
-
-function pairOutagesFromChecks(checks, nowMs = Date.now()) {
-  const outages = []
-  let downTs = null
-  let downType = null
-  let lastUpTs = null
-
-  for (const row of checks) {
-    if (!row.ok && downTs === null) {
-      downTs = row.ts
-      downType = row.outage_type ?? null
-    } else if (row.ok && downTs !== null) {
-      const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-      outages.push({ start: downTs, end: row.ts, durationMs: row.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
-      lastUpTs = row.ts
-      downTs = null
-      downType = null
-    } else if (row.ok) {
-      lastUpTs = row.ts
-    }
-  }
-
-  if (downTs !== null) {
-    const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-    outages.push({ start: downTs, end: null, durationMs: nowMs - downTs, uptimeBeforeMs, outage_type: downType, ongoing: true })
-  }
-
-  return outages
-}
-
-// Compute outages given DB and range. Returns array of outage objects.
-function computeOutages(db, from, to) {
-  const checks = loadInternetCheckRows(db, from, to)
-  let outages = []
-  let usedPersistedRows = false
-
-  try {
-    const persisted = db.all(
-      `SELECT start, end, duration_ms, outage_type, ongoing, created_at
-       FROM network_outages
-       WHERE start <= ?
-       ORDER BY start ASC`,
-      [to]
-    )
-    if (persisted && persisted.length > 0) {
-      usedPersistedRows = true
-      let lastEnd = null
-      for (const row of persisted) {
-        const start = Number(row.start)
-        const end = row.end == null ? null : Number(row.end)
-        const durationMs = Number(row.duration_ms ?? (end != null ? end - start : Date.now() - start))
-        const uptimeBeforeMs = lastEnd !== null ? start - lastEnd : null
-        if ((end == null || end >= from) && start <= to) outages.push({
-          start,
-          end,
-          durationMs,
-          uptimeBeforeMs,
-          outage_type: row.outage_type ?? null,
-          ongoing: Number(row.ongoing) === 1,
-        })
-        lastEnd = end ?? start + durationMs
-      }
-    }
-  } catch {
-    usedPersistedRows = false
-  }
-
-  if (!usedPersistedRows) {
-    // Fallback for older databases that have not yet populated network_outages.
-    let events = db.all(
-      `SELECT ts, event, payload FROM audit_log WHERE event IN ('internet.down','internet.up') ORDER BY ts ASC`
-    )
-
-    // Normalize timestamps: some environments store ts in seconds instead of ms.
-    // If the first timestamp looks like seconds (less than 1e12), convert all to ms.
-    if (events && events.length > 0 && events[0].ts && events[0].ts < 1e12) {
-      events = events.map(e => ({ ...e, ts: Number(e.ts) * 1000 }))
-    }
-
-    let downTs = null
-    let downType = null
-    let lastUpTs = null
-
-    if (!events || events.length === 0) {
-      const checks = db.all(`SELECT ts, payload FROM audit_log WHERE event = 'internet.check' ORDER BY ts ASC`)
-      for (const c of checks) {
-        let p = null
-        try { p = JSON.parse(c.payload) } catch { p = null }
-        const ok = p ? Boolean(p.ok) : false
-        if (!ok && downTs === null) {
-          downTs = c.ts
-          downType = p?.outage_type ?? null
-        } else if (ok && downTs !== null) {
-          const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-          outages.push({ start: downTs, end: c.ts, durationMs: c.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
-          lastUpTs = c.ts
-          downTs = null
-          downType = null
-        } else if (ok) {
-          lastUpTs = c.ts
-        }
-      }
-    } else {
-      for (const e of events) {
-        if (e.event === 'internet.down' && downTs === null) {
-          downTs = e.ts
-          try { const p = JSON.parse(e.payload); downType = p.outage_type ?? null } catch { downType = null }
-        } else if (e.event === 'internet.up' && downTs !== null) {
-          const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-          outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, uptimeBeforeMs, outage_type: downType, ongoing: false })
-          lastUpTs = e.ts
-          downTs = null
-          downType = null
-        } else if (e.event === 'internet.up') {
-          lastUpTs = e.ts
-        }
-      }
-    }
-    if (downTs !== null) {
-      const uptimeBeforeMs = lastUpTs !== null ? downTs - lastUpTs : null
-      outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, uptimeBeforeMs, outage_type: downType, ongoing: true })
-    }
-  }
-  
-  // If we have fresh internet.check rows, prefer pairing those (they may be more accurate)
-  if (checks.length > 0) {
-    outages = pairOutagesFromChecks(checks)
-  }
-
-  // Clip outages to the requested window so durations reflect only the selected range.
-  const nowMs = Date.now()
-  const clipped = outages
-    .map(o => {
-      const origStart = o.start
-      const origEnd = o.end
-      const clippedStart = Math.max(origStart, from)
-      const clippedEndRaw = origEnd != null ? Math.min(origEnd, to) : (o.ongoing ? Math.min(nowMs, to) : null)
-      const clippedEnd = clippedEndRaw != null && clippedEndRaw >= clippedStart ? clippedEndRaw : (clippedEndRaw != null ? clippedEndRaw : null)
-      const durationMs = clippedEnd != null ? (clippedEnd - clippedStart) : (o.ongoing ? Math.max(0, nowMs - clippedStart) : 0)
-
-      // Adjust uptimeBeforeMs: if the original lastUpTs is known (derived from uptimeBeforeMs),
-      // and that lastUpTs is before the window start, report only the uptime observed within window.
-      let uptimeBeforeMs = o.uptimeBeforeMs
-      if (uptimeBeforeMs != null) {
-        const lastUpTs = origStart - uptimeBeforeMs
-        if (lastUpTs < from) {
-          // only the portion from `from` -> origStart is observable in-window
-          uptimeBeforeMs = Math.max(0, origStart - from)
-        }
-      }
-
-      return { ...o, start: clippedStart, end: clippedEnd, durationMs, uptimeBeforeMs }
-    })
-    // Keep only outages that overlap the window
-    .filter(o => (!o.end || o.end >= from) && o.start <= to)
-    .reverse()
-
-  return clipped
-}
+import { loadInternetCheckRows, computeWeightedInternetUptime, computeOutages } from '../lib/outages.mjs'
 
 // ── Event category → which table(s) to query ─────────────────────────────────
 // 'device' prefix → device_events only
@@ -322,7 +117,7 @@ router.get('/', (req, res) => {
     }
 
     res.json({
-      events: allRows.map(r => ({ ...r, payload: JSON.parse(r.payload) })),
+      events: allRows.map(r => ({ ...r, payload: JSON.parse(r.payload), ts_iso: new Date(r.ts).toISOString() })),
       total,
       limit,
       offset,
@@ -398,7 +193,7 @@ router.get('/chart', (req, res) => {
         const ms = ok.length ? Math.round(ok.reduce((s, x) => s + x.ms, 0) / ok.length) : null
         const vpnOk = (p.vpn_results ?? []).filter(x => x.ok && x.ms != null)
         const vpn_ms = p.vpn_up && vpnOk.length ? Math.round(vpnOk.reduce((s, x) => s + x.ms, 0) / vpnOk.length) : null
-        return [{ ts: r.ts, ok: p.ok ?? false, ms, vpn_ms }]
+        return [{ ts: r.ts, ok: p.ok ?? false, ms, vpn_ms, ts_iso: new Date(r.ts).toISOString() }]
       } catch { return [] }
     })
 
@@ -492,6 +287,7 @@ router.get('/internet', (req, res) => {
         const vpnAvgMs  = p.vpn_up && vpnOkArr.length ? Math.round(vpnOkArr.reduce((s, x) => s + x.ms, 0) / vpnOkArr.length) : null
         return {
           ts: r.ts,
+          ts_iso: new Date(r.ts).toISOString(),
           ok: p.ok ?? false,
           avgMs,
           hostCount: hosts.length,
@@ -542,6 +338,25 @@ router.get('/outages', (req, res) => {
     const totalDowntimeMs = windowed.reduce((s, o) => s + o.durationMs, 0)
     const longestMs = windowed.length ? Math.max(...windowed.map(o => o.durationMs)) : 0
 
+    // Also compute all-time outage aggregates (since earliest recorded internet event)
+    let allTimeTotalDowntimeMs = 0
+    let allTimeTotalOutages = 0
+    let allTimeLongestMs = 0
+    try {
+      const firstEv = db.get(`SELECT MIN(ts) AS ts FROM audit_log WHERE event IN ('internet.check','internet.down','internet.up')`)
+      let allFrom = (firstEv && firstEv.ts) ? Number(firstEv.ts) : null
+      // Normalize possible seconds timestamps
+      if (allFrom && allFrom < 1e12) allFrom = allFrom * 1000
+      if (allFrom) {
+        const allRows = computeOutages(db, allFrom, Date.now())
+        allTimeTotalDowntimeMs = allRows.reduce((s, o) => s + (o.durationMs || 0), 0)
+        allTimeTotalOutages = allRows.length
+        allTimeLongestMs = allRows.length ? Math.max(...allRows.map(o => o.durationMs || 0)) : 0
+      }
+    } catch {
+      // ignore — best-effort only
+    }
+
     // Server-side pagination support for large outage lists
     const page = Math.max(1, parseInt(req.query.page || '1'))
     const limit = Math.min(Math.max(1, parseInt(req.query.limit || '50')), 1000)
@@ -562,22 +377,26 @@ router.get('/outages', (req, res) => {
       if (!d) return o
       let pingDetail = null
           try { pingDetail = JSON.parse(d.ping_detail) } catch {}
-      const pingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
-      return { ...o, diagnostics: { traceroute: d.traceroute, ping_detail: pingDetail, gateway: d.gateway, ping_hosts: pingHosts, captured_at: d.captured_at } }
+      const rawPingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
+      const pingHosts = (Array.isArray(rawPingHosts) ? rawPingHosts : []).map(h => typeof h === 'string' ? h : (h.host || '')).filter(Boolean)
+      return { ...o, start_iso: new Date(o.start).toISOString(), end_iso: o.end ? new Date(o.end).toISOString() : null, diagnostics: { traceroute: d.traceroute, ping_detail: pingDetail, gateway: d.gateway, ping_hosts: pingHosts, captured_at: d.captured_at } }
     })
 
-    // If there are no paired outages but there are stored diagnostics (e.g. heartbeats or captured traces),
-    // surface them as diagnostic-only entries so the UI isn't empty.
-    if ((!windowedWithDiag || windowedWithDiag.length === 0) && diagRows && diagRows.length > 0) {
-      console.debug('[reports/outages] No paired outages found — falling back to diagnostic-only entries', { diagCount: diagRows.length, from, to })
-      windowedWithDiag = diagRows
-        .filter(d => d.outage_ts >= from && d.outage_ts <= to)
-        .map(d => {
-          let pingDetail = null
-          try { pingDetail = JSON.parse(d.ping_detail) } catch {}
-          const pingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
-          return { start: d.outage_ts, end: d.captured_at ?? null, durationMs: d.captured_at ? (d.captured_at - d.outage_ts) : 0, uptimeBeforeMs: null, outage_type: d.outage_type ?? null, ongoing: false, diagnostics: { traceroute: d.traceroute, ping_detail: pingDetail, gateway: d.gateway, ping_hosts: pingHosts, captured_at: d.captured_at } }
-        }).reverse()
+    // Diagnostic-only entries (unpaired `outage_diagnostics`) can be noisy and inflate outage counts.
+    // Do NOT surface them as outages by default. To explicitly include them, call with
+    // `?include_diag_only=1`.
+    if (String(req.query.include_diag_only || '') === '1') {
+      if ((!windowedWithDiag || windowedWithDiag.length === 0) && diagRows && diagRows.length > 0) {
+        console.debug('[reports/outages] No paired outages found — including diagnostic-only entries by request', { diagCount: diagRows.length, from, to })
+        windowedWithDiag = diagRows
+          .filter(d => d.outage_ts >= from && d.outage_ts <= to)
+          .map(d => {
+            let pingDetail = null
+            try { pingDetail = JSON.parse(d.ping_detail) } catch {}
+            const pingHosts = cfg?.network?.connectivity_hosts ?? ['1.1.1.1']
+            return { start: d.outage_ts, end: null, durationMs: null, uptimeBeforeMs: null, outage_type: d.outage_type ?? null, ongoing: false, diagnosticOnly: true, captured_at: d.captured_at ?? null, diagnostics: { traceroute: d.traceroute, ping_detail: pingDetail, gateway: d.gateway, ping_hosts: pingHosts, captured_at: d.captured_at } }
+          }).reverse()
+      }
     }
 
     // Apply pagination to the returned outages
@@ -589,9 +408,38 @@ router.get('/outages', (req, res) => {
       longestMs,
       page,
       limit,
+      // All-time aggregates for UI pre-population
+      allTime: {
+        totalOutages: allTimeTotalOutages,
+        totalDowntimeMs: allTimeTotalDowntimeMs,
+        longestMs: allTimeLongestMs,
+      }
     })
   } catch (_err) {
     res.status(500).json({ error: _err.message })
+  }
+})
+
+// Temporary debug endpoint: unauthenticated outages JSON for LAN access.
+// Enabled automatically for private/local addresses or when ALLOW_UNAUTH_ADMIN=1 is set.
+router.get('/debug/outages', (req, res) => {
+  try {
+    const remote = req.ip || req.connection?.remoteAddress || ''
+    const allowEnv = String(process.env.ALLOW_UNAUTH_ADMIN || '') === '1'
+    const isPrivate = /^::ffff:(10|192\.168|172\.(1[6-9]|2[0-9]|3[0-1]))/.test(remote) || /^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[0-1])|^127\.|^::1/.test(remote)
+    if (!allowEnv && !isPrivate) return res.status(403).json({ error: 'forbidden' })
+
+    const db   = getDb()
+    const to   = req.query.to   ? parseInt(req.query.to)   : Date.now()
+    const from = req.query.from ? parseInt(req.query.from) : to - SEVEN_DAYS
+
+    const windowed = computeOutages(db, from, to)
+    const totalDowntimeMs = windowed.reduce((s, o) => s + o.durationMs, 0)
+    const longestMs = windowed.length ? Math.max(...windowed.map(o => o.durationMs)) : 0
+
+    res.json({ outages: windowed, totalOutages: windowed.length, totalDowntimeMs, longestMs, from, to })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
   }
 })
 
@@ -635,8 +483,8 @@ router.get('/outages.pdf', (req, res) => {
     doc.text(cols.join(' | '))
     doc.moveDown(0.2)
     for (const o of rows) {
-      const start = new Date(o.start).toLocaleString()
-      const end = o.end ? new Date(o.end).toLocaleString() : ''
+      const start = new Date(o.start).toISOString()
+      const end = o.end ? new Date(o.end).toISOString() : ''
       const dur = Math.round((o.durationMs || 0) / 1000)
       const type = o.outage_type || ''
       const ong = o.ongoing ? 'yes' : 'no'

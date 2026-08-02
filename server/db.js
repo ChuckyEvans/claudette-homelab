@@ -132,6 +132,17 @@ export function getDb() {
       ongoing     INTEGER NOT NULL DEFAULT 0,
       created_at  INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS target_outages (
+      start       INTEGER NOT NULL,
+      host        TEXT    NOT NULL,
+      end         INTEGER,
+      duration_ms INTEGER NOT NULL,
+      uptime_before_ms INTEGER,
+      outage_type TEXT,
+      ongoing     INTEGER NOT NULL DEFAULT 0,
+      created_at  INTEGER NOT NULL,
+      PRIMARY KEY (start, host)
+    );
   `)
   
 
@@ -246,6 +257,11 @@ export function getDb() {
           created_at  INTEGER NOT NULL
         );
       `)
+      const outageCols = _db.all("PRAGMA table_info(network_outages)").map(c => c.name)
+      if (!outageCols.includes('uptime_before_ms')) {
+        _db.exec('ALTER TABLE network_outages ADD COLUMN uptime_before_ms INTEGER')
+        console.log('[db] Added uptime_before_ms column to network_outages.')
+      }
     } catch { /* ignore */ }
 
   // ── Flags catalogue + device-flag junction table ────────────────────────────
@@ -479,6 +495,7 @@ export function getDb() {
     CREATE TABLE IF NOT EXISTS outage_diagnostics (
       outage_ts INTEGER PRIMARY KEY,
       traceroute TEXT,
+      traceroute_last_hop TEXT,
       ping_detail TEXT,
       gateway TEXT,
       outage_type TEXT,
@@ -511,6 +528,59 @@ export function getDb() {
     );
   `)
 
+  // Migration: ensure new traceroute_last_hop column exists for older DBs
+  try {
+    const diagCols = _db.prepare("PRAGMA table_info('outage_diagnostics')").all().map(r => r.name)
+    if (!diagCols.includes('traceroute_last_hop')) {
+      console.log('[db] Adding traceroute_last_hop column to outage_diagnostics')
+      _db.exec("ALTER TABLE outage_diagnostics ADD COLUMN traceroute_last_hop TEXT")
+    }
+    // Ensure there's a unique index on outage_ts to prevent duplicate diagnostic rows
+    _db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_outage_diagnostics_outage_ts ON outage_diagnostics (outage_ts)")
+  } catch (e) {
+    console.warn('[db] outage_diagnostics migration warning:', e && e.message)
+  }
+
+  // One-time best-effort backfill: populate traceroute_last_hop from traceroute or ping_detail
+  try {
+    const toFill = _db.prepare("SELECT outage_ts, traceroute, ping_detail FROM outage_diagnostics WHERE traceroute_last_hop IS NULL OR traceroute_last_hop = ''").all()
+    if (toFill && toFill.length > 0) {
+      const parseLastHop = (txt) => {
+        if (!txt) return null
+        const lines = txt.split('\n').map(l => l.trim()).filter(Boolean)
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const m = lines[i].match(/\b(\d{1,3}(?:\.\d{1,3}){3}|[a-zA-Z0-9._-]+)\b/)
+          if (m) {
+            const candidate = m[1]
+            if (candidate !== '???' && candidate !== '*') return candidate
+          }
+        }
+        return null
+      }
+      let updates = 0
+      for (const r of toFill) {
+        try {
+          let lastHop = parseLastHop(r.traceroute)
+          if (!lastHop && r.ping_detail) {
+            try {
+              const p = JSON.parse(r.ping_detail)
+              if (Array.isArray(p)) {
+                for (const e of p) { if (e && e.ok && e.host) { lastHop = e.host; break } }
+              }
+            } catch {}
+          }
+          if (lastHop) {
+            _db.run('UPDATE outage_diagnostics SET traceroute_last_hop = ? WHERE outage_ts = ?', [lastHop, r.outage_ts])
+            updates++
+          }
+        } catch { /* ignore row errors */ }
+      }
+      if (updates > 0) console.log(`[db] backfilled traceroute_last_hop for ${updates} outage_diagnostics rows`)
+    }
+  } catch (e) {
+    console.warn('[db] backfill traceroute_last_hop warning:', e && e.message)
+  }
+
     // Backfill / migration: ensure legacy databases have the new columns with defaults.
     try {
       const cols = _db.prepare("PRAGMA table_info('network_check_runs')").all().map(r => r.name)
@@ -529,6 +599,24 @@ export function getDb() {
   return _db
 }
 
+// Normalize host strings for robust matching: strip scheme, trailing slash, and port; lowercase
+export function normalizeHostString(s) {
+  if (!s || typeof s !== 'string') return ''
+  try {
+    // Trim whitespace
+    let t = s.trim()
+    // If looks like a URL, strip scheme
+    t = t.replace(/^https?:\/\//i, '')
+    // Remove trailing slash
+    t = t.replace(/\/$/, '')
+    // Remove explicit port if present (host:port)
+    t = t.replace(/:\d+$/, '')
+    return t.toLowerCase()
+  } catch {
+    return s
+  }
+}
+
 // Helper: run DB statements with retry on busy/locked errors
 function runWithRetry(db, fn, maxAttempts = 6) {
   let attempt = 0
@@ -544,6 +632,25 @@ function runWithRetry(db, fn, maxAttempts = 6) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs)
     }
   }
+}
+
+// Coerce timestamp-like values to milliseconds. If value looks like seconds (<1e12)
+// multiply by 1000, otherwise round to integer ms.
+function toMs(val) {
+  if (val == null) return null
+  const n = Number(val)
+  if (!isFinite(n)) return null
+  return n < 1e12 ? Math.round(n * 1000) : Math.round(n)
+}
+
+// Normalize duration-like values (milliseconds). Heuristic: if value is small
+// (<100000) it's likely seconds, so multiply by 1000; otherwise assume already ms.
+function normalizeDurationMs(val) {
+  if (val == null) return null
+  const n = Number(val)
+  if (!isFinite(n)) return null
+  if (n > 0 && n < 1e5) return Math.round(n * 1000)
+  return Math.round(n)
 }
 
 // Simple in-memory serialized writer queue to ensure single-writer semantics
@@ -580,36 +687,103 @@ export function persistOutages() {
     const outages = []
     let downTs = null, downType = null, _lastUpTs = null
     let _lastPayload = null
-    if (!events || events.length === 0) {
+    // Allow forcing checks-based pairing (useful for backfill/testing) via env var
+    const forceChecks = String(process.env.FORCE_OUTAGE_USE_CHECKS || '').toLowerCase() === '1' || String(process.env.FORCE_OUTAGE_USE_CHECKS || '').toLowerCase() === 'true'
+    if (forceChecks || !events || events.length === 0) {
       const checks = db.all(`SELECT ts, payload FROM audit_log WHERE event = 'internet.check' ORDER BY ts ASC`)
+      // Normalize timestamps: some environments store ts in seconds instead of ms.
+      if (checks && checks.length > 0 && checks[0].ts && checks[0].ts < 1e12) {
+        for (const c of checks) c.ts = Number(c.ts) * 1000
+      }
       for (const c of checks) {
         let p = null
         try { p = JSON.parse(c.payload) } catch { p = null }
-        const ok = p ? Boolean(p.ok) : false
-        if (!ok && downTs === null) { downTs = c.ts; downType = p?.outage_type ?? null }
-        else if (ok && downTs !== null) { outages.push({ start: downTs, end: c.ts, durationMs: c.ts - downTs, outage_type: downType, ongoing: false }); _lastUpTs = c.ts; downTs = null; downType = null }
+        // Determine network-level OK by inspecting configured connectivity hosts.
+        // Treat network as down only when ALL configured hosts are failing.
+        let ok = p ? Boolean(p.ok) : false
+        try {
+          const cfg = loadConfig()
+          const cfgHosts = (cfg && cfg.network && Array.isArray(cfg.network.connectivity_hosts)) ? cfg.network.connectivity_hosts : []
+          const results = Array.isArray(p?.results) ? p.results : []
+          if (cfgHosts.length > 0 && results.length > 0) {
+            // Normalize configured hosts and result hosts to compare canonical forms
+            const normCfgHosts = (Array.isArray(cfgHosts) ? cfgHosts : []).map(h => normalizeHostString(typeof h === 'string' ? h : (h.host || ''))).filter(Boolean)
+            const normResults = results.map(r => ({ raw: r, host: normalizeHostString(r.host || r.url || '') }))
+
+            // Detection mode: 'majority' (default), 'any' (any host failure => network down), 'all' (all hosts must fail)
+            const mode = (process.env.OUTAGE_DETECT_MODE || 'all').toLowerCase()
+            let failures = 0
+            for (const cfgH of normCfgHosts) {
+              const match = normResults.find(rr => rr.host === cfgH)
+              if (!(match && match.raw && match.raw.ok)) failures++
+            }
+            if (mode === 'all') {
+              // All configured hosts must be OK
+              ok = failures === 0
+            } else if (mode === 'any') {
+              // Any single configured host being OK is sufficient
+              ok = failures < normCfgHosts.length
+            } else {
+              const majority = Math.ceil(normCfgHosts.length / 2)
+              ok = failures < majority
+            }
+          }
+        } catch { /* ignore config parse errors; fall back to payload.ok */ }
+        if (!ok && downTs === null) {
+          // Prefer payload.detected_at when provided and reasonable
+          try {
+            const detectedRaw = p?.detected_at ?? null
+            let detected = detectedRaw ? Number(detectedRaw) : null
+            if (detected && detected < 1e12) detected = detected * 1000
+            const now = Date.now()
+            if (detected && detected <= c.ts && detected <= now && (c.ts - detected) <= 7 * 24 * 3600 * 1000) {
+              downTs = detected
+            } else {
+              downTs = c.ts
+            }
+          } catch {
+            downTs = c.ts
+          }
+          downType = p?.outage_type ?? null
+        }
+        else if (ok && downTs !== null) { const uptimeBefore = _lastUpTs !== null ? Math.max(0, downTs - _lastUpTs) : null; outages.push({ start: downTs, end: c.ts, durationMs: c.ts - downTs, uptimeBeforeMs: uptimeBefore, outage_type: downType, ongoing: false }); _lastUpTs = c.ts; downTs = null; downType = null }
         else if (ok) { _lastUpTs = c.ts }
       }
     } else {
       for (const e of events) {
         if (e.event === 'internet.down' && downTs === null) {
-          downTs = e.ts
-          try { const p = JSON.parse(e.payload); downType = p.outage_type ?? null; _lastPayload = p } catch { downType = null; _lastPayload = null }
+          // Prefer payload.detected_at when available and reasonable
+          try {
+            const p = JSON.parse(e.payload)
+            downType = p.outage_type ?? null
+            _lastPayload = p
+            let detected = p && p.detected_at ? Number(p.detected_at) : null
+            if (detected && detected < 1e12) detected = detected * 1000
+            const now = Date.now()
+            if (detected && detected <= e.ts && detected <= now && (e.ts - detected) <= 7 * 24 * 3600 * 1000) {
+              downTs = detected
+            } else {
+              downTs = e.ts
+            }
+          } catch {
+            downTs = e.ts
+            downType = null
+            _lastPayload = null
+          }
         }
         else if (e.event === 'internet.up' && downTs !== null) {
-          outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, outage_type: downType, ongoing: false, payload: _lastPayload })
+          const uptimeBefore = _lastUpTs !== null ? Math.max(0, downTs - _lastUpTs) : null
+          outages.push({ start: downTs, end: e.ts, durationMs: e.ts - downTs, uptimeBeforeMs: uptimeBefore, outage_type: downType, ongoing: false, payload: _lastPayload })
           _lastUpTs = e.ts; downTs = null; downType = null; _lastPayload = null
         }
         else if (e.event === 'internet.up') { _lastUpTs = e.ts }
       }
     }
-    if (downTs !== null) { outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, outage_type: downType, ongoing: true }) }
+    if (downTs !== null) { const uptimeBefore = _lastUpTs !== null ? Math.max(0, downTs - _lastUpTs) : null; outages.push({ start: downTs, end: null, durationMs: Date.now() - downTs, uptimeBeforeMs: uptimeBefore, outage_type: downType, ongoing: true }) }
 
-    // Upsert into network_outages — prefer payload.detected_at when present so
-    // stored start/duration reflect detection -> discovery rather than pairing timestamps.
-    // Use a safer upsert that only replaces an existing row when the newly computed
-    // duration is greater than the stored one. This prevents accidental shrinking
-    // of previously-observed outages (e.g. due to late-arriving diagnostic timestamps).
+    // Upsert into network_outages using the paired down/up timestamps.
+    // detected_at is only a detection hint and can lag by minutes, so using it
+    // as the outage start would collapse a real outage into a few milliseconds.
     const now = Date.now()
     const upsertSql = `INSERT INTO network_outages (start,end,duration_ms,uptime_before_ms,outage_type,ongoing,created_at)
                        VALUES ($start,$end,$duration_ms,$uptime_before_ms,$outage_type,$ongoing,$created_at)
@@ -620,45 +794,32 @@ export function persistOutages() {
                          outage_type = excluded.outage_type,
                          ongoing = excluded.ongoing,
                          created_at = excluded.created_at
-                       WHERE excluded.duration_ms > network_outages.duration_ms`
-    const upsert = db.prepare(upsertSql)
+                       WHERE excluded.duration_ms > network_outages.duration_ms
+                          OR (network_outages.uptime_before_ms IS NULL AND excluded.uptime_before_ms IS NOT NULL)`
 
     for (const o of outages) {
-      // Normalize start/end to numbers (ms). Coerce missing start to now (defensive).
-      let start = Number(o.start)
-      if (!isFinite(start) || start <= 0) start = Date.now()
-      let end = o.end == null ? null : Number(o.end)
-      if (end != null && (!isFinite(end) || end <= 0)) end = null
-
-      // If payload provided a detected_at timestamp, and it looks sane, prefer that as the start
-      if (o.payload && o.payload.detected_at) {
-        let det = Number(o.payload.detected_at)
-        if (isFinite(det) && det > 0) {
-          if (det < 1e12) det = det * 1000 // seconds -> ms
-          // Only accept detected_at if it's not in the future and not unreasonably far from the paired start
-          const nowLocal = Date.now()
-          if (det <= nowLocal && Math.abs(det - start) < 1000 * 60 * 60 * 24) {
-            start = Math.round(det)
-          }
-        }
-      }
+      // Normalize start/end to milliseconds (coerce seconds->ms). Coerce missing start to now.
+      let start = toMs(o.start) || Date.now()
+      let end = o.end == null ? null : toMs(o.end)
 
       // Compute duration from start->end (or start->now for ongoing). Ensure non-negative integer.
       let duration = 0
       if (end != null) duration = Math.round(Math.max(0, end - start))
       else duration = Math.round(Math.max(0, Date.now() - start))
 
-      // Compute uptime_before_ms where possible (time between previous up and this down).
-      // The calling code that constructs `outages` may include uptimeBeforeMs; prefer that when present.
+      // Compute uptime_before_ms where possible. Normalize durations to ms.
       let uptime_before_ms = null
-      if (o.uptimeBeforeMs != null) uptime_before_ms = Number(o.uptimeBeforeMs)
-      else if (o.uptime_before_ms != null) uptime_before_ms = Number(o.uptime_before_ms)
-      if (uptime_before_ms != null && (!isFinite(uptime_before_ms) || uptime_before_ms < 0)) uptime_before_ms = null
+      if (o.uptimeBeforeMs != null) uptime_before_ms = normalizeDurationMs(o.uptimeBeforeMs)
+      else if (o.uptime_before_ms != null) uptime_before_ms = normalizeDurationMs(o.uptime_before_ms)
 
       const type = o.outage_type ?? null
       const ongoing = o.ongoing ? 1 : 0
       try {
-        upsert.run({ $start: start, $end: end, $duration_ms: duration, $uptime_before_ms: uptime_before_ms, $outage_type: type, $ongoing: ongoing, $created_at: now })
+        // Prepare+run inside retry wrapper to avoid using invalidated statements
+        runWithRetry(db, () => {
+          const stmt = db.prepare(upsertSql)
+          stmt.run({ $start: start, $end: end, $duration_ms: duration, $uptime_before_ms: uptime_before_ms, $outage_type: type, $ongoing: ongoing, $created_at: now })
+        })
       } catch (e) {
         console.error('[db] persistOutages: upsert failed for outage object:', JSON.stringify(o), e && e.message)
         try { console.error('[db] persistOutages: bound params ->', JSON.stringify({ start, end, duration, type, ongoing })) } catch {}
@@ -671,6 +832,193 @@ export function persistOutages() {
     return 0
   }
 }
+
+// Post-run: fill in missing uptime_before_ms for persisted rows by pairing internet.check rows
+// This helps ensure persisted rows have uptime_before_ms even when the initial upsert
+// skipped updates due to duration tie-breaking logic.
+function backfillPersistedUptimeBefore() {
+  try {
+    const db = getDb()
+    const rowsMissing = db.all('SELECT start FROM network_outages WHERE uptime_before_ms IS NULL')
+    if (!rowsMissing || rowsMissing.length === 0) return
+    // Load checks for a broad window (last 30 days) to ensure pairing context
+    const to = Date.now()
+    const from = to - 30*24*60*60*1000
+    const checksRows = db.all(`SELECT ts, payload FROM audit_log WHERE event = 'internet.check' AND ts >= ? AND ts <= ? ORDER BY ts ASC`, [from, to])
+    const checks = checksRows.map(r => ({ ts: Number(r.ts) < 1e12 ? Number(r.ts)*1000 : Number(r.ts), payload: typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload }))
+    import('./lib/outages.mjs').then(m => {
+      const paired = m.pairOutagesFromChecks(checks, to)
+      const map = new Map(paired.map(p => [Number(p.start), p.uptimeBeforeMs != null ? Math.round(p.uptimeBeforeMs) : null]))
+      for (const r of rowsMissing) {
+        const start = Number(r.start)
+        const val = map.get(start)
+        if (val != null) {
+          try { db.run('UPDATE network_outages SET uptime_before_ms = ? WHERE start = ?', [val, start]) } catch { /* ignore */ }
+        }
+      }
+    }).catch(() => { /* ignore pairing errors */ })
+  } catch { /* ignore */ }
+}
+
+// Run the backfill asynchronously so persistOutages returns promptly
+try { setImmediate(backfillPersistedUptimeBefore) } catch { /* ignore */ }
+
+// Persist per-target (host) outages based on `internet.check` audit entries.
+export function persistTargetOutages() {
+  const db = getDb()
+  try {
+    let rows = db.all("SELECT ts, payload FROM audit_log WHERE event = 'internet.check' ORDER BY ts ASC")
+    if (!rows || rows.length === 0) return 0
+    if (rows[0].ts && rows[0].ts < 1e12) rows = rows.map(r => ({ ...r, ts: Number(r.ts) * 1000 }))
+
+    // Map host -> { lastOk: boolean, lastOkTs: number|null, downStart: number|null }
+    const state = new Map()
+    const outages = []
+
+    for (const r of rows) {
+      let p = null
+      try { p = typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload } catch { p = null }
+      const ts = Number(r.ts) || Date.now()
+      const results = Array.isArray(p?.results) ? p.results : []
+      for (const res of results) {
+        const host = normalizeHostString(res.host || res.url || '')
+        if (!host) continue
+        const ok = !!res.ok
+        // prefer per-result timestamp when provided in payload, fall back to audit row ts
+        const resTs = res && res.ts ? toMs(res.ts) : ts
+        const prev = state.get(host) ?? { lastOk: null, lastOkTs: null, downStart: null }
+        // Transition ok -> fail: start outage
+        if (prev.lastOk === true && ok === false) {
+          prev.downStart = resTs
+        }
+        // No previous state and currently failing: consider start at this resTs
+        if (prev.lastOk === null && ok === false && prev.downStart == null) {
+          prev.downStart = resTs
+        }
+        // Transition fail -> ok: close outage
+        if ((prev.lastOk === false || prev.downStart != null) && ok === true) {
+          const start = toMs(prev.downStart ?? resTs) || Date.now()
+          const end = toMs(resTs) || null
+          const duration = Math.max(0, end - start)
+          const uptime_before = prev.lastOkTs ? Math.max(0, start - toMs(prev.lastOkTs)) : null
+          outages.push({ start, host, end, duration_ms: duration, uptime_before_ms: uptime_before, outage_type: null, ongoing: false })
+          prev.downStart = null
+        }
+        // Update lastOk / lastOkTs
+        if (ok) prev.lastOkTs = resTs
+        prev.lastOk = ok
+        state.set(host, prev)
+      }
+    }
+
+    // Any remaining open downs in state -> persist as ongoing
+    for (const [host, s] of state.entries()) {
+      if (s.downStart != null) {
+        const start = toMs(s.downStart) || Date.now()
+        const duration = Math.max(0, Date.now() - start)
+        const uptime_before = s.lastOkTs ? Math.max(0, start - toMs(s.lastOkTs)) : null
+        outages.push({ start, host, end: null, duration_ms: duration, uptime_before_ms: uptime_before, outage_type: null, ongoing: true })
+      }
+    }
+
+    if (outages.length === 0) return 0
+
+    const now = Date.now()
+    const upsertSql = `INSERT INTO target_outages (start,host,end,duration_ms,uptime_before_ms,outage_type,ongoing,created_at)
+      VALUES ($start,$host,$end,$duration_ms,$uptime_before_ms,$outage_type,$ongoing,$created_at)
+      ON CONFLICT(start,host) DO UPDATE SET
+        end = excluded.end,
+        duration_ms = excluded.duration_ms,
+        uptime_before_ms = excluded.uptime_before_ms,
+        outage_type = excluded.outage_type,
+        ongoing = excluded.ongoing,
+        created_at = excluded.created_at
+      WHERE excluded.duration_ms > target_outages.duration_ms`
+
+    for (const o of outages) {
+      try {
+        runWithRetry(db, () => {
+          const stmt = db.prepare(upsertSql)
+          const start = toMs(o.start) || Date.now()
+          const end = o.end == null ? null : toMs(o.end)
+          const duration = normalizeDurationMs(o.duration_ms)
+          const uptime_before = o.uptime_before_ms == null ? null : normalizeDurationMs(o.uptime_before_ms)
+          stmt.run({ $start: start, $host: o.host, $end: end, $duration_ms: duration, $uptime_before_ms: uptime_before, $outage_type: o.outage_type ?? null, $ongoing: o.ongoing ? 1 : 0, $created_at: toMs(now) })
+        })
+      } catch (e) {
+        console.error('[db] persistTargetOutages: upsert failed for', JSON.stringify(o), e && e.message)
+      }
+    }
+    return outages.length
+  } catch (err) {
+    console.error('[db] persistTargetOutages failed:', err && err.message)
+    return 0
+  }
+}
+
+  // Persist per-target outages (network.target.down / network.target.up)
+  export function persistTargetOutagesFromEvents() {
+    const db = getDb()
+    try {
+      let events = db.all(`SELECT ts, event, payload FROM audit_log WHERE event IN ('network.target.down','network.target.up') ORDER BY ts ASC`)
+      if (events && events.length > 0 && events[0].ts && events[0].ts < 1e12) {
+        events = events.map(e => ({ ...e, ts: Number(e.ts) * 1000 }))
+      }
+      const outages = []
+      const downByHost = new Map()
+      for (const e of events) {
+        let p = null
+        try { p = JSON.parse(e.payload) } catch { p = null }
+        const host = p?.host ?? null
+        if (!host) continue
+        if (e.event === 'network.target.down' && !downByHost.has(host)) {
+          downByHost.set(host, { start: e.ts, payload: p })
+        } else if (e.event === 'network.target.up' && downByHost.has(host)) {
+          const d = downByHost.get(host)
+          outages.push({ host, start: d.start, end: e.ts, durationMs: e.ts - d.start, outage_type: p?.outage_type ?? d.payload?.outage_type ?? null, ongoing: false, payload: d.payload })
+          downByHost.delete(host)
+        }
+      }
+      // Any remaining downs are ongoing
+      for (const [host, d] of downByHost.entries()) {
+        outages.push({ host, start: d.start, end: null, durationMs: Date.now() - d.start, outage_type: d.payload?.outage_type ?? null, ongoing: true, payload: d.payload })
+      }
+
+      const now = Date.now()
+      const upsertSql = `INSERT INTO target_outages (start,host,end,duration_ms,uptime_before_ms,outage_type,ongoing,created_at)
+                         VALUES ($start,$host,$end,$duration_ms,$uptime_before_ms,$outage_type,$ongoing,$created_at)
+                         ON CONFLICT(start,host) DO UPDATE SET
+                           end = excluded.end,
+                           duration_ms = excluded.duration_ms,
+                           uptime_before_ms = excluded.uptime_before_ms,
+                           outage_type = excluded.outage_type,
+                           ongoing = excluded.ongoing,
+                           created_at = excluded.created_at
+                         WHERE excluded.duration_ms > target_outages.duration_ms`
+      const upsert = db.prepare(upsertSql)
+      for (const o of outages) {
+        let start = toMs(o.start) || Date.now()
+        let end = o.end == null ? null : toMs(o.end)
+        let duration = 0
+        if (end != null) duration = Math.round(Math.max(0, end - start))
+        else duration = Math.round(Math.max(0, Date.now() - start))
+        const uptime_before_ms = o.uptimeBeforeMs != null ? normalizeDurationMs(o.uptimeBeforeMs) : (o.uptime_before_ms != null ? normalizeDurationMs(o.uptime_before_ms) : null)
+        const type = o.outage_type ?? null
+        const ongoing = o.ongoing ? 1 : 0
+        try {
+          upsert.run({ $start: start, $host: o.host, $end: end, $duration_ms: duration, $uptime_before_ms: uptime_before_ms, $outage_type: type, $ongoing: ongoing, $created_at: toMs(now) })
+        } catch (e) {
+          console.error('[db] persistTargetOutages: upsert failed for outage object:', JSON.stringify(o), e && e.message)
+          try { console.error('[db] persistTargetOutages: bound params ->', JSON.stringify({ start, host: o.host, end, duration, type, ongoing })) } catch {}
+          throw e
+        }
+      }
+      return outages.length
+    } catch (err) {
+      console.error('[db] persistTargetOutagesFromEvents failed:', err.message)
+      return 0
+    }
+  }
 
 /**
  * Create materialized summary table for internet checks and provide a backfill helper.
@@ -797,6 +1145,24 @@ export function backfillDailyEventSummary(fromTs = 0, toTs = Date.now()) {
 export function audit(event, payload = {}, actor = 'system', ip = null) {
   try {
     const db = getDb()
+    // Defensive sanitation: ensure internet.check payloads have normalized host strings
+    try {
+      if (event === 'internet.check' && payload && typeof payload === 'object') {
+        const sanitize = (r) => ({ host: normalizeHostString(String(r?.host || r?.url || '')), ok: !!r?.ok, ms: Number(r?.ms || 0), ts: r?.ts ? Number(r.ts) : undefined })
+        try {
+          if (Array.isArray(payload.results)) payload.results = payload.results.map(sanitize)
+        } catch {}
+        try {
+          if (Array.isArray(payload.attempts)) payload.attempts = payload.attempts.map(a => Array.isArray(a) ? a.map(sanitize) : [])
+        } catch {}
+        try {
+          if (Array.isArray(payload.vpn_results)) payload.vpn_results = payload.vpn_results.map(sanitize)
+        } catch {}
+      }
+    } catch (e) {
+      console.warn('[audit] sanitation failed:', e && e.message)
+    }
+
     return enqueueWrite(() => runWithRetry(db, () => db.run('INSERT INTO audit_log (ts, event, actor, payload, ip) VALUES (?, ?, ?, ?, ?)', [Date.now(), event, actor, JSON.stringify(payload), ip])))
   } catch (err) {
     console.error('[audit] write failed:', err && err.message)

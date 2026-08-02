@@ -187,7 +187,7 @@ function DeviceFilterDropdown({ options, selected, onChange }) {
         <div className="absolute top-full left-0 mt-1 z-50 bg-[#0d0d20] border border-[#1a1a35] rounded-xl shadow-2xl w-full min-w-[200px]">
           <div className="p-2 space-y-0.5">
             {options.map(opt => (
-              <label key={opt.value} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer">
+              <label key={String(opt.value)} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer">
                 <input type="checkbox" checked={selected.includes(opt.value)} onChange={() => toggle(opt.value)} className="w-3.5 h-3.5 accent-indigo-500" />
                 <span className="text-xs text-slate-300 truncate">{opt.label}</span>
               </label>
@@ -1569,9 +1569,9 @@ export default function NetworkScan({ networkScan, threats, services, onScan, on
               {scanDropdownOpen && (
                 <div className="absolute top-full left-0 mt-1 w-52 bg-[#0d0d1e] border border-[#2a2a45] rounded-xl shadow-2xl z-50 py-1 overflow-hidden">
                   <p className="px-3 pt-1.5 pb-1 text-[10px] text-slate-500 uppercase tracking-wide">Scope (sets sidebar filter)</p>
-                  {[{value: null, label: 'All subnets'}, {value: 'favorites', label: '★ Favorites only'}, ...subnets.map(s => ({value: s, label: s}))].map(opt => (
+                    {[{value: null, label: 'All subnets'}, {value: 'favorites', label: '★ Favorites only'}, ...subnets.map(s => ({value: s, label: s}))].map(opt => (
                     <button
-                      key={opt.value ?? '__all__'}
+                      key={String(opt.value ?? '__all__')}
                       onClick={() => { setScanScopeHint(opt.value); setScanDropdownOpen(false) }}
                       className={`w-full px-3 py-2 text-left text-xs transition-colors hover:bg-white/5 ${
                         scanScopeHint === opt.value ? 'text-indigo-400 font-medium' : 'text-slate-300'

@@ -18,7 +18,18 @@ function computeUptime(netRows) {
     const current = rows[i]
     const next = rows[i + 1]
     const start = current.ts
-    const end = next?.ts ?? current.ts
+    // Heuristic: when no `next` row exists, extend the final sample by the
+    // previous interval only if that previous interval is small. This avoids
+    // collapsing long gaps into a large final-weighted sample while still
+    // allowing short rapid-sample series to be extended.
+    let end
+    if (next) end = next.ts
+    else if (i > 0) {
+      const prevInt = current.ts - rows[i - 1].ts
+      end = prevInt <= 5 ? (current.ts + prevInt) : current.ts
+    } else {
+      end = current.ts + 1
+    }
     const delta = end - start
     if (delta <= 0) continue
     totalMs += delta

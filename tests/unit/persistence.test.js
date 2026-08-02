@@ -1,9 +1,11 @@
-import { describe, it, beforeAll, afterAll, expect } from 'vitest'
+import { describe, it, beforeAll, afterAll, expect, vi } from 'vitest'
 import fs from 'fs'
 import path from 'path'
-import { resetDb, getDb, getDataDir, audit } from '../../server/db.js'
+import { resetDb, getDb, getDataDir, audit, persistOutages } from '../../server/db.js'
 import { persistSpeedTestRow } from '../../server/utils/speedtest.js'
 import { readDdnsHistory } from '../../server/utils/ddns.js'
+
+const MIN = 60_000
 
 const DATA_DIR = getDataDir()
 
@@ -18,8 +20,8 @@ afterAll(() => {
 })
 
 describe('persistence layer', () => {
-  it('writes and reads audit internet.check', () => {
-    audit('internet.check', { ok: false, rtt: 123, vpn_ok: false })
+  it('writes and reads audit internet.check', async () => {
+    await audit('internet.check', { ok: false, rtt: 123, vpn_ok: false })
     const row = getDb().get("SELECT event, payload FROM audit_log WHERE event = 'internet.check' ORDER BY ts DESC LIMIT 1")
     expect(row).toBeTruthy()
     const payload = JSON.parse(row.payload)
@@ -46,5 +48,32 @@ describe('persistence layer', () => {
     const h = readDdnsHistory()
     expect(Array.isArray(h)).toBe(true)
     expect(h[0]).toHaveProperty('event', 'ip_changed')
+  })
+
+  it('persists outage duration from paired down/up events instead of detected_at', async () => {
+    const db = getDb()
+    db.exec('DELETE FROM audit_log; DELETE FROM network_outages;')
+
+    const downTs = 1_700_000_000_000
+    const upTs = downTs + 9 * MIN
+    const lateDetectedAt = upTs - 5_000
+    const nowSpy = vi.spyOn(Date, 'now')
+
+    nowSpy.mockReturnValueOnce(downTs)
+    await audit('internet.down', { detected_at: lateDetectedAt, outage_type: 'infra' })
+
+    nowSpy.mockReturnValueOnce(upTs)
+    await audit('internet.up', { detected_at: upTs })
+
+    nowSpy.mockReturnValue(upTs + 1_000)
+    persistOutages()
+
+    const row = db.get('SELECT start, end, duration_ms, uptime_before_ms FROM network_outages ORDER BY start DESC LIMIT 1')
+    nowSpy.mockRestore()
+
+    expect(row.start).toBe(downTs)
+    expect(row.end).toBe(upTs)
+    expect(row.duration_ms).toBe(9 * MIN)
+    expect(row.uptime_before_ms).toBeNull()
   })
 })

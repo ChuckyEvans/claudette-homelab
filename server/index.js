@@ -13,6 +13,9 @@ import { initLogBuffer } from './utils/logBuffer.js'
 initLogBuffer()
 
 import { loadConfig } from './config.js'
+import { getDb } from './db.js'
+
+const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
 import servicesRouter, { runChecks, checkConnectivity, setOutageCheckSeconds, runMtrSnapshot } from './routes/services.js'
 import { runSpeedTest, runVpnSpeedTest } from './utils/speedtest.js'
 import threatsRouter, { refreshThreats } from './routes/threats.js'
@@ -22,6 +25,7 @@ import { doAutoBackup } from './routes/system.js'
 import configRouter from './routes/config.js'
 import auditRouter from './routes/audit.js'
 import reportsRouter from './routes/reports.js'
+import { computeOutages } from './lib/outages.mjs'
 import paginateRouter from './routes/paginate.js'
 import diagnosticsRouter from './routes/diagnostics.js'
 import authRouter from './routes/auth.js'
@@ -48,14 +52,21 @@ app.use(cors({ origin: true, credentials: true }))
 app.use(cookieParser())
 app.use(express.json())
 
+// Ensure COOP / Origin-Agent-Cluster headers are applied uniformly across
+// responses to avoid mixed site-keying (some responses requesting origin-
+// keying while others do not). Browsers may ignore COOP on insecure origins,
+// but having consistent headers prevents the "site-keyed vs origin-keyed"
+// mismatch warning.
 // Send COOP / Origin-Agent-Cluster headers only for secure or localhost origins.
 // Browsers refuse to apply COOP when origin is not potentially trustworthy (HTTP on LAN).
 app.use((req, res, next) => {
   try {
-    const host = req.headers.host || ''
-    const isLocalhost = host.startsWith('localhost') || host.startsWith('127.0.0.1')
+    const _host = req.headers.host || ''
     const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https'
-    if (isSecure || isLocalhost) {
+    // Only request origin-keying when the request is secure. Avoid setting
+    // COOP/OAC on plain HTTP LAN origins (browsers will ignore COOP there
+    // and mixed settings can produce warnings about site-keyed clusters).
+    if (isSecure) {
       // Request origin-keyed agent cluster
       res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
       res.setHeader('Origin-Agent-Cluster', '?1')
@@ -85,7 +96,24 @@ app.use(helmet({
     },
   },
   crossOriginEmbedderPolicy: false,
+  // Don't send HSTS header from an HTTP-only server; enable via proxy (Nginx) when using HTTPS
+  hsts: false,
 }))
+
+// Ensure COOP/OAC are not sent for insecure (HTTP) LAN origins — some
+// browsers treat these as untrustworthy and will ignore or warn when mixed
+// site-keying headers are present. This middleware forcibly removes those
+// headers unless the request is secure.
+app.use((req, res, next) => {
+  try {
+    const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https'
+    if (!isSecure) {
+      res.removeHeader('Cross-Origin-Opener-Policy')
+      res.removeHeader('Origin-Agent-Cluster')
+    }
+  } catch { /* ignore */ }
+  next()
+})
 
 // ── Auth rate limiter (OWASP A07 Auth Failures) ──────────────────────────────
 const authLimiter = rateLimit({
@@ -138,6 +166,48 @@ app.locals.broadcast = broadcast
 app.use('/api/auth/login', authLimiter)
 app.use('/api/auth/register', authLimiter)
 app.use('/api/auth', authRouter)
+
+// Temporary top-level debug endpoint for outages — mounted before auth so it
+// can be accessed without a session for local debugging. Only enabled for
+// private LAN addresses or when ALLOW_UNAUTH_ADMIN=1 is set.
+app.get('/api/reports/debug/outages', async (req, res) => {
+  try {
+    // Temporarily allow access from any IP — this is a short-lived debug aid.
+    // Note: remove or harden before using in production.
+
+    const db   = getDb()
+    const to   = req.query.to   ? parseInt(req.query.to)   : Date.now()
+    const from = req.query.from ? parseInt(req.query.from) : to - SEVEN_DAYS
+
+    // Persisted rows (authoritative)
+    let persisted = []
+    try {
+      persisted = db.all(`SELECT start,end,duration_ms,uptime_before_ms,outage_type,ongoing,created_at FROM network_outages WHERE start <= ? ORDER BY start ASC`, [to])
+    } catch { persisted = [] }
+
+    // Load recent internet.check rows and a paired-from-checks view
+    const outagesMod = await import('./lib/outages.mjs')
+    const { loadInternetCheckRows, pairOutagesFromChecks } = outagesMod
+    const checks = loadInternetCheckRows(db, from, to)
+    const pairedFromChecks = pairOutagesFromChecks(checks)
+
+    const windowed = computeOutages(db, from, to)
+    const totalDowntimeMs = windowed.reduce((s, o) => s + o.durationMs, 0)
+    const longestMs = windowed.length ? Math.max(...windowed.map(o => o.durationMs)) : 0
+
+    res.json({
+      outages: windowed,
+      totalOutages: windowed.length,
+      totalDowntimeMs,
+      longestMs,
+      from,
+      to,
+      persisted,        // raw persisted network_outages rows
+      checks,           // raw internet.check rows (parsed)
+      pairedFromChecks, // pairing result derived from checks
+    })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
 
 // Discovery endpoint that the frontend calls via the backend. This runs the
 // Ookla CLI on the host and returns a JSON-normalized server list. Access is
@@ -237,6 +307,15 @@ if (process.env.NODE_ENV === 'production') {
   })
 }
 
+// Temporary debug UI page (development/admin only)
+app.get('/debug/outages', (_req, res) => {
+  try {
+    const file = path.join(__dirname, '..', 'public', 'debug-outages.html')
+    if (fs.existsSync(file)) return res.sendFile(file)
+    res.status(404).send('debug page missing')
+  } catch (e) { res.status(500).send(e.message) }
+})
+
 // ── Background jobs ───────────────────────────────────────────────────────────
 
 // Start passive ARP gateway sniffer (low overhead, runs continuously)
@@ -250,6 +329,24 @@ setTimeout(() => runChecks(broadcast).catch(e => console.error('[jobs] check:', 
 setTimeout(() => checkConnectivity(broadcast).catch(e => console.error('[jobs] internet:', e.message)), 4000)
 setTimeout(() => refreshThreats(broadcast).catch(e => console.error('[jobs] threats:', e.message)), 5000)
 setTimeout(() => runPingSweep(broadcast).catch(e => console.error('[jobs] ping:', e.message)), 15000)
+
+// On startup, run a quick persist of target and network outages to catch any
+// transitions that occurred while the server was offline. This is best-effort
+// and idempotent — it will upsert existing rows. Run after other initial jobs.
+setTimeout(() => {
+  import('./db.js').then(db => {
+    try {
+      const t = db.persistTargetOutages()
+      const n = db.persistOutages()
+      if ((n || 0) + (t || 0) > 0) {
+        if (app.locals && app.locals.broadcast) app.locals.broadcast('outages.persisted', { count: (n || 0) + (t || 0), ts: Date.now() })
+        console.log('[startup] persisted outages on boot ->', { target: t, network: n })
+      } else {
+        console.log('[startup] no persisted outages needed on boot')
+      }
+    } catch (e) { console.error('[startup] persist outages failed:', e && e.message) }
+  }).catch(e => console.error('[startup] import db failed:', e && e.message))
+}, 30000)
 
 // ── Job queue — runs background jobs one at a time, in order ─────────────────
 const _jobQueue = []
@@ -340,24 +437,29 @@ function scheduleJobs() {
     })))
   }
 
-  // Schedule connectivity script if present at /tmp/conn_check.js (runs inside container)
+  // Schedule connectivity script if present at /opt/conn_check.js (container) or server/conn_check.js (local dev)
   try {
-    // dynamic import for ESM environments where `require` is not available
-    import('util').then(({ promisify }) => {
-      import('child_process').then(({ exec }) => {
-        const pe = promisify(exec)
-        // every 5 minutes — run the bundled conn_check in /opt
-        // (previously used /tmp/conn_check.js which could be missing)
-        _tasks.push(cron.schedule('*/5 * * * *', () => {
-          enqueue('conn-check', async () => {
-            try {
-              await pe('node /opt/conn_check.js')
-            } catch (e) { console.error('[jobs] conn-check:', e.message) }
-          })
-        }))
-      })
-    }).catch(() => { /* ignore on platforms without exec */ })
-  } catch { /* ignore on platforms without exec */ }
+    const candidates = ['/opt/conn_check.js', path.join(__dirname, 'conn_check.js')]
+    const found = candidates.find(p => fs.existsSync(p))
+    if (found) {
+      import('util').then(({ promisify }) => {
+        import('child_process').then(({ execFile }) => {
+          const pe = promisify(execFile)
+          _tasks.push(cron.schedule('*/5 * * * *', () => {
+            enqueue('conn-check', async () => {
+              try {
+                // Use execFile with the node executable to avoid shell parsing
+                await pe(process.execPath, [found])
+              } catch (e) { console.error('[jobs] conn-check:', e && e.message)
+              }
+            })
+          }))
+        })
+      }).catch(() => { /* ignore on platforms without execFile */ })
+    } else {
+      console.log('[jobs] conn-check: no conn_check.js found; skipping conn-check job')
+    }
+  } catch (e) { console.error('[jobs] conn-check-schedule:', e && e.message) }
 
   // Baseline mtr — runs on a configurable schedule when internet is healthy
   const mtrBaselineHrs = cfg?.schedule?.mtr_baseline_hours ?? 1

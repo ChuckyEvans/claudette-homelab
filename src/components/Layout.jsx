@@ -9,6 +9,7 @@ const NAV = [
   { id: 'threats',   label: 'Exposure',  icon: ShieldAlert,     hint: 'Open port risk assessment per device' },
   { id: 'system',    label: 'System',    icon: Cpu,             hint: 'CPU, memory, temperature & Pi hardware stats' },
   { id: 'reports',   label: 'Reports',   icon: BarChart2,       hint: 'Speed tests, uptime history & charts' },
+  { id: 'outage-inspector', label: 'Outage Inspector', icon: BarChart2, hint: 'Temporary debug view of outages & checks' },
   { id: 'backups',   label: 'Backups',   icon: ClipboardList,   hint: 'Create, download and restore backups (admin only)' },
   { id: 'users',     label: 'Users',     icon: ShieldAlert,     hint: 'Manage user accounts and roles' },
   // Incidents merged into Dashboard — navigation entry removed

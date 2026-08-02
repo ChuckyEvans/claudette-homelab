@@ -1,0 +1,82 @@
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon  17.99MB
+Step 1/23 : FROM node:22-alpine AS builder
+ ---> 262aa4f3ae29
+Step 2/23 : WORKDIR /app
+ ---> Using cache
+ ---> f1417e631adc
+Step 3/23 : COPY package*.json ./
+ ---> Using cache
+ ---> f2925366cbf5
+Step 4/23 : RUN npm install --no-audit --no-fund --loglevel=error
+ ---> Using cache
+ ---> d63270a4295d
+Step 5/23 : COPY . .
+ ---> Using cache
+ ---> 5ff997b636cc
+Step 6/23 : RUN npm run build:skip-tests
+ ---> Using cache
+ ---> c8397e5eb300
+Step 7/23 : FROM node:22-alpine
+ ---> 262aa4f3ae29
+Step 8/23 : RUN apk add --no-cache nmap tcpdump curl sqlite sqlite-dev mtr  && ARCH="$(uname -m)"  && case "$ARCH" in       aarch64) ST_ARCH="aarch64" ;;       armv7l)  ST_ARCH="armhf"   ;;       x86_64)  ST_ARCH="x86_64"  ;;       *)        echo "[docker] Ookla speedtest: unsupported arch $ARCH, skipping"; exit 0 ;;     esac  && curl -fsSL "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${ST_ARCH}.tgz" -o /tmp/st.tgz  && tar -xzf /tmp/st.tgz -C /tmp  && find /tmp -type f -name speedtest -exec mv -f {} /usr/local/bin/speedtest \;  && if [ -f /usr/local/bin/speedtest ]; then chmod +x /usr/local/bin/speedtest; else echo '[docker] speedtest binary not found after extraction'; fi  && rm -rf /tmp/ookla-speedtest-* /tmp/st.tgz  && (command -v speedtest >/dev/null 2>&1 && speedtest --accept-license --accept-gdpr --version 2>&1 || echo '[docker] speedtest binary installed')
+ ---> Using cache
+ ---> ac7f92678334
+Step 9/23 : WORKDIR /app
+ ---> Using cache
+ ---> de64cf13d885
+Step 10/23 : COPY package*.json ./
+ ---> Using cache
+ ---> 12d468d9bceb
+Step 11/23 : RUN npm ci --omit=dev --no-audit --no-fund --loglevel=error
+ ---> Using cache
+ ---> 1bb6abd5e0c4
+Step 12/23 : ARG CACHEBUST=1
+ ---> Using cache
+ ---> 839d7496b90f
+Step 13/23 : COPY server/ ./server/
+ ---> Using cache
+ ---> fe11adbbad43
+Step 14/23 : COPY server/conn_check.js /opt/conn_check.js
+ ---> Using cache
+ ---> cd1f993af464
+Step 15/23 : RUN chmod +x /opt/conn_check.js || true
+ ---> Running in c0278059065f
+ ---> Removed intermediate container c0278059065f
+ ---> a00a559fdc6b
+Step 16/23 : COPY --from=builder /app/dist ./dist/
+ ---> bfef0ecf8321
+Step 17/23 : RUN mkdir -p /app/data
+ ---> Running in bfd139a17fb3
+ ---> Removed intermediate container bfd139a17fb3
+ ---> fcd6814300c1
+Step 18/23 : RUN apk add --no-cache sqlite-libs sqlite
+ ---> Running in 4e038a8fd3d5
+OK: 36.6 MiB in 42 packages
+ ---> Removed intermediate container 4e038a8fd3d5
+ ---> 34f08c1ecaba
+Step 19/23 : EXPOSE 7654
+ ---> Running in 09019623ca5b
+ ---> Removed intermediate container 09019623ca5b
+ ---> 3965b26eb691
+Step 20/23 : ENV NODE_ENV=production
+ ---> Running in 0e490a7799b7
+ ---> Removed intermediate container 0e490a7799b7
+ ---> c8c9c45c91c0
+Step 21/23 : ARG BUILD_TIME
+ ---> Running in 7e68abb0846a
+ ---> Removed intermediate container 7e68abb0846a
+ ---> 7845b6fc772c
+Step 22/23 : ENV BUILD_TIME=${BUILD_TIME}
+ ---> Running in 763bae5110a4
+ ---> Removed intermediate container 763bae5110a4
+ ---> ef6cf5b6af84
+Step 23/23 : CMD ["node", "server/index.js"]
+ ---> Running in 4d3a6d09edd5
+ ---> Removed intermediate container 4d3a6d09edd5
+ ---> e7644cf360f8
+Successfully built e7644cf360f8
+Successfully tagged claudette:latest

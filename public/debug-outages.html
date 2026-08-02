@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Debug Outages</title>
+  <style>body{font-family:system-ui,Segoe UI,Arial;margin:20px}pre{background:#111;color:#dfe;padding:12px;border-radius:6px;overflow:auto;max-height:60vh}</style>
+</head>
+<body>
+  <h1>Debug Outages</h1>
+  <p>Fetches <code>/api/reports/debug/outages</code> and displays persisted rows, checks, and pairedFromChecks.</p>
+  <label>From (ms epoch): <input id="from" style="width:260px"></label>
+  <label>To (ms epoch): <input id="to" style="width:260px"></label>
+  <button id="go">Load</button>
+  <h2>Response</h2>
+  <pre id="out">(click Load)</pre>
+
+  <script>
+    document.getElementById('go').addEventListener('click', async ()=>{
+      const f = document.getElementById('from').value
+      const t = document.getElementById('to').value
+      const q = new URLSearchParams()
+      if (f) q.set('from', f)
+      if (t) q.set('to', t)
+      const url = '/api/reports/debug/outages' + (q.toString() ? ('?' + q.toString()) : '')
+      const out = document.getElementById('out')
+      out.textContent = 'loading...'
+      try {
+        const res = await fetch(url)
+        const j = await res.json()
+        out.textContent = JSON.stringify(j, null, 2)
+      } catch (e) { out.textContent = 'error: '+e.message }
+    })
+  </script>
+</body>
+</html>

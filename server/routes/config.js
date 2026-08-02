@@ -71,13 +71,32 @@ router.post('/', async (req, res) => {
     },
   }
   const existingNetwork = loadConfig()?.network ?? {}
-  // Sanitize connectivity hosts: allow IPs and simple hostnames/URLs only
-  const rawConnectivityHosts = Array.isArray(body.network?.connectivity_hosts)
-    ? body.network.connectivity_hosts
-        .map(h => sanitize(String(h), /[^a-zA-Z0-9.-]/g, 64))
-        .filter(h => h)
-        .slice(0, 5)
-    : null
+  // Sanitize connectivity hosts: accept either array of strings or array of objects
+  // Normalize into array of objects: { host, enabled, retries, label?, hint? }
+  let rawConnectivityHosts = null
+  if (Array.isArray(body.network?.connectivity_hosts)) {
+    rawConnectivityHosts = body.network.connectivity_hosts
+      .map(h => {
+        if (typeof h === 'string') {
+          const host = sanitize(h, /[^a-zA-Z0-9.-]/g, 64)
+          return host ? { host, enabled: true, retries: 1 } : null
+        }
+        if (h && typeof h === 'object') {
+          const host = sanitize(String(h.host ?? h.url ?? ''), /[^a-zA-Z0-9.-]/g, 64)
+          if (!host) return null
+          return {
+            host,
+            enabled: (h.enabled === true || String(h.enabled) === 'true'),
+            retries: Math.max(1, parseInt(h.retries) || 1),
+            label: String(h.label ?? '').slice(0, 64) || undefined,
+            hint: String(h.hint ?? '').slice(0, 128) || undefined,
+          }
+        }
+        return null
+      })
+      .filter(Boolean)
+      .slice(0, 5)
+  }
   config.network = { ...existingNetwork }
   if (rawSubnets.length) {
     config.network.subnets = rawSubnets
@@ -86,7 +105,31 @@ router.post('/', async (req, res) => {
     delete config.network.subnets
     delete config.network.subnet
   }
-  config.network.connectivity_hosts = rawConnectivityHosts ?? existingNetwork.connectivity_hosts ?? ['1.1.1.1']
+  // Normalize existing connectivity_hosts (strings -> objects) and choose final value
+  const normalizeHostsArray = (arr) => {
+    if (!Array.isArray(arr)) return []
+    return arr.map(item => {
+      if (typeof item === 'string') return { host: sanitize(item, /[^a-zA-Z0-9.-]/g, 64), enabled: true, retries: 1 }
+      if (item && typeof item === 'object') {
+        const host = sanitize(String(item.host ?? item.url ?? ''), /[^a-zA-Z0-9.-]/g, 64)
+        if (!host) return null
+        return {
+          host,
+          enabled: (item.enabled === true || String(item.enabled) === 'true'),
+          retries: Math.max(1, parseInt(item.retries) || 1),
+          label: String(item.label ?? '').slice(0, 64) || undefined,
+          hint: String(item.hint ?? '').slice(0, 128) || undefined,
+        }
+      }
+      return null
+    }).filter(Boolean)
+  }
+  if (rawConnectivityHosts && rawConnectivityHosts.length) {
+    config.network.connectivity_hosts = rawConnectivityHosts
+  } else {
+    const existingNormalized = normalizeHostsArray(existingNetwork.connectivity_hosts)
+    config.network.connectivity_hosts = existingNormalized.length ? existingNormalized : [{ host: '1.1.1.1', enabled: true, retries: 1 }]
+  }
   config.network.dormant_after_days = Math.max(1, Math.min(365, (n => Number.isFinite(n) ? n : 3)(parseInt(body.network?.dormant_after_days))))
   config.network.skull_after_days   = Math.max(1, Math.min(365, (n => Number.isFinite(n) ? n : 7)(parseInt(body.network?.skull_after_days))))
   // vpn_interface: allow Linux iface names (letters, digits, underscore, hyphen, max 15 chars)
@@ -191,7 +234,7 @@ router.post('/', async (req, res) => {
     // If an Ookla server id was provided, validate it by querying the local discovery
     if (config.schedule?.ookla_server_id) {
       try {
-        const ifaceQuery = config.schedule.ookla_interface ? `?interface=${encodeURIComponent(config.schedule.ookla_interface)}` : ''
+        // iface query not used directly; discovery command builds flags explicitly below
         const { exec } = await import('child_process')
         const { promisify } = await import('util')
         const pe = promisify(exec)
@@ -200,7 +243,7 @@ router.post('/', async (req, res) => {
         let out
         try {
           out = (await pe(discoveryCmd, { timeout: 20000 })).stdout || ''
-        } catch (e) {
+        } catch {
           // fallback to list parsing
           out = (await pe('speedtest --list 2>&1 || speedtest -L 2>&1', { timeout: 20000 })).stdout || ''
         }
@@ -212,7 +255,7 @@ router.post('/', async (req, res) => {
             const id = String(s.id ?? s.serverId ?? s.server_id ?? s.server ?? '')
             if (id && id === String(config.schedule.ookla_server_id)) { found = true; break }
           }
-        } catch (e) {
+        } catch {
           // parse text list output
           const lines = String(out || '').split('\n').map(l => l.trim()).filter(Boolean)
           for (const line of lines) {
@@ -221,8 +264,8 @@ router.post('/', async (req, res) => {
           }
         }
         if (!found) return res.status(400).json({ error: 'Invalid Ookla server id: not found in local discovery output' })
-      } catch (e) {
-        return res.status(500).json({ error: 'Ookla server validation failed: ' + (e.message || String(e)) })
+        } catch {
+        return res.status(500).json({ error: 'Ookla server validation failed' })
       }
     }
     fs.writeFileSync(getConfigPath(), yaml.dump(config))

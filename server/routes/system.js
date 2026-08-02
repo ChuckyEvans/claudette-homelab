@@ -4,8 +4,9 @@ import si from 'systeminformation'
 import os from 'os'
 import fs from 'fs'
 import path from 'path'
-import zlib from 'node:zlib'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'url'
+import { path7za } from '7zip-bin'
 import { getDb, getDbPath, getDataDir, resetDb, audit } from '../db.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { getConfigPath, loadConfig, resetConfig } from '../config.js'
@@ -25,6 +26,110 @@ const VERSION_CACHE_MS = 60 * 60 * 1000
 const BUILD_TIME = process.env.BUILD_TIME || null
 
 const router = Router()
+
+const BACKUP_EXTS = ['.7z', '.7zip']
+
+function getBackupDir() {
+  return path.join(getDataDir(), 'backups')
+}
+
+function ensureBackupDir() {
+  const backupDir = getBackupDir()
+  if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
+  return backupDir
+}
+
+function listRestoreSources() {
+  const backupDir = getBackupDir()
+  if (!fs.existsSync(backupDir)) return []
+  return fs.readdirSync(backupDir)
+    .filter(f => BACKUP_EXTS.some(ext => f.toLowerCase().endsWith(ext)))
+    .map(name => {
+      const fullPath = path.join(backupDir, name)
+      const stat = fs.statSync(fullPath)
+      return { name, fullPath, size: stat.size, mtime: stat.mtimeMs }
+    })
+    .sort((a, b) => b.mtime - a.mtime)
+}
+
+function run7z(args, opts = {}) {
+  const res = spawnSync(path7za, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    ...opts,
+  })
+  if (res.error) throw res.error
+  if (res.status !== 0) {
+    const stderr = (res.stderr || '').trim()
+    throw new Error(stderr || `7z exited with code ${res.status}`)
+  }
+  return res.stdout || ''
+}
+
+function isTransientDataFile(name) {
+  return name === 'backups' || name.endsWith('.lock') || name.endsWith('-wal') || name.endsWith('-shm')
+}
+
+function getArchiveEntries() {
+  const dataDir = getDataDir()
+  const entries = []
+
+  const addPath = (absPath, relPath) => {
+    if (!fs.existsSync(absPath)) return
+    const stat = fs.statSync(absPath)
+    if (stat.isDirectory()) {
+      const children = fs.readdirSync(absPath)
+      if (children.length === 0) return
+      for (const child of children) addPath(path.join(absPath, child), path.join(relPath, child))
+      return
+    }
+    entries.push(relPath)
+  }
+
+  for (const name of fs.readdirSync(dataDir)) {
+    if (isTransientDataFile(name)) continue
+    const absPath = path.join(dataDir, name)
+    addPath(absPath, name)
+  }
+
+  return entries
+}
+
+function buildBackupArchive() {
+  const backupDir = ensureBackupDir()
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', 'Z')
+  const archiveName = `claudette-backup-${stamp}.7z`
+  const archivePath = path.join(backupDir, archiveName)
+  const dataDir = getDataDir()
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claudette-backup-'))
+  const stagingDir = path.join(workDir, 'data')
+
+  try {
+    const db = getDb()
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+
+    fs.mkdirSync(stagingDir, { recursive: true })
+    for (const name of getArchiveEntries()) {
+      const src = path.join(dataDir, name)
+      const dest = path.join(stagingDir, name)
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      fs.cpSync(src, dest, { recursive: true })
+    }
+
+    const entries = fs.existsSync(stagingDir) ? ['data'] : []
+    if (!entries.length) throw new Error('No backup data found')
+
+    run7z(['a', '-t7z', '-mx=9', archivePath, ...entries], { cwd: workDir })
+    return { archiveName, archivePath }
+  } finally {
+    try { fs.rmSync(workDir, { recursive: true, force: true }) } catch {}
+  }
+}
+
+function extractBackupArchive(filePath, destinationDir) {
+  fs.mkdirSync(destinationDir, { recursive: true })
+  run7z(['x', '-y', `-o${destinationDir}`, filePath], { cwd: destinationDir })
+}
 
 router.get('/stats', async (req, res) => {
   try {
@@ -137,61 +242,40 @@ router.get('/interfaces', async (req, res) => {
 
 // ── Backup helpers ────────────────────────────────────────────────────────────
 
-function buildBackupBundle() {
-  const db = getDb()
-  // Flush WAL into the main database file for a consistent snapshot
-  db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
-  const dbData     = fs.readFileSync(getDbPath())
-  const configPath = getConfigPath()
-  const configData = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : ''
-  const json = JSON.stringify({
-    app:     'claudette',
-    version: '1',
-    created: Date.now(),
-    config:  configData,
-    db:      dbData.toString('base64'),
-  })
-  // Gzip-compress: base64 SQLite + JSON wrapper compresses ~85-90%
-  return zlib.gzipSync(Buffer.from(json, 'utf8'))
-}
-
-function localDateStr() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-}
-
 /** Called by the cron scheduler — saves a backup to data/backups/. */
 export function doAutoBackup() {
   try {
-    const bundle    = buildBackupBundle()
-    const backupDir = path.join(getDataDir(), 'backups')
-    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
-    const fname = `claudette-backup-${localDateStr()}-${Date.now()}.claudette.gz`
-    fs.writeFileSync(path.join(backupDir, fname), bundle)
+    const { archiveName, archivePath } = buildBackupArchive()
     // Prune old auto-backups based on configured retention (default 7 days)
+    const backupDir = getBackupDir()
     const keepDays = Math.max(1, loadConfig()?.schedule?.backup_keep_days ?? 7)
     const cutoff = Date.now() - keepDays * 86_400_000
-    const all = fs.readdirSync(backupDir).filter(f => f.startsWith('claudette-backup-'))
+    const all = fs.readdirSync(backupDir).filter(f => f.startsWith('claudette-backup-') && BACKUP_EXTS.some(ext => f.toLowerCase().endsWith(ext)))
     for (const f of all) {
       const stat = fs.statSync(path.join(backupDir, f))
       if (stat.mtimeMs < cutoff) fs.unlinkSync(path.join(backupDir, f))
     }
-    audit('backup.auto', { file: fname }, 'system')
-    console.log(`[backup] Auto-backup saved: ${fname} (${(bundle.length / 1024).toFixed(1)} KB)`)
+    audit('backup.auto', { file: archiveName }, 'system')
+    console.log(`[backup] Auto-backup saved: ${archiveName} (${(fs.statSync(archivePath).size / 1024).toFixed(1)} KB)`)
   } catch (err) {
     console.error('[backup] Auto-backup failed:', err.message)
   }
 }
 
-// ── POST /api/system/backup — create & download a backup bundle ───────────────
+// ── POST /api/system/backup — create & download a 7z backup ───────────────
 router.post('/backup', requireAuth, requireRole('admin'), (req, res) => {
   try {
-    const bundle   = buildBackupBundle()
-    const filename = `claudette-backup-${localDateStr()}.claudette.gz`
-    res.setHeader('Content-Type', 'application/gzip')
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
-    res.send(bundle)
-    audit('backup.created', { size: bundle.length, actor: req.user?.sub ?? 'user' })
+    const { archiveName, archivePath } = buildBackupArchive()
+    const size = fs.statSync(archivePath).size
+    const mode = String(req.query.mode || 'download')
+    audit('backup.created', { size, actor: req.user?.sub ?? 'user', file: archiveName, mode })
+    if (mode === 'save') {
+      return res.json({ ok: true, file: archiveName, size, mtime: fs.statSync(archivePath).mtimeMs })
+    }
+    res.setHeader('Content-Type', 'application/x-7z-compressed')
+    res.setHeader('X-Backup-Size', String(size))
+    res.setHeader('Content-Disposition', `attachment; filename="${archiveName}"`)
+    res.sendFile(archivePath)
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -200,10 +284,9 @@ router.post('/backup', requireAuth, requireRole('admin'), (req, res) => {
 // GET /api/system/backup?name=filename — serve an existing backup file (admin only)
 router.get('/backup', requireAuth, requireRole('admin'), (req, res) => {
   try {
-    const name = req.query.name
+    const name = path.basename(String(req.query.name || ''))
     if (!name) return res.status(400).json({ error: 'name required' })
-    const backupDir = path.join(getDataDir(), 'backups')
-    const file = path.join(backupDir, path.basename(name))
+    const file = path.join(getBackupDir(), name)
     if (!fs.existsSync(file)) return res.status(404).json({ error: 'Not found' })
     res.download(file)
   } catch (err) {
@@ -211,59 +294,57 @@ router.get('/backup', requireAuth, requireRole('admin'), (req, res) => {
   }
 })
 
-// ── POST /api/system/restore — restore from an uploaded backup bundle ─────────
-// Accepts the JSON bundle as a raw body (up to 50 MB).
-router.post('/restore', requireAuth, requireRole('admin'), express.raw({ type: '*/*', limit: '50mb' }), (req, res) => {
+// ── POST /api/system/restore — restore from an uploaded 7z backup ─────────
+router.post('/restore', requireAuth, requireRole('admin'), express.raw({ type: '*/*', limit: '200mb' }), (req, res) => {
   try {
-    let bodyBuf = req.body
-    // Require gzip — detect magic bytes 1f 8b
-    if (bodyBuf[0] !== 0x1f || bodyBuf[1] !== 0x8b) {
-      return res.status(400).json({ error: 'Invalid backup file — must be a .claudette.gz file' })
+    const bodyBuf = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || [])
+    const sig = bodyBuf.slice(0, 6)
+    const sevenZ = Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c])
+    if (sig.length < sevenZ.length || !sig.equals(sevenZ)) {
+      return res.status(400).json({ error: 'Invalid backup file — must be a .7z or .7zip archive' })
     }
-    try { bodyBuf = zlib.gunzipSync(bodyBuf) } catch {
-      return res.status(400).json({ error: 'Invalid backup file — could not decompress' })
-    }
-    let bundle
+
+    const restoreRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'claudette-restore-'))
+    const uploadPath = path.join(restoreRoot, 'upload.7z')
+    fs.writeFileSync(uploadPath, bodyBuf)
     try {
-      bundle = JSON.parse(bodyBuf.toString('utf8'))
-    } catch {
-      return res.status(400).json({ error: 'Invalid backup file — could not parse JSON' })
+      run7z(['t', uploadPath], { cwd: restoreRoot })
+      extractBackupArchive(uploadPath, restoreRoot)
+      const extractedDataDir = path.join(restoreRoot, 'data')
+      const dbPath = path.join(extractedDataDir, path.basename(getDbPath()))
+      const configPath = path.join(extractedDataDir, 'config.yaml')
+      if (!fs.existsSync(dbPath) || !fs.existsSync(configPath)) {
+        return res.status(400).json({ error: 'Invalid backup file — missing required files' })
+      }
+
+      resetDb()
+      fs.mkdirSync(path.dirname(getDbPath()), { recursive: true })
+      fs.writeFileSync(getConfigPath(), fs.readFileSync(configPath, 'utf8'), 'utf8')
+      resetConfig()
+      fs.copyFileSync(dbPath, getDbPath())
+      for (const suffix of ['-wal', '-shm']) {
+        const p = getDbPath() + suffix
+        if (fs.existsSync(p)) fs.unlinkSync(p)
+      }
+
+      for (const name of ['.jwt_secret', 'ddns-history.json', 'ddns-status.json', 'state.json']) {
+        const src = path.join(extractedDataDir, name)
+        if (fs.existsSync(src)) fs.copyFileSync(src, path.join(getDataDir(), name))
+      }
+
+      const themesSrc = path.join(extractedDataDir, 'themes')
+      const themesDst = path.join(getDataDir(), 'themes')
+      if (fs.existsSync(themesSrc)) fs.cpSync(themesSrc, themesDst, { recursive: true, force: true })
+      const evidenceSrc = path.join(extractedDataDir, 'evidence')
+      const evidenceDst = path.join(getDataDir(), 'evidence')
+      if (fs.existsSync(evidenceSrc)) fs.cpSync(evidenceSrc, evidenceDst, { recursive: true, force: true })
+
+      audit('backup.restored', { created: Date.now(), actor: req.user?.sub ?? 'user' })
+      console.log(`[backup] Restore completed from archive ${req.headers['x-filename'] || 'upload'}`)
+      res.json({ ok: true, created: Date.now() })
+    } finally {
+      try { fs.rmSync(restoreRoot, { recursive: true, force: true }) } catch {}
     }
-
-    if (bundle.app !== 'claudette' || bundle.version !== '1' || !bundle.db || !bundle.config) {
-      return res.status(400).json({ error: 'Invalid backup file — missing required fields' })
-    }
-
-    // Decode the database binary
-    let dbBuf
-    try {
-      dbBuf = Buffer.from(bundle.db, 'base64')
-    } catch {
-      return res.status(400).json({ error: 'Invalid backup file — database data is corrupt' })
-    }
-    if (dbBuf.length < 100) {
-      return res.status(400).json({ error: 'Invalid backup file — database too small' })
-    }
-
-    // Verify SQLite magic bytes (first 16 bytes = "SQLite format 3\0")
-    const magic = dbBuf.slice(0, 15).toString('ascii')
-    if (magic !== 'SQLite format 3') {
-      return res.status(400).json({ error: 'Invalid backup file — not a valid SQLite database' })
-    }
-
-    // Write config first (safe even if DB write fails)
-    const configPath = getConfigPath()
-    fs.writeFileSync(configPath, bundle.config, 'utf8')
-    resetConfig()
-
-    // Close DB connection, overwrite database file, reopen on next access
-    resetDb()
-    fs.writeFileSync(getDbPath(), dbBuf)
-
-    audit('backup.restored', { created: bundle.created, actor: req.user?.sub ?? 'user' })
-    console.log(`[backup] Restore completed — backup was from ${new Date(bundle.created).toLocaleString('en-GB')}`)
-
-    res.json({ ok: true, created: bundle.created })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -272,14 +353,7 @@ router.post('/restore', requireAuth, requireRole('admin'), express.raw({ type: '
 // GET /api/system/backups — list available backup bundles (admin only)
 router.get('/backups', requireAuth, requireRole('admin'), (req, res) => {
   try {
-    const backupDir = path.join(getDataDir(), 'backups')
-    if (!fs.existsSync(backupDir)) return res.json({ items: [] })
-    const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.claudette.gz') || f.startsWith('claudette-backup-'))
-    const items = files.map(f => {
-      const p = path.join(backupDir, f)
-      const s = fs.statSync(p)
-      return { name: f, size: s.size, mtime: s.mtimeMs }
-    }).sort((a,b) => b.mtime - a.mtime)
+    const items = listRestoreSources().map(({ name, size, mtime }) => ({ name, size, mtime }))
     res.json({ items })
   } catch (err) {
     res.status(500).json({ error: err.message })

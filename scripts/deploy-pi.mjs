@@ -14,6 +14,7 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync, statSync } from 'n
 import { join, resolve, dirname } from 'node:path'
 import { tmpdir, homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import yaml from 'js-yaml'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -69,28 +70,36 @@ const kodiUser = param('kodi-user', 'root')
 function yamlVal(key, fb = '') {
   const f = join(ROOT, 'config.yaml')
   if (!existsSync(f)) return fb
-  const m = readFileSync(f, 'utf8').match(new RegExp(`^\s*${key}:\s*(.+)`, 'm'))
-  return m ? m[1].trim().replace(/^['"]|['"]$/g, '') : fb
+  try {
+    const cfg = yaml.load(readFileSync(f, 'utf8')) || {}
+    const parts = String(key).split('.')
+    let cur = cfg
+    for (const p of parts) {
+      if (cur == null) return fb
+      cur = cur[p]
+    }
+    return cur == null ? fb : String(cur)
+  } catch {
+    return fb
+  }
 }
+
 function yamlList(key) {
   const f = join(ROOT, 'config.yaml')
   if (!existsSync(f)) return []
-  const lines = readFileSync(f, 'utf8').split('\n')
-  const result = []
-  let on = false
-  for (const l of lines) {
-    if (new RegExp(`^\s+${key}:\s*$`).test(l)) { on = true; continue }
-    if (on) {
-      const m = l.match(/^\s+-\s+(.+)/)
-      if (m) result.push(m[1].trim().replace(/^['"]|['"]$/g, ''))
-      else if (l.trim() && !/^\s+-/.test(l)) break
-    }
+  try {
+    const cfg = yaml.load(readFileSync(f, 'utf8')) || {}
+    const parts = String(key).split('.')
+    let cur = cfg
+    for (const p of parts) { if (cur == null) return []; cur = cur[p] }
+    return Array.isArray(cur) ? cur.map(x => String(x)) : []
+  } catch {
+    return []
   }
-  return result
 }
 
-if (!piHost) piHost = yamlVal('host', '192.168.1.10')
-if (!piUser) piUser = yamlVal('ssh_user', 'ubuntu')
+if (!piHost) piHost = yamlVal('pi.host', yamlVal('host', '192.168.1.10'))
+if (!piUser) piUser = yamlVal('pi.ssh_user', yamlVal('ssh_user', 'ubuntu'))
 if (!sshKey) {
   const raw = yamlVal('ssh_key', '')
   if (raw && !raw.includes('#')) sshKey = raw.replace(/^~/, homedir())
@@ -113,18 +122,15 @@ let startTime = Date.now()
 emitProgress({ step: 'init', progress: 0, message: 'starting deploy' })
 
 function run(cmd, args, { silent = false, noThrow = false, cwd = ROOT } = {}) {
-  const r = spawnSync(cmd, args, { stdio: silent ? 'pipe' : 'inherit', encoding: 'utf8', cwd, shell: false })
+  const useShell = process.platform === 'win32' && /^npm(\.cmd)?$|^npx(\.cmd)?$/i.test(String(cmd))
+  const r = spawnSync(cmd, args, { stdio: silent ? 'pipe' : 'inherit', encoding: 'utf8', cwd, shell: useShell })
   if (r.error && !noThrow) die(`Cannot run '${cmd}': ${r.error.message}`)
   if (!noThrow && r.status !== 0) die(`${cmd} failed (exit ${r.status})`)
   return (r.stdout ?? '').trim()
 }
 
 function resolveNpmCmdSync() {
-  if (process.platform !== 'win32') return 'npm'
-  try {
-    const r = spawnSync('npm.cmd', ['--version'], { encoding: 'utf8', shell: false })
-    if (!r.error && r.status === 0) return 'npm.cmd'
-  } catch (e) {}
+  if (process.platform === 'win32') return 'npm.cmd'
   return 'npm'
 }
 const NPM_CMD = resolveNpmCmdSync()
@@ -153,7 +159,25 @@ if (!skipLint) {
 } else info('Skipping eslint (flag: --skip-lint)')
 if (!skipTests) {
   log('\n→ Running unit tests...')
-  run(NPM_CMD, ['run', 'test'], { noThrow: false })
+  // Try running Vitest in single-threaded mode during deploy to avoid intermittent
+  // worker/process timeouts on CI and under heavy IO (DB file locking).
+  // If the Vitest CLI version doesn't accept the flag, fall back to the
+  // default `npm run test` invocation.
+  // Attempt to run Vitest with `--threads false` via a direct spawn so we can
+  // observe the exit code (the `run()` helper aborts the process on non-zero
+  // exit which prevents graceful fallback).
+  const useShellForNpm = process.platform === 'win32' && /^npm(\.cmd)?$|^npx(\.cmd)?$/i.test(String(NPM_CMD))
+  const testArgs = ['run', 'test', '--', '--threads', 'false']
+  try {
+    const r = spawnSync(NPM_CMD, testArgs, { stdio: 'inherit', encoding: 'utf8', cwd: ROOT, shell: useShellForNpm })
+    if (r.error || r.status !== 0) {
+      console.warn('[deploy] --threads flag attempt failed; running tests with default flags')
+      run(NPM_CMD, ['run', 'test'], { noThrow: false })
+    }
+  } catch (e) {
+    console.warn('[deploy] test spawn failed; falling back to npm run test')
+    run(NPM_CMD, ['run', 'test'], { noThrow: false })
+  }
   info('Tests passed.')
 } else info('Skipping tests (flag: --skip-tests)')
 
@@ -191,40 +215,24 @@ if (quick) {
 }
 
 if (preBuilt) {
-  log('\n[1/2] Uploading pre-built dist + server (skipping npm build on Pi)...')
-  const tar = join(tmpdir(), 'claudette-src.tar')
-  const includes = ['server', 'dist', 'package.json', 'package-lock.json'].filter(f => existsSync(join(ROOT, f)))
-  mkTar(tar, ...includes)
-  scpTo(tar, `${piUser}@${piHost}:/home/${piUser}/claudette-src.tar`)
-  unlinkSync(tar)
-  const dockerfileContent = [
-    'FROM node:22-alpine',
-    "RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && apk add --no-cache nmap tcpdump curl",
-    'WORKDIR /app',
-    'COPY package*.json ./',
-    "RUN echo 'nameserver 8.8.8.8' > /etc/resolv.conf && npm ci --omit=dev",
-    'ARG CACHEBUST=1',
-    'COPY server/ ./server/',
-    'COPY dist/ ./dist/',
-    'RUN mkdir -p /app/data',
-    'EXPOSE 7654',
-    'ENV NODE_ENV=production',
-    'CMD ["node","server/index.js"]',
-  ].join('\n')
-  const tmpDf = join(tmpdir(), 'claudette-Dockerfile')
-  writeFileSync(tmpDf, dockerfileContent, 'utf8')
-  scpTo(tmpDf, `${piUser}@${piHost}:/home/${piUser}/claudette-Dockerfile`)
-  unlinkSync(tmpDf)
-  info('Uploaded. Building on Pi (no npm build)...')
+  log('\n[1/2] Building image locally and uploading to Pi (pre-built)...')
+  // Ensure local dist is built so the image contains the frontend artifacts
+  run(NPM_CMD, ['run', 'build'], { noThrow: false })
+
+  // Build the Docker image locally, save it to a tarball, then upload and load on the Pi
+  info('Building Docker image locally...')
+  run('docker', ['build', '-t', IMAGE, '.'], { noThrow: false })
+  const imgTar = join(tmpdir(), 'claudette-image.tar')
+  run('docker', ['save', '-o', imgTar, IMAGE], { noThrow: false })
+  scpTo(imgTar, `${piUser}@${piHost}:/home/${piUser}/claudette-image.tar`)
+  try { unlinkSync(imgTar) } catch (e) {}
+
+  info('Uploaded image tar. Loading on Pi...')
   remote([
-    'rm -rf /tmp/claudette-build || true',
-    'mkdir -p /tmp/claudette-build',
-    `tar -xf /home/${piUser}/claudette-src.tar -C /tmp/claudette-build`,
-    `mv /home/${piUser}/claudette-Dockerfile /tmp/claudette-build/Dockerfile || true`,
-    `cd /tmp/claudette-build && sudo docker build --build-arg CACHEBUST=${Date.now()} -t ${IMAGE} .`,
-    'cd / && rm -rf /tmp/claudette-build || true',
+    `sudo docker load -i /home/${piUser}/claudette-image.tar`,
+    `rm -f /home/${piUser}/claudette-image.tar`,
   ].join(' && '))
-  info('Built.')
+  info('Image loaded on Pi.')
 } else if (!skipBuild) {
   log('\n[1/2] Uploading source + building on Pi (native ARM64)...')
   const tar = join(tmpdir(), 'claudette-src.tar')
@@ -247,8 +255,15 @@ if (preBuilt) {
     'PROGFILE=/tmp/claudette-build/progress.json',
     'emit() { echo "$1" > "$PROGFILE" ; }',
     'emit "{\"step\":\"start\",\"progress\":0,\"message\":\"begin build\"}"',
-    `cd /tmp/claudette-build && sudo docker build --build-arg CACHEBUST=${Date.now()} -t ${IMAGE} . 2>&1 | tee /tmp/claudette-build/build.log`,
+    `cd /tmp/claudette-build && for i in 1 2; do if sudo docker build --build-arg CACHEBUST=${Date.now()} -t ${IMAGE} . 2>&1 | tee /tmp/claudette-build/build.log; then echo build_ok; break; else echo "[deploy] docker build failed on attempt \$i"; cp /tmp/claudette-build/build.log /home/${piUser}/claudette-build-failed-$(date -u +%Y%m%dT%H%M%SZ)-attempt\${i}.log || true; if [ "\$i" -eq 2 ]; then echo '[deploy] all build attempts failed' >&2; exit 1; fi; sleep 2; fi; done`,
     'emit "{\"step\":\"done\",\"progress\":0.9,\"message\":\"build finished\"}"',
+    `BUILD_LOG=/home/${piUser}/claudette-build-$(date -u +%Y%m%dT%H%M%SZ).log`,
+    `mkdir -p /home/${piUser}/claudette-build-logs || true`,
+    'cp /tmp/claudette-build/build.log "$BUILD_LOG" || true',
+    'cp -a /root/.npm/_logs /home/${piUser}/claudette-build-logs/ 2>/dev/null || true',
+    `echo "build log saved to $BUILD_LOG" >> /home/${piUser}/claudette-build.saved || true`,
+    `echo "npm logs copied to /home/${piUser}/claudette-build-logs" >> /home/${piUser}/claudette-build.saved || true`,
+    `chown -R ${piUser}:${piUser} /home/${piUser}/claudette-build-logs /home/${piUser}/claudette-build-*.log || true`,
     'cd / && rm -rf /tmp/claudette-build || true',
   ].join('\n')
   const tmpScript = join(tmpdir(), 'claudette-deploy.sh')
@@ -292,24 +307,30 @@ const dockerRunParts = [
   IMAGE,
 ].filter(Boolean).join(' ')
 
-info('Ensuring host data directory backups and config restoration...')
+info('Ensuring host data directory 7z backup...')
 try {
-  const restoreScript = [
+  const backupScript = [
     'set -e',
+    'TS=$(date -u +%Y%m%dT%H%M%SZ)',
     'DATA=/home/' + piUser + '/claudette-data',
     'BACK=/home/' + piUser + '/claudette-backups',
-    'mkdir -p "$BACK"',
-    'TS=$(date -u +%Y%m%dT%H%M%SZ)',
-    'if [ -f "$DATA/claudette.db" ]; then sudo cp -v "$DATA/claudette.db" "$BACK/claudette.db.$TS.bak" || true; else echo No DB to backup; fi',
-    'if [ -f "$DATA/config.yaml" ]; then sudo cp -v "$DATA/config.yaml" "$BACK/config.yaml.$TS.bak" || true; else echo No config to backup; fi',
-    "CAND_DB=$(ls -1t \"$DATA/claudette.db*\" \"$BACK/claudette.db.*\" 2>/dev/null | head -n1 || true)",
-    'if [ -n "$CAND_DB" ] && [ -f "$CAND_DB" ]; then echo Restoring DB from $CAND_DB; sudo cp -v "$CAND_DB" "$DATA/claudette.db"; sudo chown 1000:1000 "$DATA/claudette.db" || true; else echo No DB candidate found; fi',
-    "CAND_CFG=$(ls -1t \"$DATA/config.yaml*\" \"$BACK/config.yaml.*\" 2>/dev/null | head -n1 || true)",
-    'if [ -n "$CAND_CFG" ] && [ -f "$CAND_CFG" ]; then echo Restoring config from $CAND_CFG; sudo cp -v "$CAND_CFG" "$DATA/config.yaml"; sudo chown 1000:1000 "$DATA/config.yaml" || true; else echo No config candidate found; fi',
+    'WORK=$(mktemp -d /tmp/claudette-backup.XXXXXX)',
+    'ARCHIVE=$BACK/claudette-data-$TS.7z',
+    'PAUSED=0',
+    'ZIP=$(command -v 7z || command -v 7za || command -v 7zr)',
+    'if [ -z "$ZIP" ]; then echo "7z not found on remote host"; exit 1; fi',
+    'mkdir -p "$BACK" "$WORK/data"',
+    'cleanup() { if [ "$PAUSED" -eq 1 ]; then sudo docker unpause ' + CONTAINER + ' >/dev/null 2>&1 || true; fi; rm -rf "$WORK"; }',
+    'trap cleanup EXIT',
+    'if sudo docker inspect -f "{{.State.Running}}" ' + CONTAINER + ' 2>/dev/null | grep -q true; then sudo docker exec ' + CONTAINER + ' node --input-type=module -e "const { getDb } = await import(\'/app/server/db.js\'); const db = getDb(); db.exec(\'PRAGMA wal_checkpoint(TRUNCATE)\')"; sudo docker pause ' + CONTAINER + '; PAUSED=1; fi',
+    'cp -a "$DATA/." "$WORK/data/"',
+    'rm -rf "$WORK/data/claudette.db.lock" "$WORK/data/backups"',
+    'find "$WORK/data" -type f \( -name "*.db-wal" -o -name "*.db-shm" \) -delete',
+    'cd "$WORK" && "$ZIP" a -t7z "$ARCHIVE" data >/dev/null',
   ].join(' && ')
-  remote(restoreScript, { silent: true, noThrow: true })
+  remote(backupScript, { silent: true, noThrow: true })
 } catch (e) {
-  info('Warning: restore step failed — continuing to start container')
+  info('Warning: 7z backup step failed — continuing to start container')
 }
 
 info('Docker run command:')

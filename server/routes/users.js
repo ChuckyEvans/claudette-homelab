@@ -30,6 +30,31 @@ router.get('/', requireAuth, requireAdmin, (req, res) => {
   res.json({ total: Number(total), page, per, items })
 })
 
+// POST /api/users - admin only: create a new user
+router.post('/', requireAuth, requireAdmin, async (req, res) => {
+  const { username, password, role } = req.body ?? {}
+  const actor = req.actor
+  if (!username || typeof username !== 'string' || !username.trim()) return res.status(400).json({ error: 'Username required' })
+  if (!password || typeof password !== 'string' || password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' })
+  const uname = username.trim()
+  if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(uname)) return res.status(400).json({ error: 'Invalid username' })
+  const db = getDb()
+  const existing = db.get('SELECT id FROM users WHERE username = ?', [uname])
+  if (existing) return res.status(400).json({ error: 'User already exists' })
+  try {
+    const bcrypt = await import('bcryptjs')
+    const hash = await bcrypt.default.hash(password, 12)
+    const userRole = (role === 'admin') ? 'admin' : 'user'
+    const now = Date.now()
+    db.run('INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)', [uname, hash, userRole, now])
+    audit('users.create', { username: uname, by: actor }, actor, req.ip)
+    return res.json({ ok: true })
+  } catch (e) {
+    console.error('[users] create failed', e && e.stack || e)
+    return res.status(500).json({ error: 'Create failed' })
+  }
+})
+
 // POST /api/users/:username/promote - promote to admin
 router.post('/:username/promote', requireAuth, requireAdmin, (req, res) => {
   const target = req.params.username

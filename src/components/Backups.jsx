@@ -6,6 +6,8 @@ export default function Backups({ setPage: _setPage, addToast }) {
   const [loading, setLoading] = useState(false)
   const [restoring, setRestoring] = useState(false)
   const [confirming, setConfirming] = useState(null) // { file }
+  const [selectedBackup, setSelectedBackup] = useState('')
+  const [backupMode, setBackupMode] = useState('download')
   const fileRef = useRef()
 
   const load = () => {
@@ -17,11 +19,37 @@ export default function Backups({ setPage: _setPage, addToast }) {
 
   const handleCreate = async () => {
     try {
-      await api.system.backup()
-      addToast?.('Backup created and downloaded', 'update')
+      if (backupMode === 'save') {
+        const res = await api.system.backupSave()
+        addToast?.(`Backup saved to Pi backups folder: ${res.file}`, 'update')
+      } else {
+        await api.system.backupDownload()
+        addToast?.('Backup created and downloaded', 'update')
+      }
       setTimeout(load, 1000)
     } catch (e) {
       addToast?.('Backup failed: ' + e.message, 'update')
+    }
+  }
+
+  const doRestoreSelected = async () => {
+    if (!selectedBackup) return
+    setRestoring(true)
+    try {
+      const res = await fetch(`/api/system/backup?name=${encodeURIComponent(selectedBackup)}`, { credentials: 'include' })
+      if (res.status === 401) throw new Error('Not authenticated')
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.error || res.statusText)
+      }
+      const buf = await res.arrayBuffer()
+      await api.system.restore(buf)
+      addToast?.('Restore completed — reloading', 'update')
+      window.location.reload()
+    } catch (e) {
+      addToast?.('Restore failed: ' + e.message, 'update')
+    } finally {
+      setRestoring(false)
     }
   }
 
@@ -58,28 +86,53 @@ export default function Backups({ setPage: _setPage, addToast }) {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-lg font-semibold">Backups</h1>
         <div className="flex items-center gap-2">
-          <button onClick={handleCreate} className="px-3 py-1.5 bg-indigo-600 text-white rounded">Create & Download</button>
+          <select value={backupMode} onChange={e => setBackupMode(e.target.value)} className="px-3 py-1.5 bg-[#0b0b18] border border-[#1a1a30] text-slate-200 rounded">
+            <option value="download">Save to browser</option>
+            <option value="save">Save on Pi</option>
+          </select>
+          <button onClick={handleCreate} className="px-3 py-1.5 bg-indigo-600 text-white rounded">Create Backup</button>
           <label className="px-3 py-1.5 bg-slate-800 text-slate-200 rounded cursor-pointer">
             {restoring ? 'Restoring...' : 'Restore from file'}
-            <input ref={fileRef} type="file" accept=".gz,.claudette" onChange={onFilePicked} className="hidden" />
+            <input ref={fileRef} type="file" accept=".7z,.7zip" onChange={onFilePicked} className="hidden" />
           </label>
           <button onClick={load} className="px-3 py-1.5 bg-white/3 text-white rounded">Refresh</button>
         </div>
       </div>
 
       <div className="bg-[#0b0b18] border border-[#1a1a30] rounded-lg p-4">
-        <p className="text-sm text-slate-400 mb-3">Available backups (newest first). Auto-backups are created per schedule.</p>
+        <p className="text-sm text-slate-400 mb-3">Available 7z backups (newest first). Auto-backups are created per schedule and stored in the Pi backups folder.</p>
+        <div className="flex items-center gap-2 mb-4">
+          <select
+            value={selectedBackup}
+            onChange={e => setSelectedBackup(e.target.value)}
+            className="min-w-0 flex-1 px-3 py-1.5 bg-[#07071a] border border-[#1a1a30] text-slate-200 rounded"
+          >
+            <option value="">Select a backup to restore</option>
+            {items.map(it => (
+              <option key={it.name} value={it.name}>
+                {it.name} • {(it.size / 1024 / 1024).toFixed(2)} MB • {new Date(it.mtime).toLocaleString()}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={doRestoreSelected}
+            disabled={restoring || !selectedBackup}
+            className="px-3 py-1.5 bg-red-600 text-white rounded disabled:opacity-40"
+          >
+            {restoring ? 'Restoring…' : 'Restore Selected'}
+          </button>
+        </div>
         {loading ? (
           <div className="text-sm text-slate-400">Loading…</div>
         ) : items.length === 0 ? (
-          <div className="text-sm text-slate-500">No backups found.</div>
+          <div className="text-sm text-slate-500">No 7z backups found.</div>
         ) : (
           <div className="space-y-2">
             {items.map(it => (
               <div key={it.name} className="flex items-center justify-between bg-[#07071a] border border-[#1a1a30] rounded px-3 py-2">
                 <div>
                   <div className="text-sm text-slate-200">{it.name}</div>
-                  <div className="text-xs text-slate-500">{(it.size/1024).toFixed(1)} KB • {new Date(it.mtime).toLocaleString()}</div>
+                  <div className="text-xs text-slate-500">{(it.size/1024/1024).toFixed(2)} MB • {new Date(it.mtime).toLocaleString()}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <a className="px-3 py-1.5 bg-slate-700 text-slate-200 rounded" href={`/api/system/backup?name=${encodeURIComponent(it.name)}`} target="_blank" rel="noreferrer">Download</a>
@@ -94,7 +147,7 @@ export default function Backups({ setPage: _setPage, addToast }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-[#0d0d1e] border border-[#1a1a30] rounded-xl p-6 w-full max-w-lg mx-4">
             <h2 className="text-base font-semibold text-white mb-2">Confirm Restore</h2>
-            <p className="text-sm text-slate-400 mb-4">You are about to restore from <strong className="text-slate-200">{confirming.file.name}</strong>. This will overwrite the current database and configuration. A pre-restore snapshot will be kept automatically by the server.</p>
+            <p className="text-sm text-slate-400 mb-4">You are about to restore from <strong className="text-slate-200">{confirming.file.name}</strong>. This will overwrite the current database, config, and related data files. A pre-restore snapshot will be kept automatically by the server.</p>
             <div className="flex justify-end gap-2">
               <button onClick={cancelConfirm} className="px-3 py-1.5 bg-white/3 text-white rounded">Cancel</button>
               <button onClick={doRestore} disabled={restoring} className="px-3 py-1.5 bg-red-600 text-white rounded">{restoring ? 'Restoring…' : 'Proceed & Restore'}</button>

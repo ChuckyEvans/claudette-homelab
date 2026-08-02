@@ -1,0 +1,1 @@
+SELECT id, event, ts, substr(payload,1,200) FROM audit_log WHERE ts > datetime('now','-1 hour') ORDER BY ts DESC LIMIT 40;

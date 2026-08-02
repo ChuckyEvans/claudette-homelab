@@ -268,10 +268,10 @@ function ChartTip({ active, payload, label, labelFormatter }) {
         <p className="text-slate-300 font-medium mb-1">{labelFormatter ? labelFormatter(label) : label}</p>
       )}
       {payload.map(p => (
-        <div key={p.dataKey ?? p.name} className="flex items-center gap-2 text-slate-400">
+        <div key={String(p.dataKey ?? p.name)} className="flex items-center gap-2 text-slate-400">
           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: p.fill || p.stroke }} />
           <span className="capitalize">{p.name}:</span>
-          <span className="text-white font-medium ml-1">{p.value}{p.unit ?? ''}</span>
+          <span className="text-white font-medium ml-1">{typeof p.value === 'object' && p.value !== null ? JSON.stringify(p.value).slice(0,120) : String(p.value)}{p.unit ?? ''}</span>
         </div>
       ))}
     </div>
@@ -628,7 +628,7 @@ function MultiSelectDropdown({ label, options, selected, onApply, className }) {
         <div className="absolute top-full left-0 mt-1 z-50 bg-[#0d0d20] border border-[#1a1a35] rounded-xl shadow-2xl min-w-[200px] max-w-[280px]">
           <div className="max-h-52 overflow-y-auto p-2 space-y-0.5">
             {options.map(opt => (
-              <label key={opt.value} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer">
+              <label key={String(opt.value)} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer">
                 <input type="checkbox" checked={pending.has(opt.value)} onChange={() => toggle(opt.value)} className="w-3.5 h-3.5 accent-indigo-500" />
                 <span className="text-xs text-slate-300 truncate">{opt.label}</span>
               </label>
@@ -855,6 +855,8 @@ export default function Reports() {
   const [loading,      setLoading]      = useState(false)
   const [drillDay,     setDrillDay]     = useState(null) // { from, to, label }
   const [internetData,  setInternetData]  = useState(null)
+  const [checkGrouping, setCheckGrouping] = useState('group')
+  const [expandedGroups, setExpandedGroups] = useState(new Set())
   const [speedtestData, setSpeedtestData] = useState(null)
   const [speedLatest, setSpeedLatest] = useState(null)
   const [exporting,     setExporting]     = useState(null)
@@ -862,6 +864,7 @@ export default function Reports() {
   const [runningVpn,    setRunningVpn]    = useState(false)
   const [manualActive,  setManualActive]  = useState(false)
   const [outageData,    setOutageData]    = useState(null)
+  const [outageAllTime, setOutageAllTime] = useState(null)
   const [outageLogPage, setOutageLogPage] = useState(1)
   const [outageLogPer, setOutageLogPer] = useState(25)
   const [outageLog,     setOutageLog]     = useState([])
@@ -1000,8 +1003,9 @@ export default function Reports() {
       // Debug: log the query range sent to the server to help diagnose empty UI lists
       console.debug('[Reports] loadOutages() requesting range', { from, to })
       const od = await api.reports.outages({ from, to })
-      console.debug('[Reports] outages response', { count: (od?.outages?.length ?? 0), totalOutages: od?.totalOutages })
+      console.debug('[Reports] outages response', { count: (od?.outages?.length ?? 0), totalOutages: od?.totalOutages, allTime: od?.allTime })
       setOutageData(od)
+      if (od?.allTime) setOutageAllTime(od.allTime)
     } catch (e) {
       console.error('[Reports/outages]', e)
     }
@@ -1044,16 +1048,28 @@ export default function Reports() {
           gateway: o.diagnostics?.gateway ?? null,
           durationMs: o.durationMs,
           uptimeBeforeMs: o.uptimeBeforeMs,
+          diagnosticOnly: !!o.diagnosticOnly,
           diagnostics: o.diagnostics || null
         }))
         total = rows.length
       }
 
-      // Ensure durationMs and uptimeBeforeMs present for display
+      // Diagnostic rows are capture records, not downtime incidents.
       rows = rows.map(r => {
         const rr = { ...r }
-        if (rr.durationMs == null && rr.outage_ts && rr.captured_at) rr.durationMs = Number(rr.captured_at) - Number(rr.outage_ts)
-        if (rr.uptimeBeforeMs == null && rr.outage_ts && rr.prev_up_ts) rr.uptimeBeforeMs = Number(rr.outage_ts) - Number(rr.prev_up_ts)
+        if (!rr.diagnostics && (rr.traceroute || rr.ping_detail || rr.gateway || rr.captured_at != null)) {
+          let pingDetail = rr.ping_detail ?? null
+          if (typeof pingDetail === 'string') {
+            try { pingDetail = JSON.parse(pingDetail) } catch { pingDetail = null }
+          }
+          rr.diagnostics = {
+            traceroute: rr.traceroute ?? null,
+            ping_detail: pingDetail,
+            gateway: rr.gateway ?? null,
+            captured_at: rr.captured_at ?? null,
+          }
+        }
+        rr.diagnosticOnly = rr.diagnosticOnly === true || rr.durationMs == null
         return rr
       })
       setOutageLog(rows)
@@ -1622,12 +1638,15 @@ export default function Reports() {
                     : selectedOutage.outage_type === 'infra'
                     ? <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-yellow-500/10 border border-yellow-500/30 text-yellow-400">Infra</span>
                     : null}
+                  {selectedOutage.diagnosticOnly && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 border border-amber-500/30 text-amber-300">Diag</span>}
                   {selectedOutage.ongoing && <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 border border-red-500/40 text-red-400 animate-pulse">⚠ ONGOING</span>}
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
                   <span>Started: <span className="text-red-300">{new Date(selectedOutage.start).toLocaleString('en-GB')}</span></span>
-                  {selectedOutage.end && <span>Restored: <span className="text-emerald-400">{new Date(selectedOutage.end).toLocaleString('en-GB')}</span></span>}
-                  <span>Duration: <span className="text-red-300 font-bold">{fmtMs(selectedOutage.durationMs)}{selectedOutage.ongoing ? '+' : ''}</span></span>
+                  {selectedOutage.diagnosticOnly
+                    ? <span>Captured: <span className="text-amber-300">{selectedOutage.captured_at ? new Date(selectedOutage.captured_at).toLocaleString('en-GB') : 'diagnostic row'}</span></span>
+                    : selectedOutage.end && <span>Restored: <span className="text-emerald-400">{new Date(selectedOutage.end).toLocaleString('en-GB')}</span></span>}
+                  <span>{selectedOutage.diagnosticOnly ? 'Capture lag:' : 'Duration:'} <span className={selectedOutage.diagnosticOnly ? 'text-amber-300 font-bold' : 'text-red-300 font-bold'}>{selectedOutage.diagnosticOnly ? 'diagnostic only' : `${fmtMs(selectedOutage.durationMs)}${selectedOutage.ongoing ? '+' : ''}`}</span></span>
                   {selectedOutage.uptimeBeforeMs != null && <span>Was up for: <span className="text-slate-400">{fmtMs(selectedOutage.uptimeBeforeMs)}</span></span>}
                 </div>
               </div>
@@ -1644,16 +1663,18 @@ export default function Reports() {
                   <p className="text-sm font-semibold text-red-300 tabular-nums">{new Date(selectedOutage.start).toLocaleString('en-GB')}</p>
                 </div>
                 <div className="rounded-xl px-4 py-3 border border-[#1a1a30] bg-[#0a0a18]">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Restored</p>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">{selectedOutage.diagnosticOnly ? 'Captured' : 'Restored'}</p>
                   <p className="text-sm font-semibold tabular-nums">
-                    {selectedOutage.ongoing
+                    {selectedOutage.diagnosticOnly
+                      ? <span className="text-amber-300">Diagnostic capture</span>
+                      : selectedOutage.ongoing
                       ? <span className="text-red-400 animate-pulse">Still offline</span>
                       : <span className="text-emerald-400">{new Date(selectedOutage.end).toLocaleString('en-GB')}</span>}
                   </p>
                 </div>
                 <div className="rounded-xl px-4 py-3 border border-red-500/20 bg-[#0a0a18]">
                   <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Down For</p>
-                  <p className="text-xl font-bold text-red-300 tabular-nums">{fmtMs(selectedOutage.durationMs)}{selectedOutage.ongoing ? '+' : ''}</p>
+                  <p className={`text-xl font-bold tabular-nums ${selectedOutage.diagnosticOnly ? 'text-amber-300' : 'text-red-300'}`}>{selectedOutage.diagnosticOnly ? 'diagnostic only' : `${fmtMs(selectedOutage.durationMs)}${selectedOutage.ongoing ? '+' : ''}`}</p>
                 </div>
                 {selectedOutage.uptimeBeforeMs != null && (
                   <div className="rounded-xl px-4 py-3 border border-[#1a1a30] bg-[#0a0a18]">
@@ -2208,7 +2229,7 @@ export default function Reports() {
                   <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                     <span className="text-slate-500 uppercase tracking-wide">Pinging</span>
                     {networkConfig.connectivity_hosts.map(h => (
-                      <span key={h} className="font-mono text-slate-600 bg-[#0a0a18] border border-[#1a1a30] px-1.5 py-0.5 rounded">{h}</span>
+                      <span key={h.host ?? h.label ?? JSON.stringify(h)} className="font-mono text-slate-600 bg-[#0a0a18] border border-[#1a1a30] px-1.5 py-0.5 rounded">{h.label ?? h.host}</span>
                     ))}
                     <span className="text-slate-500">+ http://connectivity-check.ubuntu.com</span>
                   </div>
@@ -2419,6 +2440,9 @@ export default function Reports() {
                     <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
                     <p className="text-xs font-semibold text-red-300">Outage Log</p>
                     <span className="text-[10px] text-slate-500">{outageData.totalOutages} incident{outageData.totalOutages !== 1 ? 's' : ''} · {fmtMs(outageData.totalDowntimeMs)} total downtime</span>
+                    {outageAllTime && (
+                      <span className="text-[10px] text-slate-400 ml-3">All-time: {outageAllTime.totalOutages} · {fmtMs(outageAllTime.totalDowntimeMs)}</span>
+                    )}
                   </div>
                   <button
                     onClick={handleCopyIspReport}
@@ -2450,26 +2474,30 @@ export default function Reports() {
                       {outageLog.map((o, i) => (
                         <tr key={i}
                           onClick={() => setSelectedOutage(o)}
-                          className={`cursor-pointer hover:bg-red-950/30 transition-colors ${o.ongoing ? 'bg-red-950/20' : ''}`}>
+                          className={`cursor-pointer hover:bg-red-950/30 transition-colors ${o.ongoing ? 'bg-red-950/20' : ''} ${o.diagnosticOnly ? 'bg-amber-950/20' : ''}`}>
                           <td className="px-4 py-2 text-slate-500 tabular-nums">{i + 1}</td>
                           <td className="px-4 py-2 text-red-300 tabular-nums whitespace-nowrap">{new Date(o.outage_ts || o.captured_at || o.start).toLocaleString('en-GB')}</td>
                           <td className="px-4 py-2 tabular-nums whitespace-nowrap">
-                            {o.ongoing
+                            {o.diagnosticOnly
+                              ? <span className="text-amber-300 font-semibold">Diagnostic capture</span>
+                              : o.ongoing
                               ? <span className="text-red-400 font-semibold">&#9888; Still offline</span>
                               : <span className="text-emerald-400">{new Date(o.captured_at || o.end).toLocaleString('en-GB')}</span>}
                           </td>
                           <td className="px-4 py-2">
-                            {o.outage_type === 'isp'
+                            {o.diagnosticOnly
+                              ? <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300">Diag</span>
+                              : o.outage_type === 'isp'
                               ? <span className="px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/30 text-orange-400">ISP</span>
                               : o.outage_type === 'infra'
                               ? <span className="px-1.5 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-yellow-400" title="Local gateway unreachable — likely an infrastructure issue, not the ISP">Infra</span>
                               : <span className="text-slate-600">—</span>}
                           </td>
                           <td className="px-4 py-2 text-right font-bold tabular-nums text-red-300">
-                            {fmtMs(o.durationMs)}{o.ongoing ? '+' : ''}
+                            {o.diagnosticOnly ? <span className="text-amber-300">—</span> : `${fmtMs(o.durationMs)}${o.ongoing ? '+' : ''}`}
                           </td>
                           <td className="px-4 py-2 text-right tabular-nums text-slate-400">
-                            {o.uptimeBeforeMs != null ? fmtMs(o.uptimeBeforeMs) : <span className="text-slate-600">—</span>}
+                            {o.diagnosticOnly ? <span className="text-slate-600">—</span> : (o.uptimeBeforeMs != null ? fmtMs(o.uptimeBeforeMs) : <span className="text-slate-600">—</span>)}
                           </td>
                           <td className="px-4 py-2 text-right">
                             {(() => {
@@ -2556,8 +2584,53 @@ export default function Reports() {
                   }
                   return true
                 })
+
+                function buildGroups(items, groupingMode) {
+                  if (!items || items.length === 0) return []
+                  if (groupingMode === 'flat' || groupingMode === 'expanded') return items.map(c => ({ type: 'check', check: c }))
+                  const groups = []
+                  let i = 0
+                  while (i < items.length) {
+                    const cur = items[i]
+                    if (cur.ok) {
+                      const seq = []
+                      let j = i
+                      while (j < items.length && items[j].ok) { seq.push(items[j]); j++ }
+                      if (seq.length > 1) {
+                        groups.push({ type: 'group', start: seq[0].ts, end: seq[seq.length-1].ts, count: seq.length, avgMs: Math.round(seq.reduce((s, x) => s + (x.avgMs || 0), 0) / seq.length) || null, hostCount: Math.round(seq.reduce((s, x) => s + (x.hostCount || 0), 0) / seq.length) || null, children: seq })
+                      } else {
+                        groups.push({ type: 'check', check: seq[0] })
+                      }
+                      i = j
+                    } else {
+                      groups.push({ type: 'check', check: cur })
+                      i++
+                    }
+                  }
+                  return groups
+                }
+
+                const groups = buildGroups(filtered, checkGrouping)
+
+                function toggleGroup(idx) {
+                  setExpandedGroups(prev => {
+                    const s = new Set(prev)
+                    if (s.has(idx)) s.delete(idx); else s.add(idx)
+                    return s
+                  })
+                }
+
                 return (
                 <div className="overflow-x-auto max-h-96 overflow-y-auto text-[11px]">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs text-slate-400">Mode:</div>
+                    <div className="flex items-center gap-2">
+                      <button className={`px-2 py-1 text-xs rounded ${checkGrouping === 'group' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 border border-[#1a1a30]'}`} onClick={() => { setCheckGrouping('group'); setExpandedGroups(new Set()) }}>Grouped</button>
+                      <button className={`px-2 py-1 text-xs rounded ${checkGrouping === 'expanded' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 border border-[#1a1a30]'}`} onClick={() => { setCheckGrouping('expanded'); setExpandedGroups(new Set()) }}>Expanded</button>
+                      <button className={`px-2 py-1 text-xs rounded ${checkGrouping === 'flat' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 border border-[#1a1a30]'}`} onClick={() => { setCheckGrouping('flat'); setExpandedGroups(new Set()) }}>Flat</button>
+                      <button className="px-2 py-1 text-xs rounded border text-slate-400" onClick={() => { setExpandedGroups(new Set()) }}>Collapse All</button>
+                    </div>
+                  </div>
                   <table className="w-full">
                     <thead className="sticky top-0 bg-[#0a0a18]">
                       <tr className="border-b border-[#1a1a30]">
@@ -2565,47 +2638,56 @@ export default function Reports() {
                         <th className="px-2 py-1.5 text-left text-sky-400/70">Direct Status</th>
                         <th className="px-2 py-1.5 text-left text-violet-400/70">VPN</th>
                         <th className="px-2 py-1.5 text-left text-slate-400">Mode</th>
-                <th className="px-2 py-1.5 text-right text-slate-400">Direct{ispConfig?.name ? <span className="text-slate-500 font-normal ml-1">({ispConfig.name})</span> : ''}</th>
+                        <th className="px-2 py-1.5 text-right text-slate-400">Direct{ispConfig?.name ? <span className="text-slate-500 font-normal ml-1">({ispConfig.name})</span> : ''}</th>
                         <th className="px-2 py-1.5 text-right text-slate-400">Hosts</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((check, i) => (
-                        <tr key={i} className="border-b border-[#1a1a30] hover:bg-[#15151f] cursor-pointer" onClick={() => setSelectedCheck(check)}>
-                          <td className="px-2 py-1.5 text-slate-400">{new Date(check.ts).toLocaleString('en-GB')}</td>
-                          <td className="px-2 py-1.5">
-                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${
-                              check.ok
-                                ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
-                                : 'bg-red-500/15 text-red-400 border-red-500/20'
-                            }`}>{check.ok ? 'Online' : 'Offline'}</span>
-                          </td>
-                          <td className="px-2 py-1.5">
-                            {check.vpn_up
-                              ? <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border ${
-                                  check.vpn_ok !== false
-                                    ? 'bg-violet-500/10 text-violet-400 border-violet-500/20'
-                                    : 'bg-red-500/15 text-red-400 border-red-500/20'
-                                }`}>{check.vpn_ok !== false ? '✓' : '✗'}</span>
-                              : <span className="text-slate-700 text-[10px]">—</span>
-                            }
-                          </td>
-                          <td className="px-2 py-1.5">
-                            {check.outage_mode
-                              ? <span title={`Fast-polling every ${check.interval_seconds}s (attempt ${check.attempt_count})`}
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-400 cursor-default">
-                                  <Zap className="w-2.5 h-2.5" />{check.interval_seconds}s
-                                </span>
-                              : <span className="text-slate-700 text-[10px]">—</span>
-                            }
-                          </td>
-                          <td className="px-2 py-1.5 text-right text-slate-400">{check.avgMs ?? '—'} ms</td>
-                          <td className="px-2 py-1.5 text-right text-slate-400">
-                            <span className="text-emerald-400">{check.okCount}</span> / {check.hostCount}
-                          </td>
-                        </tr>
-                      ))}
-                      {filtered.length === 0 && (
+                      {groups.map((item, gi) => {
+                        if (item.type === 'group') {
+                          const collapsed = !expandedGroups.has(gi)
+                          return (
+                            <>
+                              <tr key={`g-${gi}`} className="border-b border-[#1a1a30] bg-[#071021]">
+                                <td className="px-2 py-1.5 text-slate-300">
+                                  <div className="flex items-center gap-2">
+                                    <button className="px-2 py-0.5 text-xs border rounded text-slate-300" onClick={(e) => { e.stopPropagation(); toggleGroup(gi) }}>{collapsed ? `▸ ${item.count}` : `▾ ${item.count}`}</button>
+                                    <span>{new Date(item.start).toLocaleString('en-GB')} {item.end && item.end !== item.start ? `– ${new Date(item.end).toLocaleTimeString('en-GB')}` : ''}</span>
+                                  </div>
+                                </td>
+                                <td className="px-2 py-1.5"><span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold border bg-sky-500/10 text-sky-400 border-sky-500/20">Online</span></td>
+                                <td className="px-2 py-1.5 text-slate-400">—</td>
+                                <td className="px-2 py-1.5 text-slate-400">{item.avgMs ?? '—'} ms</td>
+                                <td className="px-2 py-1.5 text-right text-slate-400">{item.avgMs ?? '—'}</td>
+                                <td className="px-2 py-1.5 text-right text-slate-400">{item.hostCount ?? '—'}</td>
+                              </tr>
+                              {!collapsed && item.children.map((check, ci) => (
+                                <tr key={`g-${gi}-c-${ci}`} className="border-b border-[#1a1a30] hover:bg-[#15151f] cursor-pointer" onClick={() => setSelectedCheck(check)}>
+                                  <td className="px-2 py-1.5 text-slate-400">{new Date(check.ts).toLocaleString('en-GB')}</td>
+                                  <td className="px-2 py-1.5"><span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border bg-sky-500/10 text-sky-400 border-sky-500/20`}>Online</span></td>
+                                  <td className="px-2 py-1.5">{check.vpn_up ? (check.vpn_ok !== false ? <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border bg-violet-500/10 text-violet-400 border-violet-500/20`}>✓</span> : <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border bg-red-500/15 text-red-400 border-red-500/20`}>✗</span>) : <span className="text-slate-700 text-[10px]">—</span>}</td>
+                                  <td className="px-2 py-1.5">{check.outage_mode ? <span title={`Fast-polling every ${check.interval_seconds}s (attempt ${check.attempt_count})`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-400 cursor-default"><Zap className="w-2.5 h-2.5" />{check.interval_seconds}s</span> : <span className="text-slate-700 text-[10px]">—</span>}</td>
+                                  <td className="px-2 py-1.5 text-right text-slate-400">{check.avgMs ?? '—'} ms</td>
+                                  <td className="px-2 py-1.5 text-right text-slate-400"><span className="text-emerald-400">{check.okCount}</span> / {check.hostCount}</td>
+                                </tr>
+                              ))}
+                            </>
+                          )
+                        }
+                        // single check row
+                        const check = item.check
+                        return (
+                          <tr key={`c-${gi}`} className="border-b border-[#1a1a30] hover:bg-[#15151f] cursor-pointer" onClick={() => setSelectedCheck(check)}>
+                            <td className="px-2 py-1.5 text-slate-400">{new Date(check.ts).toLocaleString('en-GB')}</td>
+                            <td className="px-2 py-1.5"><span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${check.ok ? 'bg-sky-500/10 text-sky-400 border-sky-500/20' : 'bg-red-500/15 text-red-400 border-red-500/20'}`}>{check.ok ? 'Online' : 'Offline'}</span></td>
+                            <td className="px-2 py-1.5">{check.vpn_up ? (check.vpn_ok !== false ? <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border bg-violet-500/10 text-violet-400 border-violet-500/20`}>✓</span> : <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border bg-red-500/15 text-red-400 border-red-500/20`}>✗</span>) : <span className="text-slate-700 text-[10px]">—</span>}</td>
+                            <td className="px-2 py-1.5">{check.outage_mode ? <span title={`Fast-polling every ${check.interval_seconds}s (attempt ${check.attempt_count})`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-400 cursor-default"><Zap className="w-2.5 h-2.5" />{check.interval_seconds}s</span> : <span className="text-slate-700 text-[10px]">—</span>}</td>
+                            <td className="px-2 py-1.5 text-right text-slate-400">{check.avgMs ?? '—'} ms</td>
+                            <td className="px-2 py-1.5 text-right text-slate-400"><span className="text-emerald-400">{check.okCount}</span> / {check.hostCount}</td>
+                          </tr>
+                        )
+                      })}
+                      {groups.length === 0 && (
                         <tr><td colSpan={6} className="px-2 py-6 text-center text-slate-500 text-xs">No checks match the filter</td></tr>
                       )}
                     </tbody>
@@ -2662,7 +2744,7 @@ export default function Reports() {
                     <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                       <span className="text-slate-500 uppercase tracking-wide">Pinging via VPN</span>
                       {networkConfig.connectivity_hosts.map(h => (
-                        <span key={h} className="font-mono text-slate-500 bg-[#0a0a18] border border-[#1a1a30] px-1.5 py-0.5 rounded">{h}</span>
+                        <span key={h.host ?? h.label ?? JSON.stringify(h)} className="font-mono text-slate-500 bg-[#0a0a18] border border-[#1a1a30] px-1.5 py-0.5 rounded">{h.label ?? h.host}</span>
                       ))}
                     </div>
                   )}

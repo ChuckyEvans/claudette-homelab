@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenVPN connection to us8373
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/openvpn --config /etc/openvpn/ovpn_tcp/us8373.nordvpn.com.tcp.ovpn --auth-user-pass /etc/openvpn/auth.txt --log /var/log/openvpn-us8373.log --writepid /run/openvpn-us8373.pid
+ExecStartPost=/usr/local/bin/vpn-routing-apply.sh
+ExecStopPost=/usr/local/bin/vpn-routing-remove.sh
+Restart=on-failure
+RestartSec=5s
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=multi-user.target

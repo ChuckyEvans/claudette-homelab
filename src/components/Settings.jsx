@@ -762,7 +762,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
   const [pingInterval,          setPingInterval]          = useState(5)
   const [deepScanHour,          setDeepScanHour]          = useState(4)
   const [retentionDays,         setRetentionDays]         = useState(365)
-  const [connectivityHosts,     setConnectivityHosts]     = useState(['1.1.1.1'])
+  const [connectivityHosts,     setConnectivityHosts]     = useState([{ host: '1.1.1.1', enabled: true, retries: 1 }])
   const [fallbackDns,           setFallbackDns]           = useState([])
   const [vpnInterface,          setVpnInterface]          = useState('')
   const [dormantAfterDays,      setDormantAfterDays]      = useState(3)
@@ -828,7 +828,11 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
         setPingInterval(cfg.schedule?.ping_interval_minutes ?? 5)
         setDeepScanHour(cfg.schedule?.deep_scan_hour ?? 4)
         setRetentionDays(cfg.retention?.days ?? 365)
-        setConnectivityHosts(cfg.network?.connectivity_hosts ?? ['1.1.1.1'])
+        // Normalize connectivity hosts to objects: { host, enabled, retries }
+        const raw = cfg.network?.connectivity_hosts ?? ['1.1.1.1']
+        const defRetries = cfg.network?.ping_retries ?? 1
+        const mapped = (Array.isArray(raw) ? raw : []).map(h => typeof h === 'string' ? { host: h, enabled: true, retries: defRetries, label: '', hint: '' } : { host: h.host || '', enabled: h.enabled !== false, retries: h.retries ?? defRetries, label: h.label ?? '', hint: h.hint ?? '' })
+        setConnectivityHosts(mapped.length ? mapped : [{ host: '1.1.1.1', enabled: true, retries: defRetries, label: '', hint: '' }])
         setFallbackDns(cfg.network?.fallback_dns ?? [])
         setVpnInterface(cfg.network?.vpn_interface ?? '')
         setDormantAfterDays(cfg.network?.dormant_after_days ?? 3)
@@ -967,7 +971,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
     try {
       await api.config.save({
         pi: { host: piHost, ssh_user: piUser, ssh_key: sshKey },
-        network: { subnets, connectivity_hosts: connectivityHosts.filter(h => h.trim()), fallback_dns: fallbackDns.filter(h => h.trim()), dormant_after_days: parseInt(dormantAfterDays) || 3, skull_after_days: parseInt(skullAfterDays) || 7, vpn_interface: vpnInterface.trim() || undefined },
+        network: { subnets, connectivity_hosts: connectivityHosts.map(h => ({ host: h.host, enabled: h.enabled !== false, retries: h.retries || 1, label: h.label || undefined, hint: h.hint || undefined })), ping_retries: undefined, fallback_dns: fallbackDns.filter(h => h.trim()), dormant_after_days: parseInt(dormantAfterDays) || 3, skull_after_days: parseInt(skullAfterDays) || 7, vpn_interface: vpnInterface.trim() || undefined },
         schedule: schedulePayload(),
         retention: { days: parseInt(retentionDays) },
         services: services.filter(s => s.name && s.url),
@@ -1166,23 +1170,43 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
           </section>
 
           <section>
-            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-4">
               <SectionHeading>Connectivity Check Hosts</SectionHeading>
-              <button onClick={() => { setConnectivityHosts(p => [...p, '']); markDirty() }}
+              <button onClick={() => { setConnectivityHosts(p => [...p, { host: '', enabled: true, retries: 1 }]); markDirty() }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/25 hover:border-indigo-500/50 rounded-lg transition-colors">
                 <Plus className="w-3.5 h-3.5" />Add Host
               </button>
             </div>
             <p className="text-[11px] text-slate-600 mb-3">IPs to ping for internet connectivity checks. Default: 1.1.1.1.</p>
-            <div className="space-y-2 max-w-xs">
+              <div className="space-y-2 max-w-md">
               {connectivityHosts.map((h, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input value={h} onChange={e => setConnectivityHosts(p => p.map((x, j) => j === i ? e.target.value : x))}
-                    placeholder="1.1.1.1"
-                    className="flex-1 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 outline-none transition-colors font-mono" />
-                  <button onClick={() => { setConnectivityHosts(p => p.filter((_, j) => j !== i)); markDirty() }} className="p-1.5 text-slate-600 hover:text-red-400 transition-colors">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                <div key={i} className="w-full">
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" checked={!!h.enabled} onChange={e => { setConnectivityHosts(p => p.map((x, j) => j === i ? { ...x, enabled: e.target.checked } : x)); markDirty() }} className="w-4 h-4" />
+                    <input value={h.host} onChange={e => setConnectivityHosts(p => p.map((x, j) => j === i ? { ...x, host: e.target.value } : x))}
+                      placeholder="1.1.1.1 or connectivity-check.ubuntu.com"
+                      className="flex-1 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 outline-none transition-colors font-mono" />
+                    <input type="number" min="1" max="10" value={h.retries || 1} onChange={e => setConnectivityHosts(p => p.map((x, j) => j === i ? { ...x, retries: Math.max(1, parseInt(e.target.value) || 1) } : x))}
+                      className="w-20 bg-[#080812] border border-[#1a1a30] rounded-lg px-2 py-2 text-sm text-slate-200 outline-none" />
+                    <button onClick={async () => {
+                        markDirty()
+                        try {
+                          const res = await api.services.pingRemote(h.host, h.retries || 1)
+                          showToast(`${h.host} — ${res.ok ? 'reachable' : 'unreachable'} (${res.ms} ms)`, res.ok ? 'success' : 'error')
+                        } catch (err) { showToast(err.message, 'error') }
+                      }} className="px-2 py-1 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">Test</button>
+                    <button onClick={() => { setConnectivityHosts(p => p.filter((_, j) => j !== i)); markDirty() }} className="p-1.5 text-slate-600 hover:text-red-400 transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <input value={h.label || ''} onChange={e => setConnectivityHosts(p => p.map((x, j) => j === i ? { ...x, label: e.target.value } : x))}
+                      placeholder="Label (e.g. Cloudflare DNS)"
+                      className="w-40 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 outline-none transition-colors" />
+                    <input value={h.hint || ''} onChange={e => setConnectivityHosts(p => p.map((x, j) => j === i ? { ...x, hint: e.target.value } : x))}
+                      placeholder="Hint (optional)"
+                      className="flex-1 bg-[#080812] border border-[#1a1a30] focus:border-indigo-500/50 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 outline-none transition-colors" />
+                  </div>
                 </div>
               ))}
             </div>
@@ -1975,7 +1999,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
             <div className="space-y-4">
               <Field
                 label="Auto-backup every N days (0 = disabled)"
-                hint="Creates a .claudette.gz backup in the claudette-data Docker volume on the Pi (/app/data/backups/). Same disk as the database — useful for accidental changes, not hardware failure. For offsite copies, use Backup Now."
+                hint="Creates a .7z backup in the claudette-data Docker volume on the Pi (/app/data/backups/). Same disk as the database — useful for accidental changes, not hardware failure. For offsite copies, use Save to Browser."
                 type="number" min="0" max="365"
                 value={backupIntervalDays}
                 onChange={e => setBackupIntervalDays(e.target.value)}
@@ -1994,7 +2018,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                   onClick={async () => {
                     try {
                       setBackingUp(true)
-                      await api.system.backup()
+                      await api.system.backupDownload()
                       showToast('Backup downloaded')
                     } catch (err) {
                       showToast(err.message, 'error')
@@ -2007,12 +2031,29 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                 >
                   {backingUp
                     ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" />Backing up…</>
-                    : <><Download className="w-3.5 h-3.5" />Backup Now</>}
+                    : <><Download className="w-3.5 h-3.5" />Save to Browser</>}
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      setBackingUp(true)
+                      const res = await api.system.backupSave()
+                      showToast(`Saved on Pi: ${res.file}`)
+                    } catch (err) {
+                      showToast(err.message, 'error')
+                    } finally {
+                      setBackingUp(false)
+                    }
+                  }}
+                  disabled={backingUp || restoring}
+                  className="flex items-center gap-2 px-3 py-2 text-xs border border-[#1a1a30] text-slate-400 hover:text-slate-200 hover:border-[#2a2a45] rounded-lg transition-colors disabled:opacity-40"
+                >
+                  <Download className="w-3.5 h-3.5" />Save on Pi
                 </button>
                 <input
                   ref={restoreInputRef}
                   type="file"
-                  accept=".claudette.gz"
+                  accept=".7z,.7zip"
                   className="hidden"
                   onChange={async e => {
                     e.stopPropagation() // don't mark settings dirty
@@ -2046,7 +2087,7 @@ export default function Settings({ onOpenWizard, configStatus, onDirtyChange }) 
                     : <><Upload className="w-3.5 h-3.5" />Restore from File</>}
                 </button>
               </div>
-              <p className="text-[11px] text-slate-600">Backup files (.claudette.gz) are gzip-compressed and contain the full database and config. Keep them somewhere safe.</p>
+              <p className="text-[11px] text-slate-600">Backup files (.7z/.7zip) contain the full data snapshot needed for restore. Keep them somewhere safe.</p>
             </div>
             <div className="mt-6">
               <SectionHeading>Pi Backups</SectionHeading>

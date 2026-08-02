@@ -1,0 +1,552 @@
+[
+  {
+    "start": 1780355242126,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1780355781157,
+    "duration_ms": 539031,
+    "uptime_before_ms": null,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1780381805281,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782328362702,
+    "duration_ms": 1946557421,
+    "uptime_before_ms": 303098,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782336906019,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782337801543,
+    "duration_ms": 895524,
+    "uptime_before_ms": 8543317,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782342306272,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782342601658,
+    "duration_ms": 295386,
+    "uptime_before_ms": 4504729,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782360305877,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782361201435,
+    "duration_ms": 895558,
+    "uptime_before_ms": 604325,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782365106208,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782366301509,
+    "duration_ms": 1195301,
+    "uptime_before_ms": 304822,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782367506127,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782373201632,
+    "duration_ms": 5695505,
+    "uptime_before_ms": 1204618,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782373806194,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782379500748,
+    "duration_ms": 5694554,
+    "uptime_before_ms": 604562,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782384005192,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782392101643,
+    "duration_ms": 8096451,
+    "uptime_before_ms": 1503632,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782402906297,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782405601354,
+    "duration_ms": 2695057,
+    "uptime_before_ms": 1805744,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782406279514,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782406572719,
+    "duration_ms": 293205,
+    "uptime_before_ms": 678160,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782406883611,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782408302631,
+    "duration_ms": 1419020,
+    "uptime_before_ms": 310892,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782410105956,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782410701494,
+    "duration_ms": 595538,
+    "uptime_before_ms": 1803325,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782411306248,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782417000846,
+    "duration_ms": 5694598,
+    "uptime_before_ms": 304693,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782450606326,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782455101654,
+    "duration_ms": 4495328,
+    "uptime_before_ms": 9304862,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782455706136,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782456301572,
+    "duration_ms": 595436,
+    "uptime_before_ms": 302122,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782456906092,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782458401539,
+    "duration_ms": 1495447,
+    "uptime_before_ms": 604520,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782463205974,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782463501165,
+    "duration_ms": 295191,
+    "uptime_before_ms": 304988,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782463805838,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782464101410,
+    "duration_ms": 295572,
+    "uptime_before_ms": 304673,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782464705600,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782465601489,
+    "duration_ms": 895889,
+    "uptime_before_ms": 305053,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782466310925,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782466614856,
+    "duration_ms": 303931,
+    "uptime_before_ms": 304026,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782466931349,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782467807419,
+    "duration_ms": 876070,
+    "uptime_before_ms": 316493,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782468707604,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782469301662,
+    "duration_ms": 594058,
+    "uptime_before_ms": 577540,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782469908092,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782471402352,
+    "duration_ms": 1494260,
+    "uptime_before_ms": 606430,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782471724849,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782472301582,
+    "duration_ms": 576733,
+    "uptime_before_ms": 322497,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782473208475,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782473812367,
+    "duration_ms": 603892,
+    "uptime_before_ms": 301578,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782512106507,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782513001851,
+    "duration_ms": 895344,
+    "uptime_before_ms": 1684932,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782516306099,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782516602816,
+    "duration_ms": 296717,
+    "uptime_before_ms": 3004082,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782522906267,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782524401297,
+    "duration_ms": 1495030,
+    "uptime_before_ms": 6004784,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782530408107,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782531301259,
+    "duration_ms": 893152,
+    "uptime_before_ms": 6006810,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782531605746,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782531901027,
+    "duration_ms": 295281,
+    "uptime_before_ms": 304487,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782532805286,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782533103018,
+    "duration_ms": 297732,
+    "uptime_before_ms": 303811,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782533705673,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782534001274,
+    "duration_ms": 295601,
+    "uptime_before_ms": 305132,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782534305140,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782535201356,
+    "duration_ms": 896216,
+    "uptime_before_ms": 303866,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782535505578,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782535800555,
+    "duration_ms": 294977,
+    "uptime_before_ms": 304222,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782536106017,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782536401429,
+    "duration_ms": 295412,
+    "uptime_before_ms": 305462,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782537608514,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782538203711,
+    "duration_ms": 595197,
+    "uptime_before_ms": 307967,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782539407039,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782540302636,
+    "duration_ms": 895597,
+    "uptime_before_ms": 304297,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782540607486,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782541802865,
+    "duration_ms": 1195379,
+    "uptime_before_ms": 304850,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782543006782,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782543303032,
+    "duration_ms": 296250,
+    "uptime_before_ms": 304162,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782544206992,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782544803240,
+    "duration_ms": 596248,
+    "uptime_before_ms": 304274,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782546007411,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782546305746,
+    "duration_ms": 298335,
+    "uptime_before_ms": 304481,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782570462789,
+    "host": "1.1.1.1",
+    "end": 1782570674788,
+    "duration_ms": 211999,
+    "uptime_before_ms": 23255001,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782547207788,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782570902302,
+    "duration_ms": 23694514,
+    "uptime_before_ms": 304427,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782572728595,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782578210010,
+    "duration_ms": 5481415,
+    "uptime_before_ms": 925919,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782578476904,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782578814438,
+    "duration_ms": 337534,
+    "uptime_before_ms": 266894,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782579713149,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782579975443,
+    "duration_ms": 262294,
+    "uptime_before_ms": 898711,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782595177198,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782596101250,
+    "duration_ms": 924052,
+    "uptime_before_ms": 200997,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782597005824,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782597901726,
+    "duration_ms": 895902,
+    "uptime_before_ms": 255390,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782597907467,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782598201479,
+    "duration_ms": 294012,
+    "uptime_before_ms": 5741,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782598807042,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782599101296,
+    "duration_ms": 294254,
+    "uptime_before_ms": 304840,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782599407406,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782599700995,
+    "duration_ms": 293589,
+    "uptime_before_ms": 306110,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782600006133,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": 1782600301818,
+    "duration_ms": 295685,
+    "uptime_before_ms": 305138,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1785353194094,
+    "host": "1.1.1.1",
+    "end": 1785353489540,
+    "duration_ms": 295446,
+    "uptime_before_ms": 605593,
+    "outage_type": null,
+    "ongoing": 0,
+    "created_at": 1785358663215
+  },
+  {
+    "start": 1782600606515,
+    "host": "http://connectivity-check.ubuntu.com",
+    "end": null,
+    "duration_ms": 2758056700,
+    "uptime_before_ms": 304697,
+    "outage_type": null,
+    "ongoing": 1,
+    "created_at": 1785358663215
+  }
+]

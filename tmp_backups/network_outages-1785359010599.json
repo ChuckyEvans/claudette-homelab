@@ -1,0 +1,20 @@
+[
+  {
+    "start": 1782521095090,
+    "end": 1782521155090,
+    "duration_ms": 60000,
+    "uptime_before_ms": null,
+    "outage_type": "isp",
+    "ongoing": 0,
+    "created_at": 1785358664695
+  },
+  {
+    "start": 1782570462758,
+    "end": 1782570674774,
+    "duration_ms": 212016,
+    "uptime_before_ms": null,
+    "outage_type": "unknown",
+    "ongoing": 0,
+    "created_at": 1785358664695
+  }
+]

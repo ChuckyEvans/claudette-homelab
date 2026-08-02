@@ -18,6 +18,7 @@ const AuditLog      = lazy(() => import('./components/AuditLog.jsx'))
 const Settings      = lazy(() => import('./components/Settings.jsx'))
 const AboutPage     = lazy(() => import('./components/AboutPage.jsx'))
 const Reports       = lazy(() => import('./components/Reports.jsx'))
+const OutageInspector = lazy(() => import('./components/OutageInspector.jsx'))
 const Backups       = lazy(() => import('./components/Backups.jsx'))
 const LogsPage      = lazy(() => import('./components/LogsPage.jsx'))
 const UsersPage      = lazy(() => import('./components/Users.jsx'))
@@ -414,6 +415,7 @@ export default function App() {
     system: SystemStats,
     audit: AuditLog,
     reports:  Reports,
+    'outage-inspector': OutageInspector,
     backups:  Backups,
     logs:     LogsPage,
     users:    UsersPage,

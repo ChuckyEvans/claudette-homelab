@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply VPN policy routing for Transmission and Squid
+After=network-online.target openvpn-us8373.service
+Wants=network-online.target openvpn-us8373.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vpn-routing-apply.sh
+ExecStop=/usr/local/bin/vpn-routing-remove.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

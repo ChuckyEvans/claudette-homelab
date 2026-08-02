@@ -4,7 +4,7 @@ import { fetchThreatFeedText, isRetryableThreatFeedError } from '../../server/ro
 describe('threat feed retries', () => {
   it('retries transient 502s and eventually returns text', async () => {
     const errors = []
-    vi.spyOn(console, 'error').mockImplementation((...args) => { errors.push(args.join(' ')) })
+    vi.spyOn(console, 'warn').mockImplementation((...args) => { errors.push(args.join(' ')) })
 
     let attempts = 0
     const fetchFn = vi.fn(async () => {

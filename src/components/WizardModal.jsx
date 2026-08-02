@@ -87,7 +87,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
     threatInterval: 6,
     deepScanHour: 4,
     retentionDays: 90,
-    connectivityHosts: ['1.1.1.1'],
+    connectivityHosts: [{ host: '1.1.1.1', enabled: true, retries: 1 }],
     vpnInterface: '',
     services: [],
     theme:    'dark',
@@ -145,7 +145,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
           threatInterval: cfg.schedule?.threat_interval_hours  ?? 6,
           deepScanHour:   cfg.schedule?.deep_scan_hour         ?? 4,
           retentionDays:  cfg.retention?.days                  ?? 90,
-          connectivityHosts: cfg.network?.connectivity_hosts   ?? ['1.1.1.1'],
+          connectivityHosts: (Array.isArray(cfg.network?.connectivity_hosts) ? cfg.network.connectivity_hosts.map(h => typeof h === 'string' ? { host: h, enabled: true, retries: cfg.network?.ping_retries ?? 1 } : { host: h.host || '', enabled: h.enabled !== false, retries: h.retries ?? cfg.network?.ping_retries ?? 1 }) : [{ host: '1.1.1.1', enabled: true, retries: cfg.network?.ping_retries ?? 1 }]),
           vpnInterface:      cfg.network?.vpn_interface         ?? '',
           services:       cfg.services ?? [],
           theme:          cfg.ui?.theme  ?? 'dark',
@@ -191,7 +191,7 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
     try {
       await api.config.save({
         pi:       { host: form.piHost, ssh_user: form.piUser, ssh_key: form.sshKey },
-        network:  { subnets: form.subnets.filter(s => s.trim()), connectivity_hosts: form.connectivityHosts.filter(h => h.trim()), vpn_interface: (form.vpnInterface ?? '').trim() || undefined },
+        network:  { subnets: form.subnets.filter(s => s.trim()), connectivity_hosts: form.connectivityHosts.map(h => ({ host: h.host, enabled: h.enabled !== false, retries: h.retries || 1 })), vpn_interface: (form.vpnInterface ?? '').trim() || undefined },
         schedule: { check_interval_minutes: parseInt(form.checkInterval) || 5, internet_check_minutes: parseInt(form.internetCheckInterval) || 5, internet_outage_check_seconds: Math.max(5, parseInt(form.internetOutageCheckSecs) || 10), speedtest_interval_hours: parseInt(form.speedtestInterval) || 1, threat_interval_hours: parseInt(form.threatInterval) || 6, deep_scan_hour: parseInt(form.deepScanHour) ?? 4 },
         retention: { days: parseInt(form.retentionDays) || 90 },
         services: form.services.filter(s => s.name && s.url),
@@ -716,18 +716,20 @@ export default function WizardModal({ onComplete, onSkip, configExists = false, 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-medium text-slate-300">Connectivity check hosts</label>
-                  <button type="button" onClick={() => setForm(p => ({ ...p, connectivityHosts: [...p.connectivityHosts, ''] }))}
+                  <button type="button" onClick={() => setForm(p => ({ ...p, connectivityHosts: [...p.connectivityHosts, { host: '', enabled: true, retries: 1 }] }))}
                     className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300">
                     <Plus className="w-3 h-3" /> Add
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-500">IPs to ping for internet checks. Default: 1.1.1.1</p>
                 <div className="space-y-2">
-                  {(form.connectivityHosts ?? ['1.1.1.1']).map((h, i) => (
+                  {(form.connectivityHosts ?? [{ host: '1.1.1.1', enabled: true, retries: 1 }]).map((h, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <input value={h} onChange={e => setForm(p => ({ ...p, connectivityHosts: p.connectivityHosts.map((x, j) => j === i ? e.target.value : x) }))}
+                      <input type="checkbox" checked={!!h.enabled} onChange={e => setForm(p => ({ ...p, connectivityHosts: p.connectivityHosts.map((x, j) => j === i ? { ...x, enabled: e.target.checked } : x) }))} className="w-4 h-4" />
+                      <input value={h.host || ''} onChange={e => setForm(p => ({ ...p, connectivityHosts: p.connectivityHosts.map((x, j) => j === i ? { ...x, host: e.target.value } : x) }))}
                         placeholder="1.1.1.1"
                         className="flex-1 bg-[#0a0a18] border border-[#1a1a35] rounded-lg px-3 py-2 text-sm font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60 transition-colors" />
+                      <input type="number" min="1" max="10" value={h.retries || 1} onChange={e => setForm(p => ({ ...p, connectivityHosts: p.connectivityHosts.map((x, j) => j === i ? { ...x, retries: Math.max(1, parseInt(e.target.value) || 1) } : x) }))} className="w-20 bg-[#0a0a18] border border-[#1a1a35] rounded-lg px-2 py-2 text-sm text-slate-200 outline-none" />
                       {(form.connectivityHosts ?? []).length > 1 && (
                         <button type="button" onClick={() => setForm(p => ({ ...p, connectivityHosts: p.connectivityHosts.filter((_, j) => j !== i) }))} className="text-slate-500 hover:text-red-400 transition-colors">
                           <X className="w-4 h-4" />
