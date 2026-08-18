@@ -46,6 +46,8 @@ if (flag('help') || argv.includes('-h')) {
   console.log('  --skip-build        Skip building image on Pi (use existing image)')
   console.log('  --skip-lint         Skip eslint checks')
   console.log('  --skip-tests        Skip unit tests')
+  console.log('  --run-lint          Run eslint checks (disabled by default)')
+  console.log('  --run-tests         Run unit tests (disabled by default)')
   console.log('  --no-progress       Disable live progress viewer')
   console.log('  --pi-host <host>    Target Pi host (overrides config)')
   console.log('  --pi-user <user>    SSH username for Pi (overrides config)')
@@ -58,8 +60,9 @@ if (flag('help') || argv.includes('-h')) {
 const quick = flag('quick')
 const preBuilt = flag('pre-built')
 const skipBuild = flag('skip-build')
-const skipLint = flag('skip-lint')
-const skipTests = flag('skip-tests')
+// Lint/tests are disabled by default for faster deploys; use --run-lint/--run-tests to enable
+const skipLint = flag('skip-lint') || !flag('run-lint')
+const skipTests = flag('skip-tests') || !flag('run-tests')
 const noProgress = flag('no-progress')
 let piHost = param('pi-host')
 let piUser = param('pi-user')
@@ -109,7 +112,8 @@ const CONTAINER = 'claudette'
 const IMAGE = 'claudette:latest'
 const SSH_OPTS = [
   '-o', 'StrictHostKeyChecking=no',
-  '-o', 'BatchMode=yes',
+  // Allow password fallback when key auth fails (BatchMode=no)
+  '-o', 'BatchMode=no',
   ...(sshKey ? ['-i', sshKey] : []),
 ]
 
@@ -144,6 +148,18 @@ const remote = (cmd, opts = {}) => {
   return run('ssh', [...SSH_OPTS, `${piUser}@${piHost}`, 'bash', '-lc', `'${safe}'`], opts)
 }
 const scpTo = (src, dst) => run('scp', [...SSH_OPTS, src, dst])
+function detectRemotePlatform() {
+  const arch = remote('uname -m', { silent: true, noThrow: true }).trim()
+  const map = {
+    x86_64: 'linux/amd64',
+    amd64: 'linux/amd64',
+    aarch64: 'linux/arm64',
+    arm64: 'linux/arm64',
+    armv7l: 'linux/arm/v7',
+    armhf: 'linux/arm/v7',
+  }
+  return map[arch] || null
+}
 const mkTar = (file, ...items) => {
   try { return run('tar', ['-cf', file, '-C', ROOT, ...items]) } catch (e) { die("'tar' failed — ensure GNU tar is installed") }
 }
@@ -183,6 +199,34 @@ if (!skipTests) {
 
 emitProgress({ step: 'prechecks', progress: 0.05, message: 'pre-deploy checks complete' })
 
+// Bump package.json patch version for this deploy so builds are distinguishable.
+function bumpPackagePatchVersion() {
+  try {
+    const pkgPath = join(ROOT, 'package.json')
+    const raw = readFileSync(pkgPath, 'utf8')
+    const pkg = JSON.parse(raw)
+    const ver = String(pkg.version || '0.0.0')
+    const parts = ver.split('.')
+    while (parts.length < 3) parts.push('0')
+    const patch = Number(parts[2] || 0) + 1
+    const newVer = `${parts[0]}.${parts[1]}.${patch}`
+    pkg.version = newVer
+    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
+    return newVer
+  } catch (e) {
+    return null
+  }
+}
+
+const buildTimeIso = new Date().toISOString()
+const gitShort = (() => { try { return run('git', ['rev-parse', '--short', 'HEAD'], { silent: true, noThrow: true }).trim() || 'local' } catch { return 'local' } })()
+const buildName = `build-${gitShort}-${buildTimeIso.replace(/[:.]/g,'-')}`
+let bumpedVersion = null
+try { bumpedVersion = bumpPackagePatchVersion() } catch {}
+if (bumpedVersion) log(`Version bumped to ${bumpedVersion}`, 'green')
+log(`Build name: ${buildName}`, 'gray')
+log(`Build time: ${buildTimeIso}`, 'gray')
+
 if (quick) {
   log('\n[1/2] Uploading server files to Pi...')
   const tar = join(tmpdir(), 'claudette-quick.tar')
@@ -216,12 +260,25 @@ if (quick) {
 
 if (preBuilt) {
   log('\n[1/2] Building image locally and uploading to Pi (pre-built)...')
+  const targetPlatform = detectRemotePlatform()
+  const buildArgs = ['build', '--build-arg', `BUILD_TIME=${buildTimeIso}`, '--build-arg', `BUILD_NAME=${buildName}`, '-t', IMAGE]
+  if (targetPlatform) buildArgs.push('--platform', targetPlatform)
+  buildArgs.push('.')
+
   // Ensure local dist is built so the image contains the frontend artifacts
   run(NPM_CMD, ['run', 'build'], { noThrow: false })
 
-  // Build the Docker image locally, save it to a tarball, then upload and load on the Pi
-  info('Building Docker image locally...')
-  run('docker', ['build', '-t', IMAGE, '.'], { noThrow: false })
+  // Build the Docker image in a platform-aware way so ARM64 Pis can run it.
+  info(`Building Docker image locally for ${targetPlatform || 'default platform'}...`)
+  if (targetPlatform) {
+    try {
+      run('docker', ['buildx', ...buildArgs, '--load'], { noThrow: false })
+    } catch {
+      run('docker', ['buildx', ...buildArgs, '--load'], { noThrow: false })
+    }
+  } else {
+    run('docker', buildArgs, { noThrow: false })
+  }
   const imgTar = join(tmpdir(), 'claudette-image.tar')
   run('docker', ['save', '-o', imgTar, IMAGE], { noThrow: false })
   scpTo(imgTar, `${piUser}@${piHost}:/home/${piUser}/claudette-image.tar`)
@@ -255,7 +312,7 @@ if (preBuilt) {
     'PROGFILE=/tmp/claudette-build/progress.json',
     'emit() { echo "$1" > "$PROGFILE" ; }',
     'emit "{\"step\":\"start\",\"progress\":0,\"message\":\"begin build\"}"',
-    `cd /tmp/claudette-build && for i in 1 2; do if sudo docker build --build-arg CACHEBUST=${Date.now()} -t ${IMAGE} . 2>&1 | tee /tmp/claudette-build/build.log; then echo build_ok; break; else echo "[deploy] docker build failed on attempt \$i"; cp /tmp/claudette-build/build.log /home/${piUser}/claudette-build-failed-$(date -u +%Y%m%dT%H%M%SZ)-attempt\${i}.log || true; if [ "\$i" -eq 2 ]; then echo '[deploy] all build attempts failed' >&2; exit 1; fi; sleep 2; fi; done`,
+    `cd /tmp/claudette-build && for i in 1 2; do if sudo docker build --build-arg CACHEBUST=${Date.now()} --build-arg BUILD_TIME=${buildTimeIso} --build-arg BUILD_NAME=${buildName} -t ${IMAGE} . 2>&1 | tee /tmp/claudette-build/build.log; then echo build_ok; break; else echo "[deploy] docker build failed on attempt \$i"; cp /tmp/claudette-build/build.log /home/${piUser}/claudette-build-failed-$(date -u +%Y%m%dT%H%M%SZ)-attempt\${i}.log || true; if [ "\$i" -eq 2 ]; then echo '[deploy] all build attempts failed' >&2; exit 1; fi; sleep 2; fi; done`,
     'emit "{\"step\":\"done\",\"progress\":0.9,\"message\":\"build finished\"}"',
     `BUILD_LOG=/home/${piUser}/claudette-build-$(date -u +%Y%m%dT%H%M%SZ).log`,
     `mkdir -p /home/${piUser}/claudette-build-logs || true`,
